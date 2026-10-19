@@ -182,17 +182,20 @@ async function generateDirect(sourceRoot, target) {
   const ssotMod = await load(path.join("zombie", "ssot.ts"));
   const syllabusMod = await load(path.join("zombie", "syllabus.ts"));
   const pathsMod = await load(path.join("zombie", "paths.ts"));
+  const memoryMod = await load(path.join("zombie", "memory.ts"));
   const rosterMod = await load(path.join("roster.ts"));
 
   for (const dir of pathsMod.bootstrapDirs(target)) fs.mkdirSync(dir, { recursive: true });
   const fingerprint = scanMod.scanProject(target);
   const ssotWrite = ssotMod.writeSsot(target, fingerprint);
   const syllabusWrite = syllabusMod.ensureSyllabus(target, fingerprint, rosterMod.ROSTER.map((a) => a.id));
+  const memoryIndex = memoryMod.writeIndex(target, memoryMod.readIndex(target));
   return {
     sourceRoot,
     scan: { files: fingerprint.totalFiles, dirs: fingerprint.totalDirs, bytes: fingerprint.totalBytes },
     ssot: ssotWrite,
     syllabus: syllabusWrite,
+    memory: { sessions: Object.keys(memoryIndex.sessions ?? {}).length },
   };
 }
 

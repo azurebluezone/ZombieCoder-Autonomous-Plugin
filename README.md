@@ -24,9 +24,10 @@ npm install
 npm run install-pack -- --dir /path/to/your/project
 ```
 
-`--dir` না দিলে ইনস্টলার **বর্তমান ওয়ার্কিং ডিরেক্টরি** টার্গেট করে (হোম ডিরেক্টরি নয়)।
-তাই ক্লোন করা ফোল্ডার থেকে চালালে `--dir /path/to/your/project` অবশ্যই দিন, নইলে
-প্লাগইনটি ক্লোন ফোল্ডারেই ইনস্টল হবে।
+`--dir` না দিলে ইনস্টলার **OS-এর root working directory** টার্গেট করে, অর্থাৎ
+`/home/<user>` (এই মেশিনে `/home/xubuntu`)। নির্দিষ্ট কোনো প্রজেক্টে চাইলে
+`--dir /path/to/your/project` দিন — দুই জায়গাতেই `.zombiecoder` আলাদা থাকবে,
+তাই প্রজেক্টের memory আর root-এর memory মিশে যাবে না।
 
 ইনস্টলার **প্রশ্ন করবে** (TTY থাকলে):
 

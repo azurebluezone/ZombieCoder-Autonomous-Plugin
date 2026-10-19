@@ -23,6 +23,7 @@
 //   node --experimental-strip-types bin/install.mjs --dir X --provider-url https://host/v1
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -41,10 +42,10 @@ function value(name, fallback) {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 }
 
-// Default to the current working directory, never the home directory. Installing
-// nine agents into $HOME by accident is exactly the kind of silent damage this
-// project refuses to do.
-const TARGET = path.resolve(value("--dir", process.cwd()));
+// The owner's rule: the runtime lives at the OS root working directory
+// (/home/<user>), so that is the default. Pass --dir to install into a specific
+// project instead. Every install is still explicit in the printed target line.
+const TARGET = path.resolve(value("--dir", os.homedir()));
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
 const PROVIDER_ID = "missionbarisal";

@@ -127,7 +127,13 @@ export function readIndex(projectRoot: string): MemoryIndex {
       sessions: {},
       archives: [],
     };
-  return reconcileArchives(projectRoot, index);
+  const reconciled = reconcileArchives(projectRoot, index);
+  // `kept` is the in-RAM count. If an older build wrote a larger number, report
+  // the current policy instead of stale metadata; touchIndex persists the fix.
+  for (const entry of Object.values(reconciled.sessions)) {
+    if (typeof entry.kept === "number" && entry.kept > KEEP_RECENT) entry.kept = KEEP_RECENT;
+  }
+  return reconciled;
 }
 
 export function writeIndex(projectRoot: string, index: MemoryIndex): MemoryIndex {

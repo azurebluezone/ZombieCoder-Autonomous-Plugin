@@ -189,6 +189,35 @@ CI বা `--yes`-এ কোনো প্রশ্ন থাকে না; flag 
 
 সব write atomic (temp + rename)। কোনো `.bak`, archive বা silent overwrite নেই।
 
+## Project configure script
+
+OpenCode না চললেও যেকোনো project-এ `SSOT.md` ও `syllabus.md` তৈরি করতে এক command:
+
+```bash
+# Linux / macOS
+node --experimental-strip-types scripts/configure.mjs --dir /path/to/project
+
+# Windows (PowerShell / cmd)
+node --experimental-strip-types scripts\configure.mjs --dir "C:\path\to\project"
+
+# repo থেকে npm দিয়ে
+npm run configure -- --dir /path/to/project
+```
+
+কী করে:
+
+1. global install verify করে (৯ agent, `mode: all`, `subagent allow`); না থাকলে
+   `bin/install.mjs --yes` চালায়
+2. `.zombiecoder/{memory,.state}` বানায়
+3. running OpenCode server-কে location reload করতে বলে — plugin `setup()` তখন
+   `SSOT.md` + `syllabus.md` লেখে
+4. OpenCode না চললে plugin-এর নিজের `scan`/`ssot`/`syllabus` module দিয়ে সরাসরি
+   `SSOT.md` + `syllabus.md` লেখে
+5. `.zombiecoder/.state/configure-report.json` + audit line লেখে
+
+Flags: `--dir`, `--url`, `--no-install`, `--no-reload`, `--force`, `--json`, `--help`।
+কিছু delete করে না; syllabus-এর lessons অপরিবর্তিত থাকে। Windows, Linux, macOS।
+
 ## Global `opencode.json` — V2 shape
 
 OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not

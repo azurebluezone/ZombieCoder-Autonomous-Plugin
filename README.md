@@ -59,13 +59,14 @@ URL এবং কোনো MCP নয়।
 
 1. `<project>/.opencode/{agents,plugins,skills}` এবং `<project>/.zombiecoder` বানায়
 2. প্লাগইন runtime graph কপি করে (`plugin.ts`, `roster.ts`, `zombie/*`)
-3. `.opencode/plugins/zombiecoder.ts` entrypoint লেখে
-4. `.opencode/package.json`-এ `@opencode/plugin@^2.0.32` যোগ করে (merge, কখনো clobber নয়)
-5. `.opencode`-এ `npm install` চালায়
-6. `.zombiecoder/config.json` seed/update করে
-7. MCP URL দিলে probe করে `.zombiecoder/mcp.json` লেখে
-8. `opencode.json`-এ provider + MCP merge করে (শুধু probe-verified MCP)
-9. নয়টি agent markdown লেখে
+3. `.opencode/package.json`-এ `@opencode/plugin@^2.0.32` যোগ করে (merge, কখনো clobber নয়)
+4. `.opencode`-এ `npm install` চালায়
+5. `.zombiecoder/config.json` seed/update করে
+6. MCP URL দিলে probe করে `.zombiecoder/mcp.json` লেখে
+7. `opencode.json`-এ provider + MCP merge করে (শুধু probe-verified MCP)
+8. নয়টি agent markdown লেখে (runtime plan থাকলে resolved model, নাহলে baseline)
+9. `.opencode/plugins/zombiecoder.ts` entrypoint **সবার শেষে** লেখে, যাতে OpenCode
+   কখনো half-finished install boot না করে
 
 সব write atomic (temp + rename)। কোনো `.bak`, archive বা silent overwrite নেই।
 

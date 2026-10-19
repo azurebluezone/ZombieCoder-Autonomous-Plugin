@@ -122,6 +122,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.match(manu, /ZombieCoder Shared Rules/);
 
   assert.equal(fake.tools.length, 5);
+  assert.ok(fake.tools.every((tool) => tool.output), "every tool must declare an output schema");
   assert.equal(fake.skills.length, 1);
   assert.equal(fake.skills[0].path, path.join(root, ".zombiecoder", "skills", "sample.md"));
 

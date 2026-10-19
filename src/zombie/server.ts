@@ -262,6 +262,9 @@ export function registerTools(tool: ToolLike | undefined, deps: SurfaceDeps): To
     };
   }
   const specs = toolSpecs(deps);
+  // Every ZombieCoder tool returns a JSON object. Declaring the output schema is
+  // not optional: OpenCode rejects a result that carries `output` without one.
+  const output = { type: "object" as const, additionalProperties: true };
   const kept = keepTransform<any, string[]>(tool as TransformDoor<any>, (editor: any) => {
     const added: string[] = [];
     editor?.namespace?.(TOOL_NAMESPACE);
@@ -276,6 +279,7 @@ export function registerTools(tool: ToolLike | undefined, deps: SurfaceDeps): To
         name: spec.name,
         description: spec.description,
         input: spec.input,
+        output,
         options: { namespace: TOOL_NAMESPACE.name },
         execute: async (input: any) => ({
           output: spec.run(input),

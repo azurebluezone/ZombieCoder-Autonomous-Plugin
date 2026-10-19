@@ -380,9 +380,13 @@ await step("sync opencode.json", async () => {
   if (mcpProbe?.ok) {
     next.mcp = { ...(existing.mcp ?? {}) };
     next.mcp.servers = { ...(next.mcp.servers ?? {}) };
-    if (!next.mcp.servers.zombiecoder) {
-      next.mcp.servers.zombiecoder = { type: "remote", url: MCP_URL };
-    }
+    // We own this entry, so a new verified URL replaces the old URL while any
+    // user-supplied headers/options on the same entry are preserved.
+    next.mcp.servers.zombiecoder = {
+      ...(next.mcp.servers.zombiecoder ?? {}),
+      type: "remote",
+      url: MCP_URL,
+    };
   }
 
   writeIfChanged(file, JSON.stringify(next, null, 2) + "\n");

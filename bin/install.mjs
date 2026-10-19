@@ -439,7 +439,11 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
   // V2 permissions. Global rules first; the owner's existing rules are appended
   // after ours so their later rules keep the final say.
   const existingPermissions = Array.isArray(existing.permissions) ? existing.permissions : [];
-  next.permissions = [...roster.GLOBAL_PERMISSIONS, ...existingPermissions];
+  const knownPermissions = new Set(roster.GLOBAL_PERMISSIONS.map((rule) => JSON.stringify(rule)));
+  next.permissions = [
+    ...roster.GLOBAL_PERMISSIONS,
+    ...existingPermissions.filter((rule) => !knownPermissions.has(JSON.stringify(rule))),
+  ];
 
   // Default agent + default model. The model is provider/model in V2.
   next.default_agent = "zombiecoder";

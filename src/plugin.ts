@@ -106,6 +106,22 @@ export function detectInstallLayout(locationRoot: string): InstallLayout {
   return { dir, global: false, configFile: path.join(locationRoot, "opencode.json") };
 }
 
+// A global install is installer-owned. A project's free-fallback plan must never
+// rewrite the global agents to free models — otherwise the last project opened
+// silently changes the model for every other project.
+export function globalAgentAssignment(
+  configFile: string,
+  roster: AgentDef[],
+): Record<string, string> {
+  const config = readJson<Record<string, any>>(configFile) ?? {};
+  const out: Record<string, string> = {};
+  for (const a of roster) {
+    const model = config.agents?.[a.id]?.model;
+    if (typeof model === "string" && model.length > 0) out[a.id] = model;
+  }
+  return out;
+}
+
 type Ctx = {
   location?: { directory?: string };
   agent?: {
@@ -504,6 +520,19 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.outputs.modelAssignment = plan?.assignment;
   report.outputs.customProviderReachable = plan?.probe?.ok ?? false;
 
+  // Global install: the installer owns <global>/opencode.json and <global>/agents.
+  // Merge the global models over the project plan so a project that fell back to
+  // free models cannot rewrite the global agents. Project installs keep the
+  // project plan.
+  const globalAssignment = layout.global ? globalAgentAssignment(layout.configFile, ROSTER) : {};
+  const agentAssignment = layout.global
+    ? { ...(plan?.assignment ?? {}), ...globalAssignment }
+    : (plan?.assignment ?? {});
+  report.outputs.agentAssignment = agentAssignment;
+  report.outputs.agentAssignmentSource = layout.global
+    ? "global opencode.json (installer-owned)"
+    : "project model plan";
+
   // ---- §6/§7 MCP probe ------------------------------------------------------
   // The installer can prove an MCP URL once, but the runtime must prove it again:
   // the server may have moved, or the project may have received config later.
@@ -555,11 +584,11 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   // The editor transform sees no IDs at this point, so pretending it bound them
   // would be a lie in the report.
   const agentsDir = path.join(layout.dir, "agents");
-  const folder = step("agent-folder", () => ensureAgentFolderAt(agentsDir, ROSTER, plan?.assignment ?? {}));
+  const folder = step("agent-folder", () => ensureAgentFolderAt(agentsDir, ROSTER, agentAssignment));
   report.outputs.agentFolder = folder;
 
   const agentConfig = step("agent-config", () =>
-    syncAgentConfig(layout.configFile, ROSTER, plan?.assignment ?? {}),
+    syncAgentConfig(layout.configFile, ROSTER, agentAssignment),
   );
   report.outputs.agentConfig = agentConfig;
 
@@ -569,12 +598,12 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   });
 
   const bound = step("agent-bind", () => {
-    const missing = verifyAgentMarkdownAt(agentsDir, ROSTER, plan?.assignment ?? {});
-    if (!agentConfig?.skipped) missing.push(...verifyAgentConfig(layout.configFile, ROSTER, plan?.assignment ?? {}));
+    const missing = verifyAgentMarkdownAt(agentsDir, ROSTER, agentAssignment);
+    if (!agentConfig?.skipped) missing.push(...verifyAgentConfig(layout.configFile, ROSTER, agentAssignment));
     if (missing.length > 0) {
       throw new Error(`agent binding incomplete: ${missing.join(", ")}`);
     }
-    return `${ROSTER.length} agents carry resolved model + shared rules (markdown + config)`;
+    return `${ROSTER.length} agents carry ${layout.global ? "global" : "project"} model + shared rules (markdown + config)`;
   });
   report.outputs.bound = bound;
 

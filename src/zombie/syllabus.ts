@@ -11,6 +11,7 @@ import type { Fingerprint } from "./scan.ts";
 export type SyllabusResult = {
   file: string;
   created: boolean;
+  upgraded?: boolean;
   bytes: number;
 };
 
@@ -75,11 +76,50 @@ export function renderSyllabusSeed(fp: Fingerprint, agentIds: string[]): string 
   return docWithSignature(body, "Syllabus", { files: fp.totalFiles });
 }
 
+const LESSONS_PLACEHOLDER = "_Nothing recorded yet. Each new lesson lands below, newest last._";
+
+// Upgrade an older seed without losing a single lesson. The header is allowed to
+// change (new footprint section, renamed agent); the lesson body is append-only.
+function upgradeSyllabus(existing: string, fp: Fingerprint, agentIds: string[]): string {
+  const seed = renderSyllabusSeed(fp, agentIds);
+  const seedMarker = "## 5. Lessons (append-only)";
+  const seedAt = seed.indexOf(seedMarker);
+  if (seedAt < 0) return seed;
+
+  const oldAt = existing.search(/^## \d+\. Lessons[^\n]*$/m);
+  let lessons = "";
+  if (oldAt >= 0) {
+    lessons = existing
+      .slice(oldAt)
+      .replace(/^## \d+\. Lessons[^\n]*\n+/, "")
+      .replace(/\n---\n\n_— ZombieCoder Syllabus[^\n]*\n?$/, "")
+      .trim();
+  }
+  if (!lessons || lessons === LESSONS_PLACEHOLDER) lessons = LESSONS_PLACEHOLDER;
+
+  const header = seed.slice(0, seedAt);
+  const sigAt = seed.indexOf("---", seedAt);
+  const signature = sigAt >= 0 ? seed.slice(sigAt) : "";
+  return `${header}${seedMarker}\n\n${lessons}\n\n${signature}`;
+}
+
 export function ensureSyllabus(projectRoot: string, fp: Fingerprint, agentIds: string[]): SyllabusResult {
   const file = syllabusFile(projectRoot);
   const existing = readText(file);
   if (existing !== undefined && existing.trim().length > 0) {
-    return { file, created: false, bytes: Buffer.byteLength(existing, "utf8") };
+    const needsUpgrade =
+      !existing.includes("## 2. Footprint") || existing.includes("- `kobir`");
+    if (!needsUpgrade) {
+      return { file, created: false, bytes: Buffer.byteLength(existing, "utf8") };
+    }
+    const upgraded = upgradeSyllabus(existing, fp, agentIds);
+    writeAtomic(file, upgraded);
+    return {
+      file,
+      created: false,
+      upgraded: true,
+      bytes: Buffer.byteLength(upgraded, "utf8"),
+    };
   }
   const seeded = renderSyllabusSeed(fp, agentIds);
   writeAtomic(file, seeded);

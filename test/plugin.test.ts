@@ -196,6 +196,110 @@ test("global install writes agents/config at the global root and leaves the work
   }
 });
 
+test("global install keeps global agent models when a project plan falls back to free models", async () => {
+  const root = tempProject();
+  const globalDir = tempProject();
+  const roster = await import("../src/roster.ts");
+  const custom = "missionbarisal/llama3-groq-tool-use:8b";
+  const customAssignment = Object.fromEntries(roster.ROSTER.map((agent) => [agent.id, custom]));
+  const globalConfig = {
+    $schema: "https://opencode.ai/config.json",
+    model: custom,
+    agents: roster.renderAgentsConfig(roster.ROSTER, customAssignment),
+  };
+  fs.writeFileSync(path.join(globalDir, "opencode.json"), JSON.stringify(globalConfig, null, 2));
+
+  // This project explicitly disables the custom provider, so its own plan is
+  // free-fallback. That must not leak into the installer-owned global config.
+  fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "config.json"),
+    JSON.stringify({
+      version: "0.0.0-test",
+      customProviderUrl: "",
+      customProviderID: "missionbarisal",
+      mcpUrl: "",
+      opencodeApiUrl: "",
+      ssotRefreshMs: 300000,
+      modelStrategy: "auto",
+    }),
+  );
+
+  const previous = process.env.ZOMBIECODER_INSTALL_PARENT;
+  process.env.ZOMBIECODER_INSTALL_PARENT = globalDir;
+  try {
+    const fake = makeContext(root);
+    const cleanup = await setup(fake.ctx);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    const after = JSON.parse(fs.readFileSync(path.join(globalDir, "opencode.json"), "utf8"));
+    assert.equal(after.agents.zombiecoder.model, custom, "project free plan overwrote the global agent model");
+    assert.equal(after.agents.manu.model, custom, "second global agent model overwritten");
+    const markdown = fs.readFileSync(path.join(globalDir, "agents", "zombiecoder.md"), "utf8");
+    assert.match(markdown, /^model: missionbarisal\/llama3-groq-tool-use:8b$/m);
+
+    const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", "setup-report.json"), "utf8"));
+    assert.equal(report.outputs.modelStrategy, "free-fallback");
+    assert.equal(report.outputs.agentAssignmentSource, "global opencode.json (installer-owned)");
+    assert.equal(report.outputs.bound.includes("global model"), true);
+
+    await cleanup();
+  } finally {
+    if (previous === undefined) delete process.env.ZOMBIECODER_INSTALL_PARENT;
+    else process.env.ZOMBIECODER_INSTALL_PARENT = previous;
+  }
+});
+
+test("an old kobir syllabus is upgraded with the footprint and keeps every lesson", async () => {
+  const root = tempProject();
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "a.ts"), "export const a = 1;\n");
+  fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
+  const old = [
+    "# Syllabus — agent knowledge for this project",
+    "",
+    "## 1. Scope",
+    "",
+    "| Field | Value |",
+    "| --- | --- |",
+    "| Working directory | `" + root + "` |",
+    "",
+    "## 2. Agents bound to this project",
+    "",
+    "- `kobir`",
+    "",
+    "## 3. Standing rules",
+    "",
+    "1. Evidence before confidence.",
+    "",
+    "## 4. Lessons (append-only)",
+    "",
+    "### Existing lesson",
+    "",
+    "Keep this lesson.",
+    "",
+    "---",
+    "",
+    "_— ZombieCoder Syllabus · v0.1.0 · generated 2026-01-01T00:00:00.000Z_",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(root, ".zombiecoder", "syllabus.md"), old);
+
+  const { scanProject } = await import("../src/zombie/scan.ts");
+  const { ensureSyllabus } = await import("../src/zombie/syllabus.ts");
+  const result = ensureSyllabus(root, scanProject(root), ["zombiecoder"]);
+  const text = fs.readFileSync(result.file, "utf8");
+
+  assert.equal(result.upgraded, true);
+  assert.match(text, /## 2\. Footprint \(auto-discovered\)/);
+  assert.match(text, /## 3\. Agents bound to this project/);
+  assert.match(text, /- `zombiecoder`/);
+  assert.doesNotMatch(text, /- `kobir`/);
+  assert.match(text, /### Existing lesson/);
+  assert.match(text, /Keep this lesson\./);
+  assert.equal((text.match(/^### Existing lesson$/gm) ?? []).length, 1, "lesson duplicated");
+});
+
 test("providerConfiguredOnDisk inherits a provider from an ancestor opencode.json", () => {
   const ancestor = tempProject();
   const child = path.join(ancestor, "packages", "app");

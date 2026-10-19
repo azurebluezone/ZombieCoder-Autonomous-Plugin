@@ -1,6 +1,6 @@
 # ZombieCoder Autonomous Plugin
 
-> **ZombieCoder** — যেখানে কোড ও কথা বলে  
+> **ZombieCoder** — যেখানে কোড ও কথা বলে
 > Owner: **Sahon Srabon** (Developer Zone), Dhaka, Bangladesh
 
 [![OpenCode](https://img.shields.io/badge/OpenCode-2.0.32%2B-111111)](https://opencode.ai)
@@ -237,7 +237,8 @@ OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not
 }
 ```
 
-- **provider** — শুধু live probe-pass করা model config-এ ঢোকে।
+- **provider** — live probe pass করলে সেই model; probe fail করলে আগের resolved
+  plan অপরিবর্তিত থাকে, আর HTTP error স্পষ্ট দেখানো হয়।
 - **agents** — ৯টি agent-এর description, mode, model, system prompt ও permissions।
 - **permissions** — global rules আগে, user-এর নিজের rules পরে; তাই user-এর
   later rule শেষ কথা বলে।
@@ -254,10 +255,10 @@ OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not
 | `bootstrap-dirs` | শুধু `.zombiecoder/{memory,agents}`; skills lazy, `.opencode` নয় |
 | `load-config` | shipped default < global `zombiecoder/config.json` < local `.zombiecoder/config.json` |
 | `migrate-legacy-plan` | পুরনো `memory.json` (model plan) → `models.json` |
-| `resolve-models` | কাস্টম provider live probe → না হলে cost 0/0 ফ্রি মডেল |
+| `resolve-models` | কাস্টম provider live probe → না হলে cost 0/0 ফ্রি মডেল (project plan) |
 | `probe-mcp` | MCP URL থাকলে টুলের তালিকা `.zombiecoder/mcp.json`-এ |
 | `write-ssot` | `.zombiecoder/SSOT.md` (live filesystem থেকে) |
-| `ensure-syllabus` | `.zombiecoder/syllabus.md` (footprint + append-only lessons) |
+| `ensure-syllabus` | `.zombiecoder/syllabus.md` — নতুন হলে footprint seed; পুরনো হলে একবার upgrade (Footprint যোগ, `kobir`→`zombiecoder`, lessons অপরিবর্তিত) |
 | `agent-folder` / `agent-config` | install root-এ ৯টি markdown + V2 `agents` config |
 | `agent-bind` | markdown ও config দুই door-এই resolved model + permissions verify |
 | `register-tools` | `zombiecoder` namespace-এ ৬টি টুল |
@@ -267,10 +268,17 @@ OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not
 
 সবকিছুর durable প্রমাণ থাকে: `.zombiecoder/setup-report.json`।
 
+> **Global agent config installer-owned:** global install-এ `<global>/opencode.json`
+> ও `<global>/agents/*.md` installer-এর লেখা। কোনো project-এর provider probe
+> fail করে free-fallback plan বানালেও সেই plan দিয়ে global agent model
+> overwrite হয় না — project plan শুধু `.zombiecoder/models.json`-এ থাকে।
+
 ### Model routing
 
 1. কাস্টম provider-এর **নিজের** `baseURL` live probe করা হয় — শুধু config-এ
-   লেখা আছে বলেই মৃত server-এ agent পাঠানো হয় না।
+   লেখা আছে বলেই মৃত server-এ agent পাঠানো হয় না। Probe fail করলে installer
+   আগের resolved plan রাখে (নতুন model বানায় না) এবং HTTP error দেখায়;
+   runtime-এ সেই project-এর plan free-fallback হতে পারে।
 2. provider reachable + `opencode.json`-এ configured (নিজের, ancestor অথবা
    global) → সেখানকার মডেল। global config ব্যবহার করলে নিচের প্রতিটি working
    directory সেটাই inheritance হিসেবে পায়।
@@ -283,6 +291,11 @@ reproducible থাকে। চাইলে `.zombiecoder/config.json`-এ `"mo
 > **Session model আলাদা:** OpenCode একটি session-এর selected model আলাদা রাখে।
 > Agent config-এর `model` নতুন session-এর জন্য default দেয়; চলমান session-এর
 > model বদলাতে desktop-এ model picker ব্যবহার করুন।
+
+> **Global agents installer-owned:** global install-এ agent model global
+> `opencode.json`/`agents/*.md` থেকে আসে। project-এর free-fallback plan
+> global agent model বদলায় না; তাই এক project-এর provider outage অন্য
+> project-এর agent model নষ্ট করে না।
 
 ### MCP
 
@@ -435,8 +448,10 @@ print(d["outputs"].get("bound"))
 print([(s["step"], s["ok"]) for s in d["steps"]])
 PY
 
-# 5. syllabus footprint
-grep -n "Footprint" .zombiecoder/syllabus.md
+# 5. syllabus upgrade: footprint present, kobir gone, lessons intact
+grep -q '^## 2\. Footprint' .zombiecoder/syllabus.md && echo "footprint present"
+! grep -q '^- `kobir`$' .zombiecoder/syllabus.md && echo "kobir renamed"
+grep -n '^### ' .zombiecoder/syllabus.md || echo "no lessons yet (fine)"
 
 # 6. memory index archives
 python3 - <<'PY'
@@ -456,6 +471,8 @@ setup report + tool list = `END_TO_END_TESTED`, LLM rule-following = `NOT_TESTED
 | --- | --- |
 | `Location plugins did not finish activating` | global `~/.config/opencode`-এ `npm install` হয়নি। `npm run install-pack -- --yes` আবার চালান। |
 | agent-এ কাস্টম মডেল নেই | `opencode.json`-এ provider আছে কি দেখুন; `.zombiecoder/setup-report.json`-এর `resolve-models` ও `agent-bind`। |
+| global agent model free হয়ে গেছে | একটি project-এর free-fallback plan global config overwrite করছিল। এই fix installer-owned global agents রাখে; `npm run install-pack -- --yes` আবার চালান। |
+| পুরনো syllabus-এ Footprint নেই | runtime `ensure-syllabus`-এ একবার upgrade করে; `setup-report.json`-এর step দেখুন। |
 | MCP register হয়নি | MCP URL probe fail করেছে; `.zombiecoder/mcp.json`-এর `error` দেখুন। |
 | কিছু step fail | `setup-report.json`-এ প্রতিটি step-এর `ok`/`error`; কনসোলেও `[zombiecoder] step failed`। |
 | SSOT stale | refresh ৫ মিনিট; `zombiecoder.get_working_directory` tool দিয়ে manual check। |

@@ -56,6 +56,10 @@ export function modelPlanFile(projectRoot: string): string {
   return path.join(zombieRoot(projectRoot), "models.json");
 }
 
+export function mcpFile(projectRoot: string): string {
+  return path.join(zombieRoot(projectRoot), "mcp.json");
+}
+
 export function setupReportFile(projectRoot: string): string {
   return path.join(zombieRoot(projectRoot), "setup-report.json");
 }

@@ -15,6 +15,9 @@ export type SsotContext = {
   modelAssignment: Record<string, string>;
   customProviderUrl: string;
   customProviderReachable: boolean;
+  mcpUrl?: string;
+  mcpReachable?: boolean;
+  mcpTools?: string[];
   opencodeVersion?: string;
 };
 
@@ -108,6 +111,15 @@ export function renderSsot(fp: Fingerprint, extra: SsotContext): string {
   for (const [agent, model] of Object.entries(extra.modelAssignment)) {
     lines.push(`| ${agent} | \`${model}\` |`);
   }
+  lines.push("");
+
+  lines.push(`## 9. MCP`);
+  lines.push("");
+  lines.push(`| Field | Value |`);
+  lines.push(`| --- | --- |`);
+  lines.push(`| URL | \`${extra.mcpUrl || "(not configured)"}\` |`);
+  lines.push(`| Reachable | ${extra.mcpReachable ? "yes" : "no"} |`);
+  lines.push(`| Tools | ${(extra.mcpTools ?? []).map((t) => "`" + t + "`").join(", ") || "_none_"} |`);
   lines.push("");
 
   return docWithSignature(lines.join("\n"), "SSOT", { files: fp.totalFiles });

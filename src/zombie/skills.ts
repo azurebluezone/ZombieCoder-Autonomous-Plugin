@@ -4,14 +4,14 @@
 //   project tier     : <project>/.opencode/skills/*.md      (OpenCode's own folder)
 //
 // Both are plain markdown with a tiny frontmatter block. We do not invent a new
-// skill format — OpenCode's Skill.Info has {id, name, description, location, content}
+// skill format — OpenCode's Skill.Info has {id, name, description, path, content}
 // and we fill exactly those fields through its own ctx.skill door.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readText } from "./io.ts";
 import { opencodeSkillsDir, safe, skillsDir } from "./paths.ts";
-import { keepTransform, withTimeout, type TransformDoor } from "./transform.ts";
+import { keepTransform, type TransformDoor } from "./transform.ts";
 
 export type SkillTier = "workstation" | "project";
 
@@ -25,7 +25,6 @@ export type DiscoveredSkill = {
 };
 
 export type SkillLike = TransformDoor<any> & { reload?: () => Promise<void> };
-const TRANSFORM_WAIT_MS = 6000;
 
 export function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
@@ -79,24 +78,45 @@ export function discoverSkills(projectRoot: string): DiscoveredSkill[] {
   ];
 }
 
-export async function registerSkills(
-  skill: SkillLike | undefined,
-  projectRoot: string,
-): Promise<{ registered: string[]; skipped: string[]; error?: string; release?: () => Promise<void> }> {
-  const discovered = discoverSkills(projectRoot);
+export type SkillRegistration = {
+  /** Always empty at registration time; the transform applies after setup returns. */
+  registered: string[];
+  /** Resolves with what the deferred transform actually applied. */
+  applied: Promise<{ registered: string[]; skipped: string[]; error?: string }>;
+  release: () => Promise<void>;
+};
+
+export function registerSkills(skill: SkillLike | undefined, projectRoot: string): SkillRegistration {
+  // Project-tier skills live in .opencode/skills, which OpenCode discovers by
+  // itself. Register only the workstation tier, or every project skill appears
+  // twice (once native, once namespaced) in ctx.skill.list().
+  const discovered = discoverSkills(projectRoot).filter((s) => s.tier === "workstation");
   if (!skill || typeof skill.transform !== "function") {
-    return { registered: [], skipped: discovered.map((s) => s.id), error: "ctx.skill not available" };
+    return {
+      registered: [],
+      applied: Promise.resolve({
+        registered: [],
+        skipped: discovered.map((s) => s.id),
+        error: "ctx.skill not available",
+      }),
+      release: async () => undefined,
+    };
   }
   const kept = keepTransform<any, string[]>(skill, (editor: any) => {
     const added: string[] = [];
+    const existing = new Set<string>((editor.list?.() ?? []).map((entry: any) => entry?.id).filter(Boolean));
     for (const s of discovered) {
       try {
+        if (existing.has(s.id)) {
+          added.push(s.id);
+          continue;
+        }
         if (typeof editor?.add === "function") {
           editor.add({
             id: s.id,
             name: s.name,
             description: s.description,
-            location: s.file,
+            path: s.file,
             content: s.content,
           });
           added.push(s.id);
@@ -107,21 +127,23 @@ export async function registerSkills(
     }
     return added;
   });
-  const registered = await withTimeout(kept.first, TRANSFORM_WAIT_MS, null);
-  if (registered === null) {
+
+  const applied = kept.first.then(async (value) => {
+    const registered = value ?? [];
+    if (value !== null) {
+      try {
+        await skill.reload?.();
+      } catch {
+        /* reload is a convenience, not the registration itself */
+      }
+    }
+    const registeredSet = new Set(registered);
     return {
-      registered: [],
-      skipped: discovered.map((s) => s.id),
-      error: kept.error() ?? "skill transform callback did not fire",
-      release: kept.release,
+      registered,
+      skipped: discovered.map((s) => s.id).filter((id) => !registeredSet.has(id)),
+      error: value === null ? kept.error() ?? "skill transform callback did not fire" : kept.error(),
     };
-  }
-  const registeredSet = new Set(registered);
-  await skill.reload?.();
-  return {
-    registered,
-    skipped: discovered.map((s) => s.id).filter((id) => !registeredSet.has(id)),
-    error: kept.error(),
-    release: kept.release,
-  };
+  });
+
+  return { registered: [], applied, release: kept.release };
 }

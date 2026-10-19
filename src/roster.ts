@@ -165,7 +165,7 @@ export const ROSTER: AgentDef[] = [
 // provider being up; the plugin assigns a model at runtime through
 // ctx.agent.transform using the resolved plan, and OpenCode's own default carries the
 // load if the plugin ever fails to load. Independence is a choice, not an accident.
-export function agentMarkdown(a: AgentDef): string {
+export function agentMarkdown(a: AgentDef, model?: string): string {
   const body = [
     "# " + a.name + " — " + a.callSign,
     "",
@@ -186,6 +186,7 @@ export function agentMarkdown(a: AgentDef): string {
     "---",
     'description: "' + a.description + '"',
     "mode: " + a.mode,
+    "model: " + (model || a.model),
     "---",
     "",
   ].join("\n");

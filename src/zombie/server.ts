@@ -18,12 +18,11 @@ import {
 import { readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
 import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { footprintFile } from "./paths.ts";
-import { keepTransform, withTimeout, type TransformDoor } from "./transform.ts";
+import { keepTransform, type TransformDoor } from "./transform.ts";
 import { ROSTER } from "../roster.ts";
 
 export const RPC_ID = "zombiecoder";
 export const TOOL_NAMESPACE = { name: "zombiecoder", description: "ZombieCoder project control surface" };
-const TRANSFORM_WAIT_MS = 6000;
 
 export type RpcLike = {
   register: (definition: any, handlers: any) => Promise<{ dispose: () => Promise<void>; events?: { emit: (...a: any[]) => Promise<void> } }>;
@@ -246,18 +245,33 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
   ];
 }
 
-export async function registerTools(
-  tool: ToolLike | undefined,
-  deps: SurfaceDeps,
-): Promise<{ registered: string[]; error?: string; release?: () => Promise<void> }> {
-  if (!tool || typeof tool.transform !== "function") { 
-    return { registered: [], error: "ctx.tool not available" };
+export type ToolRegistration = {
+  /** Always empty at registration time; the transform applies after setup returns. */
+  registered: string[];
+  /** Resolves with what the deferred transform actually applied. */
+  applied: Promise<{ registered: string[]; error?: string }>;
+  release: () => Promise<void>;
+};
+
+export function registerTools(tool: ToolLike | undefined, deps: SurfaceDeps): ToolRegistration {
+  if (!tool || typeof tool.transform !== "function") {
+    return {
+      registered: [],
+      applied: Promise.resolve({ registered: [], error: "ctx.tool not available" }),
+      release: async () => undefined,
+    };
   }
   const specs = toolSpecs(deps);
   const kept = keepTransform<any, string[]>(tool as TransformDoor<any>, (editor: any) => {
     const added: string[] = [];
     editor?.namespace?.(TOOL_NAMESPACE);
+    const existing = new Set<string>((editor.list?.() ?? []).map((entry: any) => entry?.name).filter(Boolean));
     for (const spec of specs) {
+      // OpenCode re-runs transforms on reload. Do not add the same tool twice.
+      if (existing.has(spec.name)) {
+        added.push(spec.name);
+        continue;
+      }
       editor.add({
         name: spec.name,
         description: spec.description,
@@ -272,16 +286,23 @@ export async function registerTools(
     }
     return added;
   });
-  const registered = await withTimeout(kept.first, TRANSFORM_WAIT_MS, null);
-  if (registered === null) {
+
+  const applied = kept.first.then(async (value) => {
+    // Only the first apply triggers a reload; later invocations are re-applies.
+    if (value !== null) {
+      try {
+        await tool.reload?.();
+      } catch {
+        /* reload is a convenience, not the registration itself */
+      }
+    }
     return {
-      registered: [],
-      error: kept.error() ?? "tool transform callback did not fire",
-      release: kept.release,
+      registered: value ?? [],
+      error: value === null ? kept.error() ?? "tool transform callback did not fire" : kept.error(),
     };
-  }
-  await tool.reload?.();
-  return { registered, error: kept.error(), release: kept.release };
+  });
+
+  return { registered: [], applied, release: kept.release };
 }
 
 // Footprint append is the one thing every surface shares.

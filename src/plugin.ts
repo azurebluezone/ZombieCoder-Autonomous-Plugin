@@ -14,8 +14,8 @@
 import { Plugin } from "@opencode/plugin";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ROSTER, SHARED_RULES, agentMarkdown, type AgentDef } from "./roster.ts";
-import { bootstrapDirs, agentStoreDir, configFile, setupReportFile } from "./zombie/paths.ts";
+import { ROSTER, agentMarkdown, type AgentDef } from "./roster.ts";
+import { bootstrapDirs, agentStoreDir, configFile, mcpFile, setupReportFile } from "./zombie/paths.ts";
 import { ensureDir, readJson, writeJson, writeAtomic, PLUGIN_VERSION } from "./zombie/io.ts";
 import { scanProject, type Fingerprint } from "./zombie/scan.ts";
 import { writeSsot } from "./zombie/ssot.ts";
@@ -26,17 +26,17 @@ import {
   cacheModelPlan,
   DEFAULT_CUSTOM_PROVIDER_URL,
   type CatalogDoors,
-  type ModelPlan,
 } from "./zombie/models.ts";
-import { keepTransform, withTimeout } from "./zombie/transform.ts";
+import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
 import { registerRpc, registerTools, footprint } from "./zombie/server.ts";
 
 export const PLUGIN_ID = "zombiecoder";
 export const DEFAULT_SSOT_REFRESH_MS = 5 * 60 * 1000; // spec §3.3 — every 5 minutes
-// OpenCode applies a transform ~1.3s after setup returns. Waiting 6s keeps the
-// report honest without making a missing door block boot forever.
-export const TRANSFORM_WAIT_MS = 6000;
+// OpenCode applies a transform AFTER setup() returns. Waiting inside setup blocks
+// the very apply we are waiting for, so registration is reported as "pending" and
+// the report is updated when the deferred callback actually fires.
+export const TRANSFORM_APPLY_TIMEOUT_MS = 15000;
 
 export type ZombieConfig = {
   customProviderUrl: string;
@@ -50,7 +50,7 @@ export type ZombieConfig = {
 export const DEFAULT_CONFIG: ZombieConfig = {
   customProviderUrl: DEFAULT_CUSTOM_PROVIDER_URL,
   customProviderID: "missionbarisal",
-  mcpUrl: "http://127.0.0.1:5000/mcp",
+  mcpUrl: "",
   opencodeApiUrl: "http://127.0.0.1:49374",
   ssotRefreshMs: DEFAULT_SSOT_REFRESH_MS,
   modelStrategy: "auto",
@@ -95,6 +95,22 @@ type Report = {
   outputs: Record<string, unknown>;
 };
 
+// Evidence that the installer already exposed this provider to OpenCode. The
+// catalog can lag behind setup; this file cannot.
+function providerConfiguredOnDisk(projectRoot: string, providerID: string): boolean {
+  for (const name of ["opencode.json", "opencode.jsonc"]) {
+    try {
+      const raw = fs.readFileSync(path.join(projectRoot, name), "utf8");
+      // jsonc is only checked for the provider key; comments are not parsed here.
+      const matched = new RegExp(`"${providerID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:`).test(raw);
+      if (matched) return true;
+    } catch {
+      /* file absent or unreadable */
+    }
+  }
+  return false;
+}
+
 function loadConfig(projectRoot: string): ZombieConfig {
   const existing = readJson<Partial<ZombieConfig>>(configFile(projectRoot));
   if (!existing) {
@@ -119,14 +135,18 @@ export function ensureZombieDirs(projectRoot: string): string[] {
 // Spec §1 — OpenCode reads <project>/.opencode/agents/*.md. The editor has no `add`,
 // so the file is the only door. Frontmatter delimiters are mandatory; without them the
 // whole file (frontmatter included) leaks into the agent's system prompt.
-export function ensureAgentFolder(projectRoot: string, roster: AgentDef[]): { written: string[]; unchanged: string[] } {
+export function ensureAgentFolder(
+  projectRoot: string,
+  roster: AgentDef[],
+  assignment: Record<string, string> = {},
+): { written: string[]; unchanged: string[] } {
   const dir = path.join(projectRoot, ".opencode", "agents");
   ensureDir(dir);
   const written: string[] = [];
   const unchanged: string[] = [];
   for (const a of roster) {
     const file = path.join(dir, a.id + ".md");
-    const content = agentMarkdown(a);
+    const content = agentMarkdown(a, assignment[a.id]);
     const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
     if (current === content) {
       unchanged.push(file);
@@ -138,45 +158,22 @@ export function ensureAgentFolder(projectRoot: string, roster: AgentDef[]): { wr
   return { written, unchanged };
 }
 
-// Spec §1 + §2 — keep each agent under the shared rules and give it a live model,
-// even if someone hand-edits the markdown.
-export function bindAgents(
+// The markdown file is the agent's real door. This verifies the file we just wrote
+// instead of trusting the deferred editor, which does not expose these IDs yet.
+export function verifyAgentMarkdown(
+  projectRoot: string,
   roster: AgentDef[],
-  plan: ModelPlan | undefined,
-  editor: any,
+  assignment: Record<string, string> = {},
 ): string[] {
-  const outcome: string[] = [];
+  const missing: string[] = [];
   for (const a of roster) {
-    const info = editor?.get?.(a.id);
-    if (!info) {
-      outcome.push(`${a.id}:missing`);
-      continue;
-    }
-    const marker = "ZombieCoder Shared Rules (bound by plugin";
-    const system = typeof info.system === "string" ? info.system : "";
-    const needsRules = !system.includes(marker);
-    const desired = plan?.assignment?.[a.id] ?? a.model;
-    const [providerID, ...rest] = desired.split("/");
-    const modelID = rest.join("/");
-    const current = info.model ? `${info.model.providerID}/${info.model.id}` : "";
-    const needsModel = current !== desired;
-
-    if (needsRules || needsModel) {
-      const apply = (agent: any) => {
-        if (needsRules) {
-          const base = typeof agent.system === "string" ? agent.system : "";
-          agent.system = base.replace(/\s*$/, "") + (base ? "\n\n" : "") + SHARED_RULES + "\n";
-        }
-        if (needsModel) agent.model = { providerID, id: modelID };
-      };
-      // `get()` returns the mutable view, but `update()` is the documented write
-      // door. Use it when present so the change is committed, not just staged.
-      if (typeof editor.update === "function") editor.update(a.id, apply);
-      else apply(info);
-    }
-    outcome.push(`${a.id}:${(needsRules ? "rules+" : "") + (needsModel ? "model+" : "") || "ok"}`);
+    const file = path.join(projectRoot, ".opencode", "agents", a.id + ".md");
+    const raw = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    const expected = assignment[a.id] ?? a.model;
+    if (!raw.includes(`model: ${expected}`)) missing.push(`${a.id}=${expected}`);
+    if (!raw.includes("ZombieCoder Shared Rules")) missing.push(`${a.id}=rules`);
   }
-  return outcome;
+  return missing;
 }
 
 export function updateAgentMetadata(
@@ -251,6 +248,51 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     }
   };
 
+  // A deferred transform is not a setup failure. It is a two-phase write:
+  // register now, apply after setup returns, then update the durable report.
+  const persistReport = (): void => {
+    report.finishedAt = new Date().toISOString();
+    try {
+      writeJson(setupReportFile(root!), report);
+    } catch (error: any) {
+      console.error(`[zombiecoder] report write failed: ${String(error?.message ?? error)}`);
+    }
+  };
+
+  const updateStep = (name: string, patch: { ok?: boolean; detail?: string; error?: string }): void => {
+    const item = report.steps.find((entry) => entry.step === name);
+    if (item) Object.assign(item, patch);
+    else report.steps.push({ step: name, ok: patch.ok ?? true, detail: patch.detail, error: patch.error });
+    persistReport();
+  };
+
+  const watchTransform = <T,>(
+    name: string,
+    promise: Promise<T | null>,
+    onValue: (value: T) => void,
+    failure: () => string,
+  ): void => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      updateStep(name, { ok: false, error: `transform did not apply within ${TRANSFORM_APPLY_TIMEOUT_MS}ms` });
+    }, TRANSFORM_APPLY_TIMEOUT_MS);
+    if (typeof (timer as any).unref === "function") (timer as any).unref();
+    cleanups.push(() => clearTimeout(timer));
+    promise
+      .then((value) => {
+        settled = true;
+        clearTimeout(timer);
+        if (value === null) updateStep(name, { ok: false, error: failure() });
+        else onValue(value);
+      })
+      .catch((error: any) => {
+        settled = true;
+        clearTimeout(timer);
+        updateStep(name, { ok: false, error: String(error?.message ?? error) });
+      });
+  };
+
   // ---- §3.1 layout ----------------------------------------------------------
   const created = step("bootstrap-dirs", () => ensureZombieDirs(root!));
   report.outputs.createdDirs = created ?? [];
@@ -267,6 +309,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     const resolved = await resolveModels(doors, ROSTER, {
       customProviderUrl: config.customProviderUrl,
       customProviderID: config.customProviderID,
+      providerConfigured: providerConfiguredOnDisk(root!, config.customProviderID),
       randomize: config.modelStrategy === "random",
     });
     cacheModelPlan(root!, resolved);
@@ -275,6 +318,22 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.outputs.modelStrategy = plan?.strategy;
   report.outputs.modelAssignment = plan?.assignment;
   report.outputs.customProviderReachable = plan?.probe?.ok ?? false;
+
+  // ---- §6/§7 MCP probe ------------------------------------------------------
+  // The installer can prove an MCP URL once, but the runtime must prove it again:
+  // the server may have moved, or the project may have received config later.
+  let mcpProbe: Awaited<ReturnType<typeof probeMcp>> | undefined;
+  const mcp = await stepAsync("probe-mcp", async () => {
+    if (!config.mcpUrl) return "skipped (no MCP URL)";
+    mcpProbe = await probeMcp(config.mcpUrl);
+    writeJson(mcpFile(root!), mcpProbe);
+    if (!mcpProbe.ok) throw new Error(mcpProbe.error ?? "MCP probe failed");
+    const names = mcpProbe.tools.map((tool) => tool.name).join(", ");
+    return `${mcpProbe.tools.length} tool(s)${names ? `: ${names}` : ""}`;
+  });
+  report.outputs.mcpUrl = config.mcpUrl || null;
+  report.outputs.mcpReachable = mcpProbe?.ok ?? false;
+  report.outputs.mcpTools = mcpProbe?.tools.map((tool) => tool.name) ?? [];
 
   const writeSsotNow = (): { file: string; sha256: string; bytes: number } => {
     const fp = scanProject(root!);
@@ -285,6 +344,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       modelAssignment: plan?.assignment ?? {},
       customProviderUrl: config.customProviderUrl,
       customProviderReachable: plan?.probe?.ok ?? false,
+      mcpUrl: config.mcpUrl,
+      mcpReachable: mcpProbe?.ok ?? false,
+      mcpTools: mcpProbe?.tools.map((tool) => tool.name) ?? [],
     });
     return { file: written.file, sha256: written.sha256, bytes: written.bytes };
   };
@@ -300,8 +362,11 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   );
   report.outputs.syllabus = syllabus;
 
-  // ---- §1 agent folder + binding -------------------------------------------
-  const folder = step("agent-folder", () => ensureAgentFolder(root!, ROSTER));
+  // ---- §1 agent folder + model binding -------------------------------------
+  // The markdown file is the documented door: frontmatter carries the resolved
+  // model, and the body carries the shared rules. The editor transform sees no
+  // IDs at this point, so pretending it bound them would be a lie in the report.
+  const folder = step("agent-folder", () => ensureAgentFolder(root!, ROSTER, plan?.assignment ?? {}));
   report.outputs.agentFolder = folder;
 
   await stepAsync("agent-reload", async () => {
@@ -309,25 +374,38 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     return "reloaded";
   });
 
-  const bound = await stepAsync("agent-bind", async () => {
-    if (!ctx.agent?.transform) throw new Error("ctx.agent.transform not available");
-    const kept = keepTransform<any, string[]>({ transform: ctx.agent.transform }, (editor: any) =>
-      bindAgents(ROSTER, plan, editor),
-    );
-    cleanups.push(kept.release);
-    const outcome = await withTimeout(kept.first, TRANSFORM_WAIT_MS, null);
-    if (!outcome) {
-      throw new Error(kept.error() ?? "agent transform callback did not fire");
+  const bound = step("agent-bind", () => {
+    const missing = verifyAgentMarkdown(root!, ROSTER, plan?.assignment ?? {});
+    if (missing.length > 0) {
+      throw new Error(`agent markdown incomplete: ${missing.join(", ")}`);
     }
-    return outcome.join(",");
+    return `${ROSTER.length} agents carry resolved model + shared rules`;
   });
   report.outputs.bound = bound;
 
   // ---- §6 skills ------------------------------------------------------------
-  const skills = await stepAsync("register-skills", async () => {
-    const result = await registerSkills(ctx.skill, root!);
-    if (result.release) cleanups.push(result.release);
-    return `${result.registered.length} registered${result.error ? ` (${result.error})` : ""}`;
+  const skills = step("register-skills", () => {
+    const registration = registerSkills(ctx.skill, root!);
+    cleanups.push(registration.release);
+    report.outputs.skills = "pending (applies after setup returns)";
+    watchTransform(
+      "register-skills",
+      registration.applied,
+      (result) => {
+        report.outputs.skills = `${result.registered.length} registered${
+          result.error ? ` (${result.error})` : ""
+        }`;
+        updateStep("register-skills", {
+          ok: !result.error || result.registered.length > 0,
+          detail: `${result.registered.length} registered${
+            result.skipped.length ? `, ${result.skipped.length} skipped` : ""
+          }`,
+          error: result.error,
+        });
+      },
+      () => "skill transform callback did not fire",
+    );
+    return "registered (apply pending)";
   });
   report.outputs.skills = skills;
 
@@ -342,10 +420,26 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   const rpc = await stepAsync("register-rpc", () => registerRpc(ctx.rpc, deps));
   report.outputs.rpc = rpc;
 
-  const tools = await stepAsync("register-tools", async () => {
-    const result = await registerTools(ctx.tool, deps);
-    if (result.release) cleanups.push(result.release);
-    return `${result.registered.length} registered${result.error ? ` (${result.error})` : ""}`;
+  const tools = step("register-tools", () => {
+    const registration = registerTools(ctx.tool, deps);
+    cleanups.push(registration.release);
+    report.outputs.tools = "pending (applies after setup returns)";
+    watchTransform(
+      "register-tools",
+      registration.applied,
+      (result) => {
+        report.outputs.tools = `${result.registered.length} registered${
+          result.error ? ` (${result.error})` : ""
+        }`;
+        updateStep("register-tools", {
+          ok: !result.error || result.registered.length > 0,
+          detail: `${result.registered.length} registered`,
+          error: result.error,
+        });
+      },
+      () => "tool transform callback did not fire",
+    );
+    return "registered (apply pending)";
   });
   report.outputs.tools = tools;
 
@@ -463,8 +557,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.outputs.refreshMs = config.ssotRefreshMs;
 
   // ---- report + footprint ---------------------------------------------------
-  report.finishedAt = new Date().toISOString();
-  step("write-report", () => writeJson(setupReportFile(root!), report));
+  report.steps.push({ step: "write-report", ok: true, detail: "written" });
+  persistReport();
   try {
     footprint(root!, "plugin", {
       kind: "setup",

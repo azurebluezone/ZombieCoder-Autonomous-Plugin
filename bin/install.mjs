@@ -26,6 +26,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createInterface } from "node:readline/promises";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(HERE, "..");
@@ -43,12 +44,78 @@ function value(name, fallback) {
 const TARGET = path.resolve(value("--dir", os.homedir()));
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
-const PROVIDER_URL = value("--provider-url", null);
-const MCP_URL = value("--mcp-url", null);
 const PROVIDER_ID = "missionbarisal";
 const OPENAI_COMPATIBLE_PACKAGE = "@opencode/ai/providers/openai-compatible";
+const DEFAULT_PROVIDER_URL =
+  process.env.ZOMBIECODER_PROVIDER_URL ?? "https://gpu.zombiecoder.my.id/v1";
+const DEFAULT_MCP_URL = "";
+
+function cleanUrl(input, fallback) {
+  if (input === null || input === undefined) return fallback;
+  const value = String(input).trim();
+  if (!value || /^(none|skip|no)$/i.test(value)) return "";
+  return value;
+}
+
+const providerFlag = value("--provider-url", null);
+const mcpFlag = value("--mcp-url", null);
+
+// Re-install should remember the owner's previous answer instead of silently
+// resetting it to the shipped default.
+function priorConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(TARGET, ".zombiecoder", "config.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+const previous = priorConfig();
+const initialProvider =
+  providerFlag !== null
+    ? cleanUrl(providerFlag, DEFAULT_PROVIDER_URL)
+    : typeof previous.customProviderUrl === "string"
+      ? previous.customProviderUrl
+      : DEFAULT_PROVIDER_URL;
+const initialMcp =
+  mcpFlag !== null
+    ? cleanUrl(mcpFlag, DEFAULT_MCP_URL)
+    : typeof previous.mcpUrl === "string"
+      ? previous.mcpUrl
+      : DEFAULT_MCP_URL;
+
+let PROVIDER_URL = initialProvider;
+let MCP_URL = initialMcp;
+
+// Ask only when a human is actually there. CI and `--yes` use the flags or the
+// documented defaults, so an automated install can never hang on a prompt.
+const INTERACTIVE = Boolean(process.stdin.isTTY) && !flag("--yes") && !flag("--defaults");
+if (INTERACTIVE) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    console.log("");
+    console.log("ZombieCoder setup — press Enter to accept the bracketed value.");
+    if (providerFlag === null) {
+      const shown = initialProvider || "none";
+      const answer = (
+        await rl.question(
+          `OpenAI-compatible URL [${shown}] ("none" = OpenCode free models only): `,
+        )
+      ).trim();
+      PROVIDER_URL = cleanUrl(answer, initialProvider);
+    }
+    if (mcpFlag === null) {
+      const shown = initialMcp || "skip";
+      const answer = (await rl.question(`MCP URL [${shown}]: `)).trim();
+      MCP_URL = cleanUrl(answer, initialMcp);
+    }
+    console.log("");
+  } finally {
+    rl.close();
+  }
+}
 
 const report = { target: TARGET, steps: [] };
+let mcpProbe = null;
 
 async function step(name, fn) {
   try {
@@ -216,12 +283,28 @@ if (DO_INSTALL) {
 // ---- 6. core config ----------------------------------------------------------
 await step("seed .zombiecoder/config.json", () => {
   const file = path.join(zombieDir, "config.json");
-  if (fs.existsSync(file)) return "kept existing config.json";
+  if (fs.existsSync(file)) {
+    let current;
+    try {
+      current = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      return "kept existing config.json (not strict JSON; not modified)";
+    }
+    const next = {
+      ...current,
+      version: PKG.version,
+      customProviderUrl: PROVIDER_URL,
+      customProviderID: current.customProviderID ?? PROVIDER_ID,
+      mcpUrl: MCP_URL,
+    };
+    const changed = writeIfChanged(file, JSON.stringify(next, null, 2) + "\n");
+    return changed ? "updated existing config.json" : "kept existing config.json";
+  }
   const config = {
     version: PKG.version,
-    customProviderUrl: PROVIDER_URL ?? "https://gpu.zombiecoder.my.id/v1",
-    customProviderID: "missionbarisal",
-    mcpUrl: MCP_URL ?? "http://127.0.0.1:5000/mcp",
+    customProviderUrl: PROVIDER_URL,
+    customProviderID: PROVIDER_ID,
+    mcpUrl: MCP_URL,
     opencodeApiUrl: "http://127.0.0.1:49374",
     ssotRefreshMs: 300000,
     modelStrategy: "auto",
@@ -231,7 +314,17 @@ await step("seed .zombiecoder/config.json", () => {
   return "written";
 });
 
-// ---- 7. opencode.json: make the URL visible to the live runtime --------------
+// ---- 7. probe MCP, then write opencode.json ----------------------------------
+await step("probe MCP", async () => {
+  if (!MCP_URL) return "skipped (no MCP URL)";
+  const { probeMcp } = await import("../src/zombie/mcp.ts");
+  mcpProbe = await probeMcp(MCP_URL, { timeoutMs: 6000 });
+  writeIfChanged(path.join(zombieDir, "mcp.json"), JSON.stringify(mcpProbe, null, 2) + "\n");
+  if (!mcpProbe.ok) throw new Error(`MCP unreachable: ${mcpProbe.error}`);
+  const names = mcpProbe.tools.map((tool) => tool.name).join(", ");
+  return `${mcpProbe.tools.length} tool(s)${names ? `: ${names}` : ""}`;
+});
+
 await step("sync opencode.json", async () => {
   if (!DO_PROVIDER_CONFIG) return "skipped (--no-provider-config)";
   const file = path.join(TARGET, "opencode.json");
@@ -249,42 +342,55 @@ await step("sync opencode.json", async () => {
   }
 
   const seeded = JSON.parse(fs.readFileSync(path.join(zombieDir, "config.json"), "utf8"));
-  const providerUrl = PROVIDER_URL ?? seeded.customProviderUrl;
-  const mcpUrl = MCP_URL ?? seeded.mcpUrl;
-  const probe = await probeProviderModels(providerUrl);
+  const providerUrl = PROVIDER_URL;
+  const providerID = seeded.customProviderID || PROVIDER_ID;
+  if (!providerUrl && !mcpProbe?.ok && !fs.existsSync(file)) {
+    return "nothing to write (free models, no MCP)";
+  }
+  const probe = providerUrl ? await probeProviderModels(providerUrl) : null;
 
   const next = { ...existing };
   if (!next.$schema) next.$schema = "https://opencode.ai/config.json";
 
-  next.providers = { ...(existing.providers ?? {}) };
-  const previous = next.providers[PROVIDER_ID] ?? {};
-  const models = { ...(previous.models ?? {}) };
-  if (probe.ok) {
-    for (const id of probe.models) {
-      models[id] = { ...(providerEntry(providerUrl, [id]).models[id]), ...(models[id] ?? {}) };
+  if (providerUrl) {
+    next.providers = { ...(existing.providers ?? {}) };
+    const previous = next.providers[providerID] ?? {};
+    const models = { ...(previous.models ?? {}) };
+    if (probe?.ok) {
+      for (const id of probe.models) {
+        models[id] = { ...(providerEntry(providerUrl, [id]).models[id]), ...(models[id] ?? {}) };
+      }
     }
+    next.providers[providerID] = {
+      ...providerEntry(providerUrl, []),
+      ...previous,
+      settings: {
+        ...(previous.settings ?? {}),
+        baseURL: providerUrl,
+        apiKey: previous.settings?.apiKey ?? "public",
+      },
+      models,
+    };
   }
-  next.providers[PROVIDER_ID] = {
-    ...providerEntry(providerUrl, []),
-    ...previous,
-    settings: {
-      ...(previous.settings ?? {}),
-      baseURL: providerUrl,
-      apiKey: previous.settings?.apiKey ?? "public",
-    },
-    models,
-  };
 
-  next.mcp = { ...(existing.mcp ?? {}) };
-  next.mcp.servers = { ...(next.mcp.servers ?? {}) };
-  if (!next.mcp.servers.zombiecoder) {
-    next.mcp.servers.zombiecoder = { type: "remote", url: mcpUrl };
+  // Only register an MCP server we actually reached. A dead default URL in
+  // opencode.json slows every boot and teaches the user to ignore errors.
+  if (mcpProbe?.ok) {
+    next.mcp = { ...(existing.mcp ?? {}) };
+    next.mcp.servers = { ...(next.mcp.servers ?? {}) };
+    if (!next.mcp.servers.zombiecoder) {
+      next.mcp.servers.zombiecoder = { type: "remote", url: MCP_URL };
+    }
   }
 
   writeIfChanged(file, JSON.stringify(next, null, 2) + "\n");
-  return probe.ok
-    ? `provider ${PROVIDER_ID} with ${probe.models.length} model(s) from ${probe.url}; MCP zombiecoder`
-    : `provider ${PROVIDER_ID} saved (probe failed: ${probe.error}); MCP zombiecoder`;
+  const providerSummary = !providerUrl
+    ? "custom provider disabled (OpenCode free models)"
+    : probe?.ok
+      ? `provider ${providerID} with ${probe.models.length} model(s) from ${probe.url}`
+      : `provider ${providerID} saved (probe failed: ${probe?.error ?? "not probed"})`;
+  const mcpSummary = mcpProbe?.ok ? `MCP zombiecoder (${mcpProbe.tools.length} tools)` : "MCP not registered";
+  return `${providerSummary}; ${mcpSummary}`;
 });
 
 // ---- 8. agent markdown now, not later ----------------------------------------

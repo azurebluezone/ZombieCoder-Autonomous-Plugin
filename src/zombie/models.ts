@@ -10,9 +10,9 @@
 //   2. OpenCode's own catalog, filtered to cost 0 / cost 0 — always present
 //   3. a baseline model we observed live in the catalog
 //
-// The mapping agent -> model is DETERMINISTIC (stable hash of the agent id), not
-// random. Random assignment would make every model.request footprint entry
-// unreproducible, and an unreproducible footprint is not evidence.
+// The mapping agent -> model is DETERMINISTIC by default (stable hash of the agent
+// id), because an unreproducible footprint is not evidence. The owner can opt into
+// `modelStrategy: "random"` when they explicitly want random mapping.
 
 import { readJson, writeJson } from "./io.ts";
 import { modelPlanFile } from "./paths.ts";
@@ -271,6 +271,8 @@ export type ResolveOptions = {
   customProviderID?: string;
   probeTimeoutMs?: number;
   skipProbe?: boolean;
+  /** True when opencode.json already declares this provider (installer wrote it). */
+  providerConfigured?: boolean;
   /** Spec §2 "random mapping" mode. Default is deterministic, for reproducible footprints. */
   randomize?: boolean;
 };
@@ -282,7 +284,7 @@ export async function resolveModels(
 ): Promise<ModelPlan> {
   const notes: string[] = [];
   const customProviderID = options.customProviderID ?? "missionbarisal";
-  const configuredUrl = options.customProviderUrl ?? DEFAULT_CUSTOM_PROVIDER_URL;
+  const configuredUrl = (options.customProviderUrl ?? DEFAULT_CUSTOM_PROVIDER_URL).trim();
 
   const catalog = await readCatalog(doors);
   const defaultModel = await readDefaultModel(doors);
@@ -294,31 +296,57 @@ export async function resolveModels(
   );
   if (defaultModel) notes.push(`OpenCode default model: ${defaultModel}`);
 
-  const provider = findProvider(catalog, customProviderID);
+  const provider = configuredUrl ? findProvider(catalog, customProviderID) : undefined;
   const providerBase = provider?.baseURL ?? null;
   const probeTarget = providerBase ?? configuredUrl;
 
   let probe: ProbeResult;
-  if (options.skipProbe) {
+  if (!configuredUrl) {
+    // The owner chose "no custom provider" (installer `none` / empty config).
+    // Do not probe a relative URL and do not quietly reuse a stale catalog entry.
+    probe = {
+      url: "",
+      ok: false,
+      status: null,
+      models: [],
+      ms: 0,
+      error: "no custom provider configured",
+    };
+    notes.push("custom provider disabled by config — free-model fallback");
+  } else if (options.skipProbe) {
     probe = { url: probeTarget, ok: false, status: null, models: [], ms: 0, error: "probe skipped" };
   } else {
     probe = await probeOpenAiCompatible(probeTarget, options.probeTimeoutMs);
   }
 
-  if (provider) {
-    notes.push(`custom provider "${customProviderID}" in catalog with ${provider.modelCount} models, baseURL ${providerBase ?? "(not exposed)"}`);
-  } else {
-    notes.push(`custom provider "${customProviderID}" not in catalog`);
+  if (configuredUrl) {
+    if (provider) {
+      notes.push(`custom provider "${customProviderID}" in catalog with ${provider.modelCount} models, baseURL ${providerBase ?? "(not exposed)"}`);
+    } else {
+      notes.push(`custom provider "${customProviderID}" not in catalog`);
+    }
+    notes.push(`probe ${probe.url} -> ${probe.ok ? `ok (${probe.models.length} models, ${probe.ms}ms)` : `failed: ${probe.error}`}`);
   }
-  notes.push(`probe ${probe.url} -> ${probe.ok ? `ok (${probe.models.length} models, ${probe.ms}ms)` : `failed: ${probe.error}`}`);
 
   let strategy: ModelPlan["strategy"];
   let candidates: string[] = [];
 
-  if (provider && probe.ok) {
-    candidates = catalog.models.filter((m) => m.providerID === customProviderID).map((m) => m.ref);
+  if (configuredUrl && (provider || options.providerConfigured) && probe.ok) {
+    // Prefer the catalog's fully-hydrated model records, then the live probe.
+    // The provider is often registered a moment AFTER setup starts (OpenCode
+    // loads provider config in parallel), so a missing catalog entry must not
+    // throw away a URL the installer already wrote.
+    const fromCatalog = catalog.models
+      .filter((m) => m.providerID === customProviderID)
+      .map((m) => m.ref);
+    candidates = fromCatalog.length > 0
+      ? fromCatalog
+      : probe.models.map((id) => `${customProviderID}/${id}`);
     strategy = candidates.length > 0 ? "custom-provider" : "free-fallback";
     if (candidates.length === 0) notes.push("provider reachable but exposes no models — falling back");
+    else if (fromCatalog.length === 0) {
+      notes.push("provider not in catalog yet — using model IDs from the live probe");
+    }
   } else {
     // Either the provider is not registered, or it is registered and its server is down.
     strategy = "free-fallback";

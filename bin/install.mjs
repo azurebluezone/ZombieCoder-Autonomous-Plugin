@@ -15,7 +15,8 @@
 //   <global>/zombiecoder/…      internal config/model-plan/MCP probe state
 //
 // Per working directory the runtime creates only .zombiecoder (SSOT, syllabus,
-// memory, footprint, models). Skills are lazy: .zombiecoder/skills appears only
+// memory, .state). Project config/models/fingerprint/footprint/mcp are not
+// created. Skills are lazy: .zombiecoder/skills appears only
 // when a skill is actually added. No .opencode in arbitrary working directories.
 //
 // NO backups, NO .bak files, NO archives: the owner keeps their own. Writes are atomic
@@ -551,7 +552,8 @@ console.log(`installed: ${report.steps.length - failed.length}/${report.steps.le
 if (GLOBAL_MODE) {
   console.log(`global: ${TARGET}/{opencode.json,agents,plugins,zombiecoder}`);
   console.log("per-directory: each working directory gets only .zombiecoder");
-  console.log("  (SSOT, syllabus, memory, footprint, models); no .opencode is created there.");
+  console.log("  (SSOT, syllabus, memory, .state); no .opencode is created there.");
+  console.log("  no per-project config.json/models.json/fingerprint.json/footprint.jsonl/mcp.json.");
   console.log("skills: .zombiecoder/skills is created only when a skill is added.");
 } else {
   console.log(`project: ${TARGET}/.opencode/{agents,plugins} + ${TARGET}/.zombiecoder`);

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "ZombieCoder agent pack for OpenCode: emits the agent folder, binds each agent under fixed rules, and gives every agent its own session, metadata and footprint.",
+  "description": "ZombieCoder agent pack for OpenCode: emits the agent folder, binds every agent under shared rules, and gives each working directory an SSOT, a hierarchical syllabus footprint and local conversation memory.",
   "exports": {
     ".": "./src/plugin.ts"
   },

@@ -17,29 +17,16 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ROSTER, GLOBAL_PERMISSIONS, agentMarkdown, renderAgentsConfig, type AgentDef } from "./roster.ts";
-import {
-  bootstrapDirs,
-  agentStoreDir,
-  configFile,
-  legacyModelPlanFile,
-  mcpFile,
-  modelPlanFile,
-  setupReportFile,
-} from "./zombie/paths.ts";
+import { bootstrapDirs, configFile, setupReportFile } from "./zombie/paths.ts";
 import { ensureDir, readJson, writeJson, writeAtomic, PLUGIN_VERSION } from "./zombie/io.ts";
-import { scanProject, type Fingerprint } from "./zombie/scan.ts";
+import { scanProject } from "./zombie/scan.ts";
 import { writeSsot } from "./zombie/ssot.ts";
 import { ensureSyllabus } from "./zombie/syllabus.ts";
 import { keepRecent, readRecent, touchIndex } from "./zombie/memory.ts";
-import {
-  resolveModels,
-  cacheModelPlan,
-  DEFAULT_CUSTOM_PROVIDER_URL,
-  type CatalogDoors,
-} from "./zombie/models.ts";
+import { resolveModels, DEFAULT_CUSTOM_PROVIDER_URL, type CatalogDoors } from "./zombie/models.ts";
 import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
-import { registerRpc, registerTools, footprint } from "./zombie/server.ts";
+import { registerRpc, registerTools, audit } from "./zombie/server.ts";
 
 export const PLUGIN_ID = "zombiecoder";
 export const DEFAULT_SSOT_REFRESH_MS = 5 * 60 * 1000; // spec §3.3 — every 5 minutes
@@ -208,30 +195,11 @@ export function providerConfiguredOnDisk(projectRoot: string, providerID: string
 
 function loadConfig(projectRoot: string): ZombieConfig {
   // Merge order mirrors OpenCode: shipped default < global ZombieCoder config
-  // < this working directory's .zombiecoder/config.json.
+  // < optional manual .zombiecoder/config.json. We never auto-create the project
+  // file: global config is the source, and the project stays clean.
   const global = readJson<Partial<ZombieConfig>>(GLOBAL_ZOMBIE_CONFIG) ?? {};
   const existing = readJson<Partial<ZombieConfig>>(configFile(projectRoot));
-  const merged: ZombieConfig = { ...DEFAULT_CONFIG, ...global, ...(existing ?? {}) };
-  if (!existing) writeJson(configFile(projectRoot), merged);
-  return merged;
-}
-
-// One-time repair: old builds wrote the model plan to memory.json. Move it to
-// models.json so memory/index.json is the only memory door.
-export function migrateLegacyPlan(projectRoot: string): string | undefined {
-  const legacy = legacyModelPlanFile(projectRoot);
-  const target = modelPlanFile(projectRoot);
-  if (!fs.existsSync(legacy) || fs.existsSync(target)) return undefined;
-  try {
-    const data = JSON.parse(fs.readFileSync(legacy, "utf8"));
-    if (data && typeof data === "object" && data.assignment && data.strategy) {
-      fs.renameSync(legacy, target);
-      return "migrated memory.json -> models.json";
-    }
-  } catch {
-    /* not a plan; leave the file alone */
-  }
-  return undefined;
+  return { ...DEFAULT_CONFIG, ...global, ...(existing ?? {}) };
 }
 
 // Spec §3.1 — create the layout only when it is not already there.
@@ -373,34 +341,6 @@ export function verifyAgentConfig(
   return missing;
 }
 
-export function updateAgentMetadata(
-  projectRoot: string,
-  agent: AgentDef,
-  sessionID: string,
-  model?: string,
-): any {
-  const dir = agentStoreDir(projectRoot, agent.id);
-  const file = path.join(dir, "metadata.json");
-  const now = new Date().toISOString();
-  const prev = readJson<any>(file) ?? {
-    id: agent.id,
-    name: agent.name,
-    callSign: agent.callSign,
-    role: agent.role,
-    mission: agent.mission,
-    decisionRule: agent.rule,
-    firstSeen: now,
-    sessions: [],
-    updates: 0,
-  };
-  prev.model = model ?? prev.model ?? agent.model;
-  prev.lastSeen = now;
-  prev.updates = (prev.updates ?? 0) + 1;
-  if (sessionID && Array.isArray(prev.sessions) && !prev.sessions.includes(sessionID)) prev.sessions.push(sessionID);
-  writeJson(file, prev);
-  return prev;
-}
-
 export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   const ctx = rawCtx as Ctx;
   const startedAt = new Date().toISOString();
@@ -497,9 +437,6 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
 
   const config = step("load-config", () => loadConfig(root!)) ?? DEFAULT_CONFIG;
 
-  const migrated = step("migrate-legacy-plan", () => migrateLegacyPlan(root!));
-  if (migrated) report.outputs.migrated = migrated;
-
   // ---- §2 model plan --------------------------------------------------------
   const plan = await stepAsync("resolve-models", async () => {
     // OpenCode 2.x: ctx.provider + ctx.model. Older betas: ctx.catalog.
@@ -513,7 +450,6 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       providerConfigured: providerConfiguredOnDisk(root!, config.customProviderID),
       randomize: config.modelStrategy === "random",
     });
-    cacheModelPlan(root!, resolved);
     return resolved;
   });
   report.outputs.modelStrategy = plan?.strategy;
@@ -540,7 +476,6 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   const mcp = await stepAsync("probe-mcp", async () => {
     if (!config.mcpUrl) return "skipped (no MCP URL)";
     mcpProbe = await probeMcp(config.mcpUrl);
-    writeJson(mcpFile(root!), mcpProbe);
     if (!mcpProbe.ok) throw new Error(mcpProbe.error ?? "MCP probe failed");
     const names = mcpProbe.tools.map((tool) => tool.name).join(", ");
     return `${mcpProbe.tools.length} tool(s)${names ? `: ${names}` : ""}`;
@@ -550,27 +485,24 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.outputs.mcpTools = mcpProbe?.tools.map((tool) => tool.name) ?? [];
 
   const writeSsotNow = (): { file: string; sha256: string; bytes: number } => {
-    const fp = scanProject(root!);
-    const written = writeSsot(root!, fp, {
-      agentCount: ROSTER.length,
-      agentIds: ROSTER.map((a) => a.id),
-      modelStrategy: plan?.strategy ?? "unknown",
-      modelAssignment: plan?.assignment ?? {},
-      customProviderUrl: config.customProviderUrl,
-      customProviderReachable: plan?.probe?.ok ?? false,
-      mcpUrl: config.mcpUrl,
-      mcpReachable: mcpProbe?.ok ?? false,
-      mcpTools: mcpProbe?.tools.map((tool) => tool.name) ?? [],
-    });
+    const written = writeSsot(root!, scanProject(root!));
     return { file: written.file, sha256: written.sha256, bytes: written.bytes };
   };
 
   // ---- §3.2 first scan + SSOT ----------------------------------------------
-  const ssot = step("write-ssot", writeSsotNow);
+  const fingerprint = step("scan-project", () => scanProject(root!));
+  report.outputs.scan = fingerprint
+    ? {
+        files: fingerprint.totalFiles,
+        dirs: fingerprint.totalDirs,
+        bytes: fingerprint.totalBytes,
+        languages: fingerprint.languages.length,
+      }
+    : null;
+  const ssot = step("write-ssot", () => writeSsot(root!, fingerprint ?? scanProject(root!)));
   report.outputs.ssot = ssot;
 
   // ---- §4 syllabus ----------------------------------------------------------
-  const fingerprint: Fingerprint | undefined = step("rescan-for-syllabus", () => scanProject(root!));
   const syllabus = step("ensure-syllabus", () =>
     ensureSyllabus(root!, fingerprint ?? scanProject(root!), ROSTER.map((a) => a.id)),
   );
@@ -676,7 +608,6 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         const sessionID = String(event?.sessionID ?? "unknown");
         const def = ROSTER.find((a) => a.id === agentID);
         const model = event?.model ? `${event.model.providerID}/${event.model.id}` : undefined;
-        if (def) updateAgentMetadata(projectRoot, def, sessionID, model);
 
         const recent = await readRecent(ctx.storage, sessionID);
         if (Array.isArray(event?.system) && typeof event.system.push === "function") {
@@ -691,12 +622,15 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
               recent.length
                 ? `Recent exchanges kept for this session:\n${recent.map((m) => `- ${m.text}`).join("\n")}`
                 : "No kept exchanges yet for this session.",
+              'Start every response with "ভাইয়া". Chat in Bengali; code and shortcuts in English.',
+              "Read SSOT and syllabus before acting. The footprint lives inside syllabus.md — never create a separate footprint file.",
+              "All agents are main agents and may delegate to each other with only the necessary context.",
               "Evidence before confidence. No evidence means no verified answer.",
             ].join("\n"),
           });
         }
 
-        footprint(projectRoot, agentID, {
+        audit(projectRoot, agentID, {
           kind: "context",
           sessionID,
           model,
@@ -714,7 +648,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         const sessionID = String(event?.sessionID ?? "unknown");
         const messages = Array.isArray(event?.messages) ? event.messages : [];
         const result = await keepRecent(ctx.storage, projectRoot, sessionID, messages);
-        footprint(projectRoot, agentID, {
+        audit(projectRoot, agentID, {
           kind: "compaction",
           sessionID,
           kept: result.kept,
@@ -727,7 +661,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
 
     const modelHook = await stepAsync("hook-model-request", () =>
       ctx.session!.hook!("model.request", (event: any) => {
-        footprint(root!, String(event?.agent ?? "unknown"), {
+        audit(root!, String(event?.agent ?? "unknown"), {
           kind: "model.request",
           sessionID: event?.sessionID,
           model: event?.model ? `${event.model.providerID}/${event.model.id}` : undefined,
@@ -753,7 +687,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   if (ctx.tool?.hook) {
     const toolHook = await stepAsync("hook-tool-after", () =>
       ctx.tool!.hook!("execute.after", (event: any) => {
-        footprint(root!, String(event?.agent ?? "unknown"), {
+        audit(root!, String(event?.agent ?? "unknown"), {
           kind: "tool",
           sessionID: event?.sessionID,
           tool: event?.tool,
@@ -771,7 +705,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   const timer = setInterval(() => {
     try {
       const written = writeSsotNow();
-      footprint(root!, "plugin", { kind: "ssot.refresh", sha256: written.sha256, bytes: written.bytes });
+      audit(root!, "plugin", { kind: "ssot.refresh", sha256: written.sha256, bytes: written.bytes });
     } catch (error: any) {
       console.error(`[zombiecoder] ssot refresh failed: ${String(error?.message ?? error)}`);
     }
@@ -784,7 +718,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.steps.push({ step: "write-report", ok: true, detail: "written" });
   persistReport();
   try {
-    footprint(root!, "plugin", {
+    audit(root!, "plugin", {
       kind: "setup",
       ok: report.steps.filter((s) => s.ok).length,
       failed: report.steps.filter((s) => !s.ok).length,

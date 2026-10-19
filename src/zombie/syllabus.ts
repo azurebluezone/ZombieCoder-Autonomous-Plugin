@@ -19,6 +19,29 @@ export function readSyllabus(projectRoot: string): string | undefined {
   return readText(syllabusFile(projectRoot));
 }
 
+function renderProjectMap(fp: Fingerprint): string[] {
+  const files = Array.isArray(fp.files) ? fp.files : [];
+  if (files.length === 0) return ["_No files detected._"];
+  const byDir = new Map<string, string[]>();
+  for (const file of files) {
+    const at = file.lastIndexOf("/");
+    const dir = at >= 0 ? file.slice(0, at + 1) : "./";
+    const name = at >= 0 ? file.slice(at + 1) : file;
+    const list = byDir.get(dir) ?? [];
+    list.push(name);
+    byDir.set(dir, list);
+  }
+  const rows = [...byDir.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const out: string[] = [];
+  for (const [dir, names] of rows.slice(0, 30)) {
+    const shown = names.slice(0, 10).map((n) => "`" + n + "`").join(", ");
+    const more = names.length > 10 ? ` … +${names.length - 10}` : "";
+    out.push(`| \`${dir}\` | ${shown}${more} |`);
+  }
+  if (rows.length > 30) out.push(`| _…_ | ${rows.length - 30} more directories; use \`project_fingerprint\` |`);
+  return out;
+}
+
 export function renderSyllabusSeed(fp: Fingerprint, agentIds: string[]): string {
   const langs = fp.languages.slice(0, 8).map((l) => l.name).join(", ") || "unknown";
   const top =
@@ -52,8 +75,15 @@ export function renderSyllabusSeed(fp: Fingerprint, agentIds: string[]): string 
     `| Markers | ${markers} |`,
     `| Files / dirs / bytes | ${fp.totalFiles} / ${fp.totalDirs} / ${fp.totalBytes} |`,
     ``,
-    `_Agents: refresh this with the \`project_fingerprint\` tool; write new footprint`,
-    `findings into §5 so the next session inherits the lesson._`,
+    `### Project map (directory → key files)`,
+    ``,
+    `| Directory | Files |`,
+    `| --- | --- |`,
+    ...renderProjectMap(fp),
+    ``,
+    `_This map is the footprint. Do not create a separate footprint file. If it is`,
+    `missing or stale, explore the project and update this section in place; add`,
+    `durable lessons to §5._`,
     ``,
     `## 3. Agents bound to this project`,
     ``,
@@ -67,6 +97,11 @@ export function renderSyllabusSeed(fp: Fingerprint, agentIds: string[]): string 
     `4. Every claim carries a label: SOURCE_VERIFIED, CONFIG_VALIDATED, LIVE_PROBE_PASSED, END_TO_END_TESTED, NOT_TESTED, UNVERIFIED.`,
     `5. Regression mindset: after a fix, re-run the checks that could have broken.`,
     `6. Two record-keeping duties only: back up before irreversible work, and log every action.`,
+    `7. Every response starts with "ভাইয়া"; chat in Bengali, code/shortcuts in English.`,
+    `8. Never lie. Admit a mistake; an honest "I don't know" beats a confident guess.`,
+    `9. Read the directory and this syllabus before writing; do not rely on memory.`,
+    `10. Shortest evidence-backed answer wins. Send only the necessary context to the provider.`,
+    `11. Every agent is a main agent; delegate with a named teammate and minimal context.`,
     ``,
     `## 5. Lessons (append-only)`,
     ``,
@@ -108,7 +143,9 @@ export function ensureSyllabus(projectRoot: string, fp: Fingerprint, agentIds: s
   const existing = readText(file);
   if (existing !== undefined && existing.trim().length > 0) {
     const needsUpgrade =
-      !existing.includes("## 2. Footprint") || existing.includes("- `kobir`");
+      !existing.includes("## 2. Footprint") ||
+      !existing.includes("### Project map") ||
+      existing.includes("- `kobir`");
     if (!needsUpgrade) {
       return { file, created: false, bytes: Buffer.byteLength(existing, "utf8") };
     }

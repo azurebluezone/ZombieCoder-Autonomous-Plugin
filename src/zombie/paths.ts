@@ -1,10 +1,14 @@
 // Spec §3 — working directory layout.
 //
-//   <project>/.zombiecoder  -> ours  (SSOT, syllabus, memory, footprint, agent store)
+//   <project>/.zombiecoder/
+//     SSOT.md                 generated project scan + shared team persona
+//     syllabus.md             footprint + standing rules + append-only lessons
+//     memory/                 conversation index + append-only archives
+//     .state/                 internal diagnostics (setup report, audit, MCP probe)
 //
-// OpenCode's own home is NOT created inside every working directory. A global
-// install lives in ~/.config/opencode (or a project install in <project>/.opencode
-// when --dir is used); the runtime only owns .zombiecoder per working directory.
+// Global configuration lives in ~/.config/opencode. Per-project config is an
+// optional manual override, never auto-created. No fingerprint.json, footprint.jsonl,
+// models.json or mcp.json is created in the project.
 //
 // Skills are lazy: .zombiecoder/skills is not created until someone actually puts
 // a skill there.
@@ -26,8 +30,8 @@ export function ssotFile(projectRoot: string): string {
   return path.join(zombieRoot(projectRoot), "SSOT.md");
 }
 
-export function fingerprintFile(projectRoot: string): string {
-  return path.join(zombieRoot(projectRoot), "fingerprint.json");
+export function stateDir(projectRoot: string): string {
+  return path.join(zombieRoot(projectRoot), ".state");
 }
 
 export function syllabusFile(projectRoot: string): string {
@@ -50,34 +54,18 @@ export function memoryArchiveFile(projectRoot: string, sessionID: string): strin
   return path.join(memoryDir(projectRoot), safe(sessionID) + ".jsonl");
 }
 
-export function footprintFile(projectRoot: string): string {
-  return path.join(zombieRoot(projectRoot), "footprint.jsonl");
-}
-
-export function modelPlanFile(projectRoot: string): string {
-  return path.join(zombieRoot(projectRoot), "models.json");
-}
-
-// Early builds wrote the model plan to memory.json, which made the "memory"
-// file a lie. Kept only so setup() can migrate it once, then remove it.
-export function legacyModelPlanFile(projectRoot: string): string {
-  return path.join(zombieRoot(projectRoot), "memory.json");
-}
-
-export function mcpFile(projectRoot: string): string {
-  return path.join(zombieRoot(projectRoot), "mcp.json");
+export function auditFile(projectRoot: string): string {
+  return path.join(stateDir(projectRoot), "audit.jsonl");
 }
 
 export function setupReportFile(projectRoot: string): string {
-  return path.join(zombieRoot(projectRoot), "setup-report.json");
+  return path.join(stateDir(projectRoot), "setup-report.json");
 }
 
+// Optional manual override. The plugin reads it if it exists but never creates it;
+// the global ~/.config/opencode/zombiecoder/config.json is the real config.
 export function configFile(projectRoot: string): string {
   return path.join(zombieRoot(projectRoot), "config.json");
-}
-
-export function agentStoreDir(projectRoot: string, agentID: string): string {
-  return path.join(zombieRoot(projectRoot), "agents", safe(agentID));
 }
 
 // OpenCode's own folder — the door we are allowed to fill.
@@ -97,9 +85,5 @@ export function opencodePluginsDir(projectRoot: string): string {
 // No skills dir: it appears only when a skill is actually added. No .opencode
 // dir: that belongs to the install root, never to an arbitrary working directory.
 export function bootstrapDirs(projectRoot: string): string[] {
-  return [
-    zombieRoot(projectRoot),
-    memoryDir(projectRoot),
-    path.join(zombieRoot(projectRoot), "agents"),
-  ];
+  return [zombieRoot(projectRoot), memoryDir(projectRoot), stateDir(projectRoot)];
 }

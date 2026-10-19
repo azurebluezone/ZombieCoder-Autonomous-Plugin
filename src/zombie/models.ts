@@ -14,8 +14,6 @@
 // id), because an unreproducible footprint is not evidence. The owner can opt into
 // `modelStrategy: "random"` when they explicitly want random mapping.
 
-import { readJson, writeJson } from "./io.ts";
-import { modelPlanFile } from "./paths.ts";
 import type { AgentDef } from "../roster.ts";
 
 export const DEFAULT_CUSTOM_PROVIDER_URL =
@@ -381,10 +379,4 @@ export async function resolveModels(
   };
 }
 
-export function cacheModelPlan(projectRoot: string, plan: ModelPlan): void {
-  writeJson(modelPlanFile(projectRoot), plan);
-}
 
-export function readCachedModelPlan(projectRoot: string): ModelPlan | undefined {
-  return readJson<ModelPlan>(modelPlanFile(projectRoot));
-}

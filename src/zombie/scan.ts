@@ -64,6 +64,8 @@ export type Fingerprint = {
   markers: string[];
   manifests: Record<string, unknown>;
   tree: string[];
+  /** Relative file paths, capped so a huge repo cannot bloat the SSOT. */
+  files: string[];
   ignored: string[];
 };
 
@@ -168,6 +170,7 @@ export function scanProject(root: string, options: ScanOptions = {}): Fingerprin
   const lang = new Map<string, { files: number; bytes: number }>();
   const dirs: string[] = [];
   const tree: string[] = [];
+  const filePaths: string[] = [];
   const markers: string[] = [];
   let files = 0;
   let bytes = 0;
@@ -197,6 +200,7 @@ export function scanProject(root: string, options: ScanOptions = {}): Fingerprin
           return;
         }
         files += 1;
+        if (filePaths.length < 500) filePaths.push(relPath);
         let size = 0;
         try {
           size = fs.statSync(full).size;
@@ -234,7 +238,7 @@ export function scanProject(root: string, options: ScanOptions = {}): Fingerprin
         name: parsed.name,
         version: parsed.version,
         type: parsed.type,
-        scripts: parsed.scripts ? Object.keys(parsed.scripts) : [],
+        scripts: parsed.scripts && typeof parsed.scripts === "object" ? parsed.scripts : {},
         dependencies: parsed.dependencies ? Object.keys(parsed.dependencies) : [],
         devDependencies: parsed.devDependencies ? Object.keys(parsed.devDependencies) : [],
       };
@@ -292,6 +296,7 @@ export function scanProject(root: string, options: ScanOptions = {}): Fingerprin
     markers,
     manifests,
     tree: tree.slice(0, 200),
+    files: filePaths,
     ignored: [...ignore],
   };
 }

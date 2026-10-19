@@ -10,13 +10,17 @@
 OpenCode-এর জন্য একটি **লোকাল-ফার্স্ট, স্বয়ংসম্পূর্ণ** এজেন্ট প্যাক। একবার ইনস্টল
 করলে যেকোনো working directory-তে:
 
-- `.zombiecoder/SSOT.md` — live filesystem থেকে তৈরি Single Source of Truth
-- `.zombiecoder/syllabus.md` — footprint + append-only lessons
-- `.zombiecoder/memory/` — শেষ ১০টি message রাখে, বাকিগুলো archive করে
-- `.zombiecoder/footprint.jsonl` — প্রতিটি action-এর audit line
-- ৯টি এজেন্টের persona, shared rules, model ও permission
+- `.zombiecoder/SSOT.md` — live filesystem scan + shared agent team/persona
+- `.zombiecoder/syllabus.md` — hierarchical footprint + append-only lessons
+- `.zombiecoder/memory/` — শেষ ৫টি message context-এ রাখে, বাকিগুলো archive করে
+- `.zombiecoder/.state/` — internal setup report + audit log (user-facing নয়)
+- ৯টি এজেন্ট, সবাই `mode: all` (dropdown-এ selectable, একে অন্যকে call করতে পারে)
+- shared persona: সত্যবাদিতা, সময়-সচেতনতা, root-level OS/UI-UX/AIML/MCP/SAP/LSP baseline
 - ৬টি `zombiecoder.*` টুল
 - ৫ মিনিট পরপর SSOT refresh
+
+প্রতি response শুরু হয় **“ভাইয়া”** দিয়ে; chat বাংলায়, কিন্তু code/command/shortcut
+ইংরেজিতে। মিথ্যে বলা নয় — না জানলে “জানি না”, ভুল হলে স্বীকার।
 
 কাস্টম OpenAI-compatible provider বা MCP URL না থাকলে এটি OpenCode-এর ফ্রি
 মডেলে **নিরবে ফলব্যাক** করে — কিছুই ভাঙে না।
@@ -39,7 +43,7 @@ OpenCode-এর জন্য একটি **লোকাল-ফার্স্�
 12. [Tools](#tools)
 13. [Skills — lazy, দুই স্তর](#skills--lazy-দুই-স্তর)
 14. [Layout](#layout)
-15. [`.zombiecoder/config.json`](#zombiecoderconfigjson)
+15. [Optional project config override](#optional-project-config-override)
 16. [Agent roster](#agent-roster)
 17. [Verification checklist](#verification-checklist)
 18. [Troubleshooting](#troubleshooting)
@@ -59,7 +63,11 @@ directory-তে `.opencode` তৈরি করে জায়গা নষ্
 | প্রতিটি project-এ আলাদা ইনস্টল | **একটি global install** (`~/.config/opencode`) সব working directory-তে কাজ করে |
 | project-এর ভেতরে `.opencode` clutter | working directory-তে শুধু **`.zombiecoder`**; `.opencode` নেই |
 | সবসময় মৃত provider-এ request | provider **live probe**; না পেলে free model |
-| ভুলে যাওয়া context | শেষ ১০টি message + **archive index** |
+| ভুলে যাওয়া context | শেষ ৫টি message context-এ + **archive index**; বাকি সব append-only archive |
+| project-এ config clutter | global config global-ই; project-এ শুধু SSOT, syllabus, memory |
+| footprint আলাদা ফাইলে | hierarchical footprint **syllabus.md**-এর ভিতরে; আলাদা ফাইল নেই |
+| agent dropdown-এ আসে না | সব agent `mode: all` — selectable এবং একে অন্যকে call করতে পারে |
+| দীর্ঘ, অপ্রয়োজনীয় উত্তর | shared persona: time-value, two-to-the-point, নির্দিষ্ট context |
 | অন্ধভাবে SSOT লেখা | bounded filesystem scan, signature, setup report |
 | agent-এর নাম বদলালেও পুরনো agent থেকে যায় | rename করলে পুরনো markdown ও config entry **prune** হয় |
 
@@ -79,11 +87,13 @@ directory-তে `.opencode` তৈরি করে জায়গা নষ্
   /project/a/.zombiecoder  /project/b/.zombiecoder  /project/c/.zombiecoder
   ├── SSOT.md              ├── SSOT.md              ├── SSOT.md
   ├── syllabus.md          ├── syllabus.md          ├── syllabus.md
-  ├── memory/index.json    ├── memory/index.json    ├── memory/index.json
-  ├── models.json          ├── models.json          ├── models.json
-  ├── footprint.jsonl      ├── footprint.jsonl      ├── footprint.jsonl
+  ├── memory/              ├── memory/              ├── memory/
+  ├── .state/              ├── .state/              ├── .state/
   └── skills/ (lazy)       └── skills/ (lazy)       └── skills/ (lazy)
 ```
+
+`.state/` internal; `.zombiecoder/config.json` optional manual override, auto-created নয়।
+`fingerprint.json`, `models.json`, `footprint.jsonl`, `mcp.json` project-এ থাকে না।
 
 ## Requirements
 
@@ -112,7 +122,11 @@ npm run install-pack -- --yes
 > `~/.config/opencode`। তাই একবার global ইনস্টল করলে **কোনো working
 > directory-তে `.opencode` তৈরি হয় না**; শুধু `.zombiecoder` তৈরি হয়।
 
-প্রয়োজনে project-local ইনস্টল:
+> **`--dir` legacy:** project-local install এখনো `.opencode` ও project-local
+> config/model cache তৈরি করে। পরিষ্কার working directory চাইলে **global**
+> ইনস্টল ব্যবহার করুন; normal path-এ `.zombiecoder`-এ config/models থাকে না।
+
+প্রয়োজনে project-local ইনস্টল (legacy):
 
 ```bash
 npm run install-pack -- --dir /path/to/your/project --yes
@@ -161,14 +175,15 @@ CI বা `--yes`-এ কোনো প্রশ্ন থাকে না; flag 
 2. plugin runtime graph কপি — `plugin.ts`, `roster.ts`, `zombie/*`
 3. `package.json`-এ `@opencode/plugin@^2.0.32` যোগ করে (merge, clobber নয়)
 4. `npm install` চালায়
-5. `zombiecoder/config.json` seed/update করে
-6. MCP URL দিলে probe করে `zombiecoder/mcp.json` লেখে
-7. provider live probe করে deterministic model plan তৈরি করে
+5. global `zombiecoder/config.json` seed/update করে
+6. MCP URL দিলে probe করে global `~/.config/opencode/zombiecoder/mcp.json` লেখে
+7. provider live probe করে global deterministic model plan তৈরি করে
 8. `opencode.json`-এ **provider + models + V2 agents + permissions + MCP** merge করে
-9. ৯টি agent markdown লেখে; পুরনো `kobir.md` ও `agents.kobir` prune করে
-10. **শুধু project-local install-এ** `.zombiecoder/SSOT.md`, `syllabus.md` ও
-    `memory/` seed করে; global install-এ skip — কারণ `.zombiecoder` প্রতি
-    working directory-তে first boot-এ তৈরি হয়
+9. ৯টি agent markdown লেখে (সবগুলো `mode: all`); পুরনো `kobir.md` ও `agents.kobir` prune করে
+10. **শুধু project-local legacy install-এ** `.zombiecoder` seed করে; global
+    install-এ skip — runtime first boot-এ শুধু `SSOT.md`, `syllabus.md`,
+    `memory/`, `.state/` তৈরি করে। project-এ `config.json`, `models.json`,
+    `fingerprint.json`, `footprint.jsonl`, `mcp.json` auto-create হয় না
 11. plugin entrypoint **সবার শেষে** লেখে, যাতে OpenCode কখনো half-finished
     install boot না করে
 
@@ -221,11 +236,11 @@ OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not
     },
     "manu": {
       "description": "Chief Systems Architect — architecture, data flow, agent orchestration, SSOT.",
-      "mode": "subagent",
+      "mode": "all",
       "model": "missionbarisal/llama3-groq-tool-use:8b",
-      "system": "# Manu — The Builder\n\n…shared rules…",
+      "system": "# Manu — The Builder\n\n…shared rules + cross-domain baseline…",
       "permissions": [
-        { "action": "subagent", "resource": "*", "effect": "deny" }
+        { "action": "subagent", "resource": "*", "effect": "allow" }
       ]
     }
   },
@@ -240,6 +255,8 @@ OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not
 - **provider** — live probe pass করলে সেই model; probe fail করলে আগের resolved
   plan অপরিবর্তিত থাকে, আর HTTP error স্পষ্ট দেখানো হয়।
 - **agents** — ৯টি agent-এর description, mode, model, system prompt ও permissions।
+  সবগুলো `mode: all`: dropdown-এ selectable এবং একে অন্যকে `subagent` হিসেবে
+  call করতে পারে। shared persona + cross-domain baseline প্রতিটি prompt-এ যায়।
 - **permissions** — global rules আগে, user-এর নিজের rules পরে; তাই user-এর
   later rule শেষ কথা বলে।
 - **mcp.servers** — শুধু probe-verified server।
@@ -252,26 +269,31 @@ OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not
 
 | ধাপ | ফল |
 | --- | --- |
-| `bootstrap-dirs` | শুধু `.zombiecoder/{memory,agents}`; skills lazy, `.opencode` নয় |
-| `load-config` | shipped default < global `zombiecoder/config.json` < local `.zombiecoder/config.json` |
-| `migrate-legacy-plan` | পুরনো `memory.json` (model plan) → `models.json` |
-| `resolve-models` | কাস্টম provider live probe → না হলে cost 0/0 ফ্রি মডেল (project plan) |
-| `probe-mcp` | MCP URL থাকলে টুলের তালিকা `.zombiecoder/mcp.json`-এ |
-| `write-ssot` | `.zombiecoder/SSOT.md` (live filesystem থেকে) |
-| `ensure-syllabus` | `.zombiecoder/syllabus.md` — নতুন হলে footprint seed; পুরনো হলে একবার upgrade (Footprint যোগ, `kobir`→`zombiecoder`, lessons অপরিবর্তিত) |
-| `agent-folder` / `agent-config` | install root-এ ৯টি markdown + V2 `agents` config |
+| `bootstrap-dirs` | শুধু `.zombiecoder/{memory,.state}`; skills lazy, `.opencode` নয় |
+| `load-config` | shipped default < global `zombiecoder/config.json` < optional manual `.zombiecoder/config.json` (auto-create নয়) |
+| `scan-project` | bounded live filesystem scan (files/dirs/bytes/languages/key files) |
+| `resolve-models` | কাস্টম provider live probe → না হলে cost 0/0 ফ্রি মডেল; plan শুধু memory-তে, project-এ `.zombiecoder/models.json` নয় |
+| `probe-mcp` | MCP URL থাকলে টুলের তালিকা global `zombiecoder/mcp.json`-এ; project-এ নয় |
+| `write-ssot` | `.zombiecoder/SSOT.md` — project scan + agent team/shared persona; global model/MCP config নেই |
+| `ensure-syllabus` | `.zombiecoder/syllabus.md` — নতুন হলে hierarchical footprint seed; পুরনো হলে একবার upgrade (`### Project map` যোগ, `kobir`→`zombiecoder`, lessons অপরিবর্তিত) |
+| `agent-folder` / `agent-config` | install root-এ ৯টি markdown + V2 `agents` config; সব `mode: all` |
 | `agent-bind` | markdown ও config দুই door-এই resolved model + permissions verify |
 | `register-tools` | `zombiecoder` namespace-এ ৬টি টুল |
 | `register-skills` | `.zombiecoder/skills/*.md` থাকলে তবেই register |
-| `hook-*` | context, compaction, model.request, session index, tool footprint |
+| `hook-*` | context, compaction, model.request, session index, tool audit |
 | `refresh` | প্রতি ৫ মিনিটে SSOT rewrite + branded signature |
 
-সবকিছুর durable প্রমাণ থাকে: `.zombiecoder/setup-report.json`।
+সবকিছুর durable প্রমাণ থাকে: `.zombiecoder/.state/setup-report.json`।
+Action audit: `.zombiecoder/.state/audit.jsonl`।
+
+> **Project clean:** global install-এ project-এ `config.json`, `models.json`,
+> `fingerprint.json`, `footprint.jsonl`, `mcp.json` তৈরি হয় না। `project_fingerprint`
+> টুল live scan করে; footprint `syllabus.md`-এর ভিতরে থাকে।
 
 > **Global agent config installer-owned:** global install-এ `<global>/opencode.json`
 > ও `<global>/agents/*.md` installer-এর লেখা। কোনো project-এর provider probe
 > fail করে free-fallback plan বানালেও সেই plan দিয়ে global agent model
-> overwrite হয় না — project plan শুধু `.zombiecoder/models.json`-এ থাকে।
+> overwrite হয় না — project plan শুধু memory/setup-report-এ থাকে।
 
 ### Model routing
 
@@ -286,7 +308,8 @@ OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not
 4. কিছুই না পেলে baseline `opencode/big-pickle`।
 
 Mapping ডিফল্টে **deterministic** (agent id-এর stable hash), যাতে footprint
-reproducible থাকে। চাইলে `.zombiecoder/config.json`-এ `"modelStrategy": "random"`।
+reproducible থাকে। চাইলে optional manual `.zombiecoder/config.json`-এ
+`"modelStrategy": "random"` দিতে পারেন — ফাইলটি auto-create হয় না।
 
 > **Session model আলাদা:** OpenCode একটি session-এর selected model আলাদা রাখে।
 > Agent config-এর `model` নতুন session-এর জন্য default দেয়; চলমান session-এর
@@ -311,10 +334,11 @@ reproducible থাকে। চাইলে `.zombiecoder/config.json`-এ `"mo
   **এবং `archives[]`** — প্রতিটি archive file, sessionID, message count, bytes,
   first/last timestamp।
 - `.zombiecoder/memory/<session>.jsonl` — archive (append-only)।
-- শেষ ১০টি message RAM/context-এ থাকে; বাকিগুলো compaction hook-এ archive-এ যায়।
+- শেষ ৫টি message RAM/context-এ থাকে; বাকিগুলো compaction hook-এ archive-এ যায়।
 - `readIndex()` disk স্ক্যান করে index-এ না থাকা পুরনো `.jsonl`-ও খুঁজে নেয়,
   তাই agent `index.json` দেখলেই সব archive খুঁজে পায়।
-- `.zombiecoder/footprint.jsonl` — প্রতিটি action-এর audit line।
+- `.zombiecoder/.state/audit.jsonl` — internal action audit line (footprint নয়;
+  user-facing ফাইল নয়)।
 
 ### Tools
 
@@ -322,11 +346,11 @@ reproducible থাকে। চাইলে `.zombiecoder/config.json`-এ `"mo
 
 | Tool | কাজ |
 | --- | --- |
-| `get_working_directory` | working directory + `.zombiecoder` layout |
-| `read_ssot` | SSOT markdown |
-| `read_syllabus` | syllabus markdown |
-| `append_syllabus` | append-only lesson যোগ |
-| `project_fingerprint` | machine-readable fingerprint |
+| `get_working_directory` | working directory + `.zombiecoder` layout (SSOT, syllabus, memory) |
+| `read_ssot` | SSOT markdown (project scan + shared team/persona) |
+| `read_syllabus` | syllabus markdown (hierarchical footprint + lessons) |
+| `append_syllabus` | append-only lesson যোগ; audit `.state/audit.jsonl`-এ |
+| `project_fingerprint` | live filesystem scan; কোনো fingerprint file লেখে না |
 | `memory_archive` | `index.json`-এর sessionID নিয়ে archive rows পড়া |
 
 ### Skills — lazy, দুই স্তর
@@ -359,26 +383,28 @@ reproducible থাকে। চাইলে `.zombiecoder/config.json`-এ `"mo
 
 ```text
 <project>/
-├── opencode.json                 # optional project override (only if --dir install)
 └── .zombiecoder/
-    ├── config.json
-    ├── SSOT.md
-    ├── syllabus.md
-    ├── fingerprint.json
-    ├── models.json
-    ├── mcp.json
-    ├── footprint.jsonl
-    ├── setup-report.json
+    ├── SSOT.md                   # project scan + agent team/shared persona
+    ├── syllabus.md               # hierarchical footprint + lessons
     ├── memory/
     │   ├── index.json            # sessions + archives[]
-    │   └── <session>.jsonl
+    │   └── <session>.jsonl       # conversation archive
+    ├── .state/                   # internal: setup-report.json, audit.jsonl
     ├── skills/                   # only if a skill is added
-    └── agents/<id>/metadata.json
+    └── config.json               # optional manual override; never auto-created
 ```
 
 **No `.opencode` in the working directory** when the plugin is installed globally.
+**No** `fingerprint.json`, `models.json`, `footprint.jsonl`, `mcp.json`,
+`setup-report.json` at the project root; those belong to the global install or
+the internal `.state/` directory.
 
-## `.zombiecoder/config.json`
+## Optional project config override
+
+Global install-এর আসল config: `~/.config/opencode/zombiecoder/config.json`
+(Windows: `%USERPROFILE%\.config\opencode\zombiecoder\config.json`)।
+প্রয়োজন হলে একটি project manually `.zombiecoder/config.json` বানিয়ে global
+config override করতে পারে; প্লাগইন সেটি **auto-create করে না**।
 
 ```json
 {
@@ -396,8 +422,7 @@ reproducible থাকে। চাইলে `.zombiecoder/config.json`-এ `"mo
 - `mcpUrl: ""` → MCP নেই।
 - `modelStrategy`: `auto` (deterministic, default), `random`, `custom`, `free`,
   `baseline`।
-- Global install-এ `zombiecoder/config.json` baseline; প্রতিটি project-এর
-  `.zombiecoder/config.json` সেটি override করতে পারে।
+- Global install-এ `zombiecoder/config.json` baseline।
 
 ## Agent roster
 
@@ -415,6 +440,21 @@ reproducible থাকে। চাইলে `.zombiecoder/config.json`-এ `"mo
 
 `zombiecoder` হলো আগের `kobir`-এর নতুন নাম। পুরনো `kobir.md` ও `agents.kobir`
 ইনস্টলার/রানটাইম দুই জায়গা থেকেই মুছে যায়।
+
+সব ৯টি agent **`mode: all`** — dropdown থেকে ইচ্ছেমতো select করা যায়, এবং
+প্রত্যেকে `subagent` permission-এ অন্য agent-কে call করতে পারে। প্রতিটি agent
+একই **shared rules** ও **cross-domain baseline** পায়:
+
+- শুরুতে “ভাইয়া”; chat বাংলায়, code/shortcut ইংরেজিতে।
+- মিথ্যে নয়; ভুল স্বীকার; না জানলে “জানি না”।
+- সময় মূল্য: প্রথম pass-এ module map, পরের pass-এ নির্দিষ্ট module; shortest
+  evidence-backed উত্তর।
+- Filer না পড়ে মনে রাখার ভরসা নয়; SSOT/syllabus আগে পড়ো; footprint syllabus-এ
+  লিখো, আলাদা ফাইল নয়।
+- Provider-এ শুধু দরকারি context; বড় window দাবি নয়; dependency কমাও।
+- UI/UX, AI/ML, MCP, SAP, LSP, Linux/POSIX, Windows Win32 — root level চিন্তা;
+  regex/parser/code-generation/CLI-এর shortcut জানো।
+- দরকার হলে skill নিজে খোঁজো/ব্যবহার করো; স্বাধীনভাবে কাজ করো।
 
 ## Verification checklist
 
@@ -439,21 +479,44 @@ cd /path/to/project
 test ! -d .opencode && echo "no .opencode (correct)"
 find .zombiecoder -maxdepth 2 | sort
 
-# 4. setup report
+# 4. project clean: no config/models/fingerprint/footprint/mcp, internal state only
+cd /path/to/project
+for f in config.json models.json fingerprint.json footprint.jsonl mcp.json; do
+  test ! -e ".zombiecoder/$f" && echo "clean: no .zombiecoder/$f"
+done
+test -f .zombiecoder/.state/setup-report.json && echo "setup report in .state (correct)"
+test -f .zombiecoder/.state/audit.jsonl && echo "audit in .state (correct)"
+
+# 5. setup report (internal)
 python3 - <<'PY'
 import json
-d=json.load(open(".zombiecoder/setup-report.json"))
+d=json.load(open(".zombiecoder/.state/setup-report.json"))
 print(d["outputs"]["install"])
 print(d["outputs"].get("bound"))
 print([(s["step"], s["ok"]) for s in d["steps"]])
 PY
 
-# 5. syllabus upgrade: footprint present, kobir gone, lessons intact
+# 6. syllabus: hierarchical footprint present, kobir gone, lessons intact
 grep -q '^## 2\. Footprint' .zombiecoder/syllabus.md && echo "footprint present"
+grep -q '^### Project map' .zombiecoder/syllabus.md && echo "hierarchical map present"
 ! grep -q '^- `kobir`$' .zombiecoder/syllabus.md && echo "kobir renamed"
 grep -n '^### ' .zombiecoder/syllabus.md || echo "no lessons yet (fine)"
 
-# 6. memory index archives
+# 7. SSOT carries team/persona, not global model/MCP config
+grep -q '^## 7\. Agent team' .zombiecoder/SSOT.md && echo "team/persona present"
+! grep -q '^## .*Model plan' .zombiecoder/SSOT.md && echo "no model plan in SSOT"
+
+# 8. every agent is mode: all and may delegate
+python3 - <<'PY'
+import json
+d=json.load(open("/home/$USER/.config/opencode/opencode.json"))
+agents=d["agents"]
+assert all(a.get("mode")=="all" for a in agents.values()), agents
+assert all(any(r.get("action")=="subagent" and r.get("effect")=="allow" for r in a.get("permissions",[])) for a in agents.values())
+print("all agents mode:all + subagent allow")
+PY
+
+# 9. memory index archives
 python3 - <<'PY'
 import json
 d=json.load(open(".zombiecoder/memory/index.json"))
@@ -470,11 +533,13 @@ setup report + tool list = `END_TO_END_TESTED`, LLM rule-following = `NOT_TESTED
 | লক্ষণ | কারণ / সমাধান |
 | --- | --- |
 | `Location plugins did not finish activating` | global `~/.config/opencode`-এ `npm install` হয়নি। `npm run install-pack -- --yes` আবার চালান। |
-| agent-এ কাস্টম মডেল নেই | `opencode.json`-এ provider আছে কি দেখুন; `.zombiecoder/setup-report.json`-এর `resolve-models` ও `agent-bind`। |
+| agent-এ কাস্টম মডেল নেই | `opencode.json`-এ provider আছে কি দেখুন; `.zombiecoder/.state/setup-report.json`-এর `resolve-models` ও `agent-bind`। |
 | global agent model free হয়ে গেছে | একটি project-এর free-fallback plan global config overwrite করছিল। এই fix installer-owned global agents রাখে; `npm run install-pack -- --yes` আবার চালান। |
-| পুরনো syllabus-এ Footprint নেই | runtime `ensure-syllabus`-এ একবার upgrade করে; `setup-report.json`-এর step দেখুন। |
-| MCP register হয়নি | MCP URL probe fail করেছে; `.zombiecoder/mcp.json`-এর `error` দেখুন। |
-| কিছু step fail | `setup-report.json`-এ প্রতিটি step-এর `ok`/`error`; কনসোলেও `[zombiecoder] step failed`। |
+| agent dropdown-এ নেই / অন্য agent-কে call করতে পারে না | সব agent `mode: all` ও `subagent: allow` হওয়া উচিত; global `opencode.json` check করে `npm run install-pack -- --yes` আবার চালান। |
+| পুরনো syllabus-এ hierarchical footprint নেই | runtime `ensure-syllabus`-এ একবার upgrade করে (`### Project map` যোগ); `.zombiecoder/.state/setup-report.json`-এর step দেখুন। |
+| MCP register হয়নি | MCP URL probe fail করেছে; global `~/.config/opencode/zombiecoder/mcp.json`-এর `error` দেখুন। |
+| কিছু step fail | `.zombiecoder/.state/setup-report.json`-এ প্রতিটি step-এর `ok`/`error`; কনসোলেও `[zombiecoder] step failed`। |
+| project-এ পুরনো config/models/fingerprint দেখা যাচ্ছে | পুরনো version-এর ফাইল। backup নিয়ে `.zombiecoder/config.json`, `models.json`, `fingerprint.json`, `footprint.jsonl`, `mcp.json`, `setup-report.json`, `agents/` সরিয়ে দিন; নতুন setup আর তৈরি করবে না। |
 | SSOT stale | refresh ৫ মিনিট; `zombiecoder.get_working_directory` tool দিয়ে manual check। |
 | `.opencode` এখনো আছে | পুরনো project-local ইনস্টল; global ব্যবহারে working directory থেকে `.opencode` মুছে ফেলুন। |
 | পুরনো session ভিন্ন model ব্যবহার করছে | session-এর selected model আলাদা; নতুন session নিন বা model picker থেকে বদলান। |

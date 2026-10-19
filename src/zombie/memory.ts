@@ -13,7 +13,7 @@ import * as path from "node:path";
 import { appendJsonl, readJson, readJsonl, readText, writeJson } from "./io.ts";
 import { memoryArchiveFile, memoryDir, memoryIndexFile, safe } from "./paths.ts";
 
-export const KEEP_RECENT = 10;
+export const KEEP_RECENT = 5;
 export const INDEX_STORAGE_PREFIX = "memory/index/";
 
 export type StorageLike = {
@@ -166,7 +166,8 @@ export async function readRecent(storage: StorageLike, sessionID: string): Promi
   if (!Array.isArray(arr)) return [];
   return arr
     .map((r: any) => (typeof r === "string" ? { text: r, at: "" } : r))
-    .filter((r: MemoryMessage) => typeof r?.text === "string" && r.text.length > 0);
+    .filter((r: MemoryMessage) => typeof r?.text === "string" && r.text.length > 0)
+    .slice(-KEEP_RECENT);
 }
 
 export async function keepRecent(

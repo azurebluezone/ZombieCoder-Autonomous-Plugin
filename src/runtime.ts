@@ -56,7 +56,7 @@ export function renderRuntime(): string {
   out.push("| ৩ | `tools/list` |");
   out.push("| ৪ | `tools/call` |");
   out.push("");
-  out.push("modern (`2025-03-26`) ও legacy (`2024-11-05`) — দুই protocol era-তেই `initialize` probe হয়। `tools/list` পর্যন্ত read-only; `tools/call` শুধু ব্যবহারকারী/এজেন্ট নির্দিষ্ট tool দিলে, কারণ tool-এর side effect থাকতে পারে। ফলাফল `.zombiecoder/mcp.json`-এ; ব্যর্থ হলে `NOT_CONFIGURED`/`NOT_TESTED`, কখনো \"সফল\" নয়।");
+  out.push("modern (`2025-03-26`) ও legacy (`2024-11-05`) — দুই protocol era-তেই `initialize` probe হয়। `tools/list` পর্যন্ত read-only; `tools/call` শুধু ব্যবহারকারী/এজেন্ট নির্দিষ্ট tool দিলে, কারণ tool-এর side effect থাকতে পারে। ফলাফল গ্লোবাল `~/.config/opencode/zombiecoder/mcp.json`-এ; প্রকল্পে আলাদা mcp ফাইল তৈরি হয় না। ব্যর্থ হলে `NOT_CONFIGURED`/`NOT_TESTED`, কখনো \"সফল\" নয়।");
   out.push("");
   out.push("## ২. ছয়টি লুপ");
   out.push("");
@@ -77,7 +77,7 @@ export function renderRuntime(): string {
   out.push("৩) না হলে:  /api/model → cost[0].input == 0 && output == 0  (বর্তমানে ১০টি)");
   out.push("৪) ম্যাপিং:  agent id → stable hash → নির্দিষ্ট ফ্রি মডেল");
   out.push("৫) ব্যর্থ হলে: rotation → পরের ফ্রি মডেল; কখনো hard-fail নয়");
-  out.push("৬) ফলাফল cache:  .zombiecoder/models.json (+ .zombiecoder/config.json-এ strategy)");
+  out.push("৬) ফলাফল cache: গ্লোবাল `~/.config/opencode/zombiecoder/models.json`; প্রকল্পে কোনো models/config ফাইল auto-create হয় না।");
   out.push(F);
   out.push("");
   out.push("ডিফল্ট deterministic — random হলে একই agent প্রতিবার ভিন্ন মডেলে চলে এবং \"কেন এই উত্তর এল\" ফেরানো যায় না।");

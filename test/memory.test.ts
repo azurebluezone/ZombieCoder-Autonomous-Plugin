@@ -15,30 +15,30 @@ function fakeStorage() {
   };
 }
 
-test("keepRecent keeps the latest 10 in RAM and archives the rest", async () => {
+test("keepRecent keeps the latest KEEP_RECENT in RAM and archives the rest", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-memory-"));
   const storage = fakeStorage();
   const messages = Array.from({ length: 14 }, (_, i) => ({ role: "user", text: `message ${i + 1}` }));
 
   const result = await keepRecent(storage, root, "ses_test", messages);
   assert.equal(result.kept, KEEP_RECENT);
-  assert.equal(result.archived, 4);
+  assert.equal(result.archived, 14 - KEEP_RECENT);
 
   const recent = await readRecent(storage, "ses_test");
   assert.equal(recent.length, KEEP_RECENT);
-  assert.equal(recent[0].text, "message 5");
+  assert.equal(recent[0].text, `message ${14 - KEEP_RECENT + 1}`);
   assert.equal(recent.at(-1)?.text, "message 14");
 
   const archived = readArchive(root, "ses_test");
   assert.equal(archived.length, 1);
-  assert.equal(archived[0].archived.length, 4);
+  assert.equal(archived[0].archived.length, 14 - KEEP_RECENT);
 
   const index = readIndex(root);
   assert.equal(index.sessions.ses_test.kept, KEEP_RECENT);
-  assert.equal(index.sessions.ses_test.archivedTotal, 4);
+  assert.equal(index.sessions.ses_test.archivedTotal, 14 - KEEP_RECENT);
   assert.equal(index.archives.length, 1);
   assert.equal(index.archives[0].sessionID, "ses_test");
-  assert.equal(index.archives[0].archived, 4);
+  assert.equal(index.archives[0].archived, 14 - KEEP_RECENT);
   assert.ok(index.archives[0].bytes > 0);
   assert.match(index.archives[0].file, /ses_test\.jsonl$/);
 });

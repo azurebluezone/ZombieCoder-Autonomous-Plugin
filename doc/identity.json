@@ -16,12 +16,12 @@
       },
       "license": "Proprietary - Local Freedom Protocol"
     },
-    "generated_at": "2026-10-19T15:04:02.267Z",
+    "generated_at": "2026-10-19T16:26:49.680Z",
     "manifest": {
       "read_only": true,
       "checksum_algorithm": "sha256",
       "checksum_scope": "canonical JSON of this object, checksum field removed",
-      "checksum": "7d4376936d8a4634e523d7a51c6101e90de2fc97851a84f04f82abd7ffc71462"
+      "checksum": "09a679cfc8e0083175e7ade0fd9b4226bb1a992705e5a831793c7ba48696bd83"
     }
   }
 }

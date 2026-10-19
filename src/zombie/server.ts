@@ -8,16 +8,11 @@
 // mutates OpenCode's own state. The single exception is `syllabus_append`, which is
 // append-only by construction.
 
-import { fingerprintFile, modelPlanFile, ssotFile, syllabusFile } from "./paths.ts";
-import {
-  appendJsonl,
-  readJson,
-  readJsonl,
-  readText,
-} from "./io.ts";
+import { auditFile, memoryDir, ssotFile, syllabusFile } from "./paths.ts";
+import { appendJsonl, readJsonl, readText } from "./io.ts";
 import { readArchive, readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
 import { appendSyllabus, readSyllabus } from "./syllabus.ts";
-import { footprintFile } from "./paths.ts";
+import { scanProject } from "./scan.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
 import { ROSTER } from "../roster.ts";
 
@@ -89,7 +84,7 @@ export function rpcDefinition() {
         input: obj({}),
         output: obj({ index: { type: "object" } }),
       },
-      footprint: {
+      audit: {
         input: obj({ limit: { type: "number" } }),
         output: obj({ entries: { type: "array" } }),
       },
@@ -141,7 +136,7 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
 
       syllabus_append: async (input: { topic: string; summary: string }) => {
         if (!input?.topic || !input?.summary) throw new Error("topic and summary are required");
-        const result = appendSyllabus(deps.projectRoot(), input.topic, input.summary, footprintFile(deps.projectRoot()));
+        const result = appendSyllabus(deps.projectRoot(), input.topic, input.summary, auditFile(deps.projectRoot()));
         return { file: result.file, bytes: result.bytes };
       },
 
@@ -155,16 +150,16 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
 
       memory_index: async () => ({ index: readIndex(deps.projectRoot()) }),
 
-      footprint: async (input: { limit?: number }) => ({
-        entries: readJsonl(footprintFile(deps.projectRoot()), input?.limit ?? 50),
+      audit: async (input: { limit?: number }) => ({
+        entries: readJsonl(auditFile(deps.projectRoot()), input?.limit ?? 50),
       }),
 
       models: async () => ({
-        plan: deps.modelPlan() ?? readJson(modelPlanFile(deps.projectRoot())) ?? {},
+        plan: deps.modelPlan() ?? {},
       }),
 
       fingerprint: async () => ({
-        fingerprint: readJson(fingerprintFile(deps.projectRoot())) ?? {},
+        fingerprint: scanProject(deps.projectRoot()),
       }),
 
       agents: async () =>
@@ -208,6 +203,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         zombiecoder: deps.projectRoot() + "/.zombiecoder",
         ssot: ssotFile(deps.projectRoot()),
         syllabus: syllabusFile(deps.projectRoot()),
+        memory: memoryDir(deps.projectRoot()),
       }),
     },
     {
@@ -233,14 +229,14 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       },
       run: (input: any) => {
         if (!input?.topic || !input?.summary) throw new Error("topic and summary are required");
-        return appendSyllabus(deps.projectRoot(), input.topic, input.summary, footprintFile(deps.projectRoot()));
+        return appendSyllabus(deps.projectRoot(), input.topic, input.summary, auditFile(deps.projectRoot()));
       },
     },
     {
       name: "project_fingerprint",
-      description: "Return the machine-readable project fingerprint produced by the last scan.",
+      description: "Scan the project live and return its machine-readable fingerprint. No fingerprint file is created.",
       input: empty,
-      run: () => readJson(fingerprintFile(deps.projectRoot())) ?? { note: "no fingerprint yet" },
+      run: () => scanProject(deps.projectRoot()),
     },
     {
       name: "memory_archive",
@@ -327,7 +323,8 @@ export function registerTools(tool: ToolLike | undefined, deps: SurfaceDeps): To
   return { registered: [], applied, release: kept.release };
 }
 
-// Footprint append is the one thing every surface shares.
-export function footprint(projectRoot: string, agentID: string, record: Record<string, unknown>): void {
-  appendJsonl(footprintFile(projectRoot), { ts: new Date().toISOString(), agent: agentID, ...record });
+// Audit append is the one thing every surface shares. It lives under .state so
+// the project root stays focused on SSOT, syllabus and memory.
+export function audit(projectRoot: string, agentID: string, record: Record<string, unknown>): void {
+  appendJsonl(auditFile(projectRoot), { ts: new Date().toISOString(), agent: agentID, ...record });
 }

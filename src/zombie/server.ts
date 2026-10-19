@@ -1,0 +1,290 @@
+// Spec §6 + §7 — the in-plugin control surface.
+//
+// Two documented OpenCode doors are used, nothing invented:
+//   ctx.rpc.register  -> reachable over HTTP at POST /api/rpc/{rpcID}/{method}
+//   ctx.tool.transform -> tools the agents themselves can call
+//
+// Every handler is pure: it reads the working directory, returns data, and never
+// mutates OpenCode's own state. The single exception is `syllabus_append`, which is
+// append-only by construction.
+
+import { fingerprintFile, modelPlanFile, ssotFile, syllabusFile } from "./paths.ts";
+import {
+  appendJsonl,
+  readJson,
+  readJsonl,
+  readText,
+} from "./io.ts";
+import { readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
+import { appendSyllabus, readSyllabus } from "./syllabus.ts";
+import { footprintFile } from "./paths.ts";
+import { keepTransform, withTimeout, type TransformDoor } from "./transform.ts";
+import { ROSTER } from "../roster.ts";
+
+export const RPC_ID = "zombiecoder";
+export const TOOL_NAMESPACE = { name: "zombiecoder", description: "ZombieCoder project control surface" };
+const TRANSFORM_WAIT_MS = 6000;
+
+export type RpcLike = {
+  register: (definition: any, handlers: any) => Promise<{ dispose: () => Promise<void>; events?: { emit: (...a: any[]) => Promise<void> } }>;
+};
+
+export type ToolLike = {
+  transform?: (cb: (editor: any) => void) => Promise<{ dispose: () => Promise<void> }>;
+  reload?: () => Promise<void>;
+};
+
+export type SurfaceDeps = {
+  projectRoot: () => string;
+  storage: StorageLike;
+  refreshSsot: () => { sha256: string; file: string; bytes: number };
+  modelPlan: () => unknown;
+};
+
+const obj = (properties: Record<string, unknown>) => ({
+  type: "object" as const,
+  properties,
+  additionalProperties: false,
+});
+
+// `events` is required by Rpc.Definition, so it is declared empty rather than omitted.
+export function rpcDefinition() {
+  return {
+    id: RPC_ID,
+    methods: {
+      working_directory: {
+        input: obj({}),
+        output: obj({ root: { type: "string" } }),
+      },
+      status: {
+        input: obj({}),
+        output: obj({
+          version: { type: "string" },
+          root: { type: "string" },
+          agents: { type: "number" },
+          ssotFile: { type: "string" },
+          syllabusFile: { type: "string" },
+        }),
+      },
+      ssot: {
+        input: obj({}),
+        output: obj({ file: { type: "string" }, markdown: { type: "string" } }),
+      },
+      ssot_refresh: {
+        input: obj({}),
+        output: obj({ file: { type: "string" }, sha256: { type: "string" }, bytes: { type: "number" } }),
+      },
+      syllabus: {
+        input: obj({}),
+        output: obj({ file: { type: "string" }, markdown: { type: "string" } }),
+      },
+      syllabus_append: {
+        input: obj({ topic: { type: "string" }, summary: { type: "string" } }),
+        output: obj({ file: { type: "string" }, bytes: { type: "number" } }),
+      },
+      memory: {
+        input: obj({ sessionID: { type: "string" } }),
+        output: obj({ recent: { type: "array" }, summary: { type: "string" } }),
+      },
+      memory_index: {
+        input: obj({}),
+        output: obj({ index: { type: "object" } }),
+      },
+      footprint: {
+        input: obj({ limit: { type: "number" } }),
+        output: obj({ entries: { type: "array" } }),
+      },
+      models: {
+        input: obj({}),
+        output: obj({ plan: { type: "object" } }),
+      },
+      fingerprint: {
+        input: obj({}),
+        output: obj({ fingerprint: { type: "object" } }),
+      },
+      agents: {
+        input: obj({}),
+        output: obj({ agents: { type: "array" } }),
+      },
+    },
+    events: {},
+  };
+}
+
+export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): Promise<{ ok: boolean; error?: string }> {
+  if (!rpc || typeof rpc.register !== "function") return { ok: false, error: "ctx.rpc not available" };
+  try {
+    const handlers = {
+      working_directory: async () => ({ root: deps.projectRoot() }),
+
+      status: async () => ({
+        version: "0.1.0",
+        root: deps.projectRoot(),
+        agents: ROSTER.length,
+        ssotFile: ssotFile(deps.projectRoot()),
+        syllabusFile: syllabusFile(deps.projectRoot()),
+      }),
+
+      ssot: async () => ({
+        file: ssotFile(deps.projectRoot()),
+        markdown: readText(ssotFile(deps.projectRoot())) ?? "(SSOT not generated yet)",
+      }),
+
+      ssot_refresh: async () => {
+        const written = deps.refreshSsot();
+        return { file: written.file, sha256: written.sha256, bytes: written.bytes };
+      },
+
+      syllabus: async () => ({
+        file: syllabusFile(deps.projectRoot()),
+        markdown: readSyllabus(deps.projectRoot()) ?? "(syllabus not seeded yet)",
+      }),
+
+      syllabus_append: async (input: { topic: string; summary: string }) => {
+        if (!input?.topic || !input?.summary) throw new Error("topic and summary are required");
+        const result = appendSyllabus(deps.projectRoot(), input.topic, input.summary, footprintFile(deps.projectRoot()));
+        return { file: result.file, bytes: result.bytes };
+      },
+
+      memory: async (input: { sessionID: string }) => {
+        const sessionID = input?.sessionID ?? "unknown";
+        return {
+          recent: await readRecent(deps.storage, sessionID),
+          summary: archiveSummary(deps.projectRoot(), sessionID),
+        };
+      },
+
+      memory_index: async () => ({ index: readIndex(deps.projectRoot()) }),
+
+      footprint: async (input: { limit?: number }) => ({
+        entries: readJsonl(footprintFile(deps.projectRoot()), input?.limit ?? 50),
+      }),
+
+      models: async () => ({
+        plan: deps.modelPlan() ?? readJson(modelPlanFile(deps.projectRoot())) ?? {},
+      }),
+
+      fingerprint: async () => ({
+        fingerprint: readJson(fingerprintFile(deps.projectRoot())) ?? {},
+      }),
+
+      agents: async () =>
+        ROSTER.map((a) => ({
+          id: a.id,
+          name: a.name,
+          callSign: a.callSign,
+          role: a.role,
+          mode: a.mode,
+          model: a.model,
+        })),
+    };
+
+    const registration = await rpc.register(rpcDefinition(), handlers);
+    // Keep the registration for the lifetime of the plugin; nothing to dispose eagerly.
+    void registration;
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, error: String(error?.message ?? error) };
+  }
+}
+
+// ---- agent-callable tools (spec names `get_working_directory` explicitly) ----
+
+type ToolSpec = {
+  name: string;
+  description: string;
+  input: Record<string, unknown>;
+  run: (input: any) => any;
+};
+
+export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
+  const empty = { type: "object" as const, properties: {}, additionalProperties: false };
+  return [
+    {
+      name: "get_working_directory",
+      description: "Return the working directory the ZombieCoder plugin is bound to, plus the .zombiecoder layout.",
+      input: empty,
+      run: () => ({
+        root: deps.projectRoot(),
+        zombiecoder: deps.projectRoot() + "/.zombiecoder",
+        ssot: ssotFile(deps.projectRoot()),
+        syllabus: syllabusFile(deps.projectRoot()),
+      }),
+    },
+    {
+      name: "read_ssot",
+      description: "Read the generated Single Source of Truth for this project.",
+      input: empty,
+      run: () => ({ file: ssotFile(deps.projectRoot()), markdown: readText(ssotFile(deps.projectRoot())) ?? "(not generated)" }),
+    },
+    {
+      name: "read_syllabus",
+      description: "Read the append-only syllabus for this project.",
+      input: empty,
+      run: () => ({ file: syllabusFile(deps.projectRoot()), markdown: readSyllabus(deps.projectRoot()) ?? "(not seeded)" }),
+    },
+    {
+      name: "append_syllabus",
+      description: "Append a lesson to the syllabus. Append-only: existing content is never modified.",
+      input: {
+        type: "object" as const,
+        properties: { topic: { type: "string" }, summary: { type: "string" } },
+        required: ["topic", "summary"],
+        additionalProperties: false,
+      },
+      run: (input: any) => {
+        if (!input?.topic || !input?.summary) throw new Error("topic and summary are required");
+        return appendSyllabus(deps.projectRoot(), input.topic, input.summary, footprintFile(deps.projectRoot()));
+      },
+    },
+    {
+      name: "project_fingerprint",
+      description: "Return the machine-readable project fingerprint produced by the last scan.",
+      input: empty,
+      run: () => readJson(fingerprintFile(deps.projectRoot())) ?? { note: "no fingerprint yet" },
+    },
+  ];
+}
+
+export async function registerTools(
+  tool: ToolLike | undefined,
+  deps: SurfaceDeps,
+): Promise<{ registered: string[]; error?: string; release?: () => Promise<void> }> {
+  if (!tool || typeof tool.transform !== "function") { 
+    return { registered: [], error: "ctx.tool not available" };
+  }
+  const specs = toolSpecs(deps);
+  const kept = keepTransform<any, string[]>(tool as TransformDoor<any>, (editor: any) => {
+    const added: string[] = [];
+    editor?.namespace?.(TOOL_NAMESPACE);
+    for (const spec of specs) {
+      editor.add({
+        name: spec.name,
+        description: spec.description,
+        input: spec.input,
+        options: { namespace: TOOL_NAMESPACE.name },
+        execute: async (input: any) => ({
+          output: spec.run(input),
+          metadata: { source: "zombiecoder", tool: spec.name },
+        }),
+      });
+      added.push(spec.name);
+    }
+    return added;
+  });
+  const registered = await withTimeout(kept.first, TRANSFORM_WAIT_MS, null);
+  if (registered === null) {
+    return {
+      registered: [],
+      error: kept.error() ?? "tool transform callback did not fire",
+      release: kept.release,
+    };
+  }
+  await tool.reload?.();
+  return { registered, error: kept.error(), release: kept.release };
+}
+
+// Footprint append is the one thing every surface shares.
+export function footprint(projectRoot: string, agentID: string, record: Record<string, unknown>): void {
+  appendJsonl(footprintFile(projectRoot), { ts: new Date().toISOString(), agent: agentID, ...record });
+}

@@ -1,0 +1,28 @@
+{
+  "name": "zombiecoder-opencode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ZombieCoder agent pack for OpenCode: emits the agent folder, binds each agent under fixed rules, and gives every agent its own session, metadata and footprint.",
+  "exports": {
+    ".": "./src/plugin.ts"
+  },
+  "bin": {
+    "zombiecoder": "./bin/install.mjs"
+  },
+  "scripts": {
+    "install-pack": "node --experimental-strip-types bin/install.mjs",
+    "generate": "node --experimental-strip-types src/generate.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.32"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

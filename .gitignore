@@ -1,0 +1,7 @@
+node_modules/
+.opencode/
+.zombiecoder/
+.backups/
+coverage/
+*.log
+.DS_Store

@@ -15,7 +15,7 @@ import {
   readJsonl,
   readText,
 } from "./io.ts";
-import { readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
+import { readArchive, readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
 import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { footprintFile } from "./paths.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
@@ -241,6 +241,24 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       description: "Return the machine-readable project fingerprint produced by the last scan.",
       input: empty,
       run: () => readJson(fingerprintFile(deps.projectRoot())) ?? { note: "no fingerprint yet" },
+    },
+    {
+      name: "memory_archive",
+      description:
+        "Read archived messages for a session. Read memory/index.json first to see every archive; this tool returns the actual rows.",
+      input: {
+        type: "object" as const,
+        properties: {
+          sessionID: { type: "string" },
+          limit: { type: "number" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      run: (input: any) => ({
+        sessionID: input?.sessionID,
+        entries: readArchive(deps.projectRoot(), String(input?.sessionID ?? ""), input?.limit ?? 50),
+      }),
     },
   ];
 }

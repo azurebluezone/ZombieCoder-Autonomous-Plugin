@@ -36,6 +36,23 @@ test("keepRecent keeps the latest 10 in RAM and archives the rest", async () => 
   const index = readIndex(root);
   assert.equal(index.sessions.ses_test.kept, KEEP_RECENT);
   assert.equal(index.sessions.ses_test.archivedTotal, 4);
+  assert.equal(index.archives.length, 1);
+  assert.equal(index.archives[0].sessionID, "ses_test");
+  assert.equal(index.archives[0].archived, 4);
+  assert.ok(index.archives[0].bytes > 0);
+  assert.match(index.archives[0].file, /ses_test\.jsonl$/);
+});
+
+test("readIndex discovers an archive file that was written before the index existed", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-archive-"));
+  const dir = path.join(root, ".zombiecoder", "memory");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "ses_legacy.jsonl"), JSON.stringify({ archived: [{ text: "old" }] }) + "\n");
+
+  const index = readIndex(root);
+  const found = index.archives.find((a) => a.sessionID === "ses_legacy");
+  assert.ok(found, "legacy archive missing from index");
+  assert.ok(found.bytes > 0);
 });
 
 test("touchIndex merges patches without dropping previous fields", () => {

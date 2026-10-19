@@ -100,7 +100,7 @@ const roles: Role[] = [
   },
   {
     n: "৯",
-    name: "Kobir",
+    name: "ZombieCoder",
     role: "Chief Arbiter",
     sign: "The Chair",
     mission: "বিশেষজ্ঞদের ফল মিলিয়ে দ্বন্দ্ব ভাঙা, SSOT lock করা, চূড়ান্ত রায় দেওয়া এবং release gate চালানো।",
@@ -111,17 +111,17 @@ const roles: Role[] = [
   },
 ];
 
-// Decision Rule: Kobir = priority/decision gate; Majnu = evidence gate.
+// Decision Rule: ZombieCoder = priority/decision gate; Majnu = evidence gate.
 const gateNote = [
   "**দুই গেট, দুই কাজ — গুলিয়ে ফেলা যাবে না:**",
   "",
   "| গেট | কে | প্রশ্ন | উত্তর \"না\" হলে |",
   "|---|---|---|---|",
   "| Evidence Gate | Majnu | প্রমাণ আছে কি? | Approved না |",
-  "| Decision Gate | Kobir | এখন কোনটা আগে, কার জন্য? | সিদ্ধান্ত আটকে থাকে |",
+  "| Decision Gate | ZombieCoder | এখন কোনটা আগে, কার জন্য? | সিদ্ধান্ত আটকে থাকে |",
   "",
-  "Majnu প্রমাণ ছাড়া কিছু ছাড়ে না; Kobir প্রমাণ থাকা সত্ত্বেও অগ্রাধিকার ঠিক করে।",
-  "আগের খসড়ায় `Aggregator` শুধু ছবির বাক্স ছিল, কোনো persona ছিল না — সেটাই Kobir এখন পূরণ করে।",
+  "Majnu প্রমাণ ছাড়া কিছু ছাড়ে না; ZombieCoder প্রমাণ থাকা সত্ত্বেও অগ্রাধিকার ঠিক করে।",
+  "আগের খসড়ায় `Aggregator` শুধু ছবির বাক্স ছিল, কোনো persona ছিল না — সেটাই ZombieCoder এখন পূরণ করে।",
 ].join("\n");
 
 export function renderAgents(): string {
@@ -200,11 +200,11 @@ export function renderAgents(): string {
   out.push("                                │");
   out.push("                           Aggregator");
   out.push("                                │");
-  out.push("                             Kobir  ─────────►  Final Answer");
+  out.push("                             ZombieCoder  ─────────►  Final Answer");
   out.push("                        (Chief Arbiter)");
   out.push(F);
   out.push("");
-  out.push("প্রতিটি এজেন্ট স্বাধীনভাবে কাজ করে, তারপর Aggregator ফল সংগ্রহ করে, Kobir দ্বন্দ্ব ভাঙে ও চূড়ান্ত রায় দেয়।");
+  out.push("প্রতিটি এজেন্ট স্বাধীনভাবে কাজ করে, তারপর Aggregator ফল সংগ্রহ করে, ZombieCoder দ্বন্দ্ব ভাঙে ও চূড়ান্ত রায় দেয়।");
   out.push("বাস্তবতা: orchestration এখনো কেবল নকশা। প্রকৃত সমান্তরাল লঞ্চ ও merge না হওয়া পর্যন্ত এটি `DESIGN_ONLY_NOT_IMPLEMENTED`।");
   out.push("");
   out.push("## ৬. Policies");

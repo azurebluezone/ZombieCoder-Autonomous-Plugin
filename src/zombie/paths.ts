@@ -1,11 +1,13 @@
 // Spec §3 — working directory layout.
 //
-// Two roots, deliberately separate:
-//   <project>/.zombiecoder  -> ours        (SSOT, syllabus, memory, footprint, agent store)
-//   <project>/.opencode     -> OpenCode's  (agents/*.md, plugins/, skills/) — we only fill it
+//   <project>/.zombiecoder  -> ours  (SSOT, syllabus, memory, footprint, agent store)
 //
-// We never move OpenCode's files into ours or the other way round. The two sides
-// meet at the path join, nothing more.
+// OpenCode's own home is NOT created inside every working directory. A global
+// install lives in ~/.config/opencode (or a project install in <project>/.opencode
+// when --dir is used); the runtime only owns .zombiecoder per working directory.
+//
+// Skills are lazy: .zombiecoder/skills is not created until someone actually puts
+// a skill there.
 
 import path from "node:path";
 
@@ -56,6 +58,12 @@ export function modelPlanFile(projectRoot: string): string {
   return path.join(zombieRoot(projectRoot), "models.json");
 }
 
+// Early builds wrote the model plan to memory.json, which made the "memory"
+// file a lie. Kept only so setup() can migrate it once, then remove it.
+export function legacyModelPlanFile(projectRoot: string): string {
+  return path.join(zombieRoot(projectRoot), "memory.json");
+}
+
 export function mcpFile(projectRoot: string): string {
   return path.join(zombieRoot(projectRoot), "mcp.json");
 }
@@ -86,14 +94,12 @@ export function opencodePluginsDir(projectRoot: string): string {
 }
 
 // Spec §3.1 — created on first run, then left alone.
+// No skills dir: it appears only when a skill is actually added. No .opencode
+// dir: that belongs to the install root, never to an arbitrary working directory.
 export function bootstrapDirs(projectRoot: string): string[] {
   return [
     zombieRoot(projectRoot),
     memoryDir(projectRoot),
-    skillsDir(projectRoot),
     path.join(zombieRoot(projectRoot), "agents"),
-    opencodeAgentsDir(projectRoot),
-    opencodeSkillsDir(projectRoot),
-    opencodePluginsDir(projectRoot),
   ];
 }

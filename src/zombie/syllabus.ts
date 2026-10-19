@@ -20,6 +20,13 @@ export function readSyllabus(projectRoot: string): string | undefined {
 
 export function renderSyllabusSeed(fp: Fingerprint, agentIds: string[]): string {
   const langs = fp.languages.slice(0, 8).map((l) => l.name).join(", ") || "unknown";
+  const top =
+    fp.topLevel
+      .slice(0, 12)
+      .map((t) => "`" + t.name + (t.kind === "dir" ? "/" : "") + "`")
+      .join(", ") || "_none_";
+  const manifests = Object.keys(fp.manifests).map((m) => "`" + m + "`").join(", ") || "_none_";
+  const markers = fp.markers.map((m) => "`" + m + "`").join(", ") || "_none_";
   const body = [
     `# Syllabus — agent knowledge for this project`,
     ``,
@@ -35,11 +42,23 @@ export function renderSyllabusSeed(fp: Fingerprint, agentIds: string[]): string 
     `| Files scanned | ${fp.totalFiles} |`,
     `| Seeded at | ${fp.scannedAt} |`,
     ``,
-    `## 2. Agents bound to this project`,
+    `## 2. Footprint (auto-discovered)`,
+    ``,
+    `| Field | Value |`,
+    `| --- | --- |`,
+    `| Top-level entries | ${top} |`,
+    `| Manifests | ${manifests} |`,
+    `| Markers | ${markers} |`,
+    `| Files / dirs / bytes | ${fp.totalFiles} / ${fp.totalDirs} / ${fp.totalBytes} |`,
+    ``,
+    `_Agents: refresh this with the \`project_fingerprint\` tool; write new footprint`,
+    `findings into §5 so the next session inherits the lesson._`,
+    ``,
+    `## 3. Agents bound to this project`,
     ``,
     agentIds.map((a) => "- `" + a + "`").join("\n"),
     ``,
-    `## 3. Standing rules`,
+    `## 4. Standing rules`,
     ``,
     `1. SSOT first, then logic, then code.`,
     `2. Evidence before confidence. No evidence means no verified answer.`,
@@ -48,7 +67,7 @@ export function renderSyllabusSeed(fp: Fingerprint, agentIds: string[]): string 
     `5. Regression mindset: after a fix, re-run the checks that could have broken.`,
     `6. Two record-keeping duties only: back up before irreversible work, and log every action.`,
     ``,
-    `## 4. Lessons (append-only)`,
+    `## 5. Lessons (append-only)`,
     ``,
     `_Nothing recorded yet. Each new lesson lands below, newest last._`,
     ``,

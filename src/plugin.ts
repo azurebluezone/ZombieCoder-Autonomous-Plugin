@@ -13,9 +13,19 @@
 
 import { Plugin } from "@opencode/plugin";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
-import { ROSTER, agentMarkdown, type AgentDef } from "./roster.ts";
-import { bootstrapDirs, agentStoreDir, configFile, mcpFile, setupReportFile } from "./zombie/paths.ts";
+import { fileURLToPath } from "node:url";
+import { ROSTER, GLOBAL_PERMISSIONS, agentMarkdown, renderAgentsConfig, type AgentDef } from "./roster.ts";
+import {
+  bootstrapDirs,
+  agentStoreDir,
+  configFile,
+  legacyModelPlanFile,
+  mcpFile,
+  modelPlanFile,
+  setupReportFile,
+} from "./zombie/paths.ts";
 import { ensureDir, readJson, writeJson, writeAtomic, PLUGIN_VERSION } from "./zombie/io.ts";
 import { scanProject, type Fingerprint } from "./zombie/scan.ts";
 import { writeSsot } from "./zombie/ssot.ts";
@@ -55,6 +65,46 @@ export const DEFAULT_CONFIG: ZombieConfig = {
   ssotRefreshMs: DEFAULT_SSOT_REFRESH_MS,
   modelStrategy: "auto",
 };
+
+// Where the plugin itself lives decides where OpenCode-owned files belong.
+//   global : ~/.config/opencode/plugins/zombiecoder/plugin.ts -> ~/.config/opencode
+//   project: <project>/.opencode/plugins/zombiecoder/plugin.ts -> <project>/.opencode
+// The working directory is never assumed to be the install root.
+const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_PARENT = path.resolve(PLUGIN_DIR, "../..");
+export const GLOBAL_CONFIG_DIR = path.join(
+  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
+  "opencode",
+);
+export const GLOBAL_ZOMBIE_CONFIG = path.join(GLOBAL_CONFIG_DIR, "zombiecoder", "config.json");
+
+export type InstallLayout = {
+  dir: string;
+  global: boolean;
+  configFile: string;
+};
+
+export function detectInstallLayout(locationRoot: string): InstallLayout {
+  const forced = process.env.ZOMBIECODER_INSTALL_PARENT;
+  const candidate = forced ? path.resolve(forced) : PLUGIN_PARENT;
+  const entry = path.join(candidate, "plugins", "zombiecoder.ts");
+  const looksLikeInstall =
+    Boolean(forced) ||
+    fs.existsSync(entry) ||
+    (path.basename(candidate) === ".opencode" && fs.existsSync(path.join(candidate, "plugins")));
+  if (looksLikeInstall) {
+    const global = path.basename(candidate) !== ".opencode";
+    return {
+      dir: candidate,
+      global,
+      configFile: global ? path.join(candidate, "opencode.json") : path.join(path.dirname(candidate), "opencode.json"),
+    };
+  }
+  // Source layout (tests, direct loading): behave like a project install rooted
+  // at the location, but never write outside the location.
+  const dir = path.join(locationRoot, ".opencode");
+  return { dir, global: false, configFile: path.join(locationRoot, "opencode.json") };
+}
 
 type Ctx = {
   location?: { directory?: string };
@@ -141,13 +191,31 @@ export function providerConfiguredOnDisk(projectRoot: string, providerID: string
 }
 
 function loadConfig(projectRoot: string): ZombieConfig {
+  // Merge order mirrors OpenCode: shipped default < global ZombieCoder config
+  // < this working directory's .zombiecoder/config.json.
+  const global = readJson<Partial<ZombieConfig>>(GLOBAL_ZOMBIE_CONFIG) ?? {};
   const existing = readJson<Partial<ZombieConfig>>(configFile(projectRoot));
-  if (!existing) {
-    const file = configFile(projectRoot);
-    writeJson(file, DEFAULT_CONFIG);
-    return { ...DEFAULT_CONFIG };
+  const merged: ZombieConfig = { ...DEFAULT_CONFIG, ...global, ...(existing ?? {}) };
+  if (!existing) writeJson(configFile(projectRoot), merged);
+  return merged;
+}
+
+// One-time repair: old builds wrote the model plan to memory.json. Move it to
+// models.json so memory/index.json is the only memory door.
+export function migrateLegacyPlan(projectRoot: string): string | undefined {
+  const legacy = legacyModelPlanFile(projectRoot);
+  const target = modelPlanFile(projectRoot);
+  if (!fs.existsSync(legacy) || fs.existsSync(target)) return undefined;
+  try {
+    const data = JSON.parse(fs.readFileSync(legacy, "utf8"));
+    if (data && typeof data === "object" && data.assignment && data.strategy) {
+      fs.renameSync(legacy, target);
+      return "migrated memory.json -> models.json";
+    }
+  } catch {
+    /* not a plan; leave the file alone */
   }
-  return { ...DEFAULT_CONFIG, ...existing };
+  return undefined;
 }
 
 // Spec §3.1 — create the layout only when it is not already there.
@@ -164,12 +232,11 @@ export function ensureZombieDirs(projectRoot: string): string[] {
 // Spec §1 — OpenCode reads <project>/.opencode/agents/*.md. The editor has no `add`,
 // so the file is the only door. Frontmatter delimiters are mandatory; without them the
 // whole file (frontmatter included) leaks into the agent's system prompt.
-export function ensureAgentFolder(
-  projectRoot: string,
+export function ensureAgentFolderAt(
+  dir: string,
   roster: AgentDef[],
   assignment: Record<string, string> = {},
-): { written: string[]; unchanged: string[] } {
-  const dir = path.join(projectRoot, ".opencode", "agents");
+): { dir: string; written: string[]; unchanged: string[] } {
   ensureDir(dir);
   const written: string[] = [];
   const unchanged: string[] = [];
@@ -184,24 +251,109 @@ export function ensureAgentFolder(
     writeAtomic(file, content);
     written.push(file);
   }
-  return { written, unchanged };
+  return { dir, written, unchanged };
 }
 
-// The markdown file is the agent's real door. This verifies the file we just wrote
-// instead of trusting the deferred editor, which does not expose these IDs yet.
-export function verifyAgentMarkdown(
+// Backward-compatible wrapper for callers that still think in project roots.
+export function ensureAgentFolder(
   projectRoot: string,
+  roster: AgentDef[],
+  assignment: Record<string, string> = {},
+): { dir: string; written: string[]; unchanged: string[] } {
+  return ensureAgentFolderAt(path.join(projectRoot, ".opencode", "agents"), roster, assignment);
+}
+
+// The markdown file is one documented door. Verify the files we wrote instead
+// of trusting the deferred editor, which does not expose these IDs at setup time.
+export function verifyAgentMarkdownAt(
+  dir: string,
   roster: AgentDef[],
   assignment: Record<string, string> = {},
 ): string[] {
   const missing: string[] = [];
   for (const a of roster) {
-    const file = path.join(projectRoot, ".opencode", "agents", a.id + ".md");
+    const file = path.join(dir, a.id + ".md");
     const raw = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
     const expected = assignment[a.id] ?? a.model;
     if (!raw.includes(`model: ${expected}`)) missing.push(`${a.id}=${expected}`);
     if (!raw.includes("ZombieCoder Shared Rules")) missing.push(`${a.id}=rules`);
   }
+  return missing;
+}
+
+export function verifyAgentMarkdown(
+  projectRoot: string,
+  roster: AgentDef[],
+  assignment: Record<string, string> = {},
+): string[] {
+  return verifyAgentMarkdownAt(path.join(projectRoot, ".opencode", "agents"), roster, assignment);
+}
+
+// V2 config agents are the second door. The installer seeds them; the runtime
+// refreshes the model after a live probe so the config never points at a dead
+// provider. Everything outside `agents` is preserved.
+export function syncAgentConfig(
+  file: string,
+  roster: AgentDef[],
+  assignment: Record<string, string> = {},
+): { file: string; updated: string[]; skipped?: string } {
+  const jsonc = file.replace(/\.json$/, ".jsonc");
+  const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  if (!current && fs.existsSync(jsonc)) {
+    return { file: jsonc, updated: [], skipped: "opencode.jsonc is present; agent config not written" };
+  }
+  const existing = readJson<Record<string, any>>(file);
+  if (existing === undefined && current.trim().length > 0) {
+    return { file, updated: [], skipped: "opencode.json is not strict JSON; agent config not written" };
+  }
+  const config: Record<string, any> = existing ?? { $schema: "https://opencode.ai/config.json" };
+  if (!config.$schema) config.$schema = "https://opencode.ai/config.json";
+
+  // V2 permissions. Our defaults come first; rules already in the user's file
+  // stay after them so the owner's later rule still wins.
+  const existingPermissions = Array.isArray(config.permissions) ? config.permissions : [];
+  const known = new Set(GLOBAL_PERMISSIONS.map((rule) => JSON.stringify(rule)));
+  config.permissions = [
+    ...GLOBAL_PERMISSIONS,
+    ...existingPermissions.filter((rule: any) => !known.has(JSON.stringify(rule))),
+  ];
+
+  const agents: Record<string, any> = { ...(config.agents ?? {}) };
+  const wanted = renderAgentsConfig(roster, assignment);
+  const updated: string[] = [];
+
+  // Renamed agent: never leave the old persona behind to compete with the new one.
+  for (const id of Object.keys(agents)) {
+    if (id === "kobir" && !wanted[id]) delete agents[id];
+  }
+  for (const [id, entry] of Object.entries(wanted)) {
+    const before = JSON.stringify(agents[id] ?? null);
+    agents[id] = { ...(agents[id] ?? {}), ...entry };
+    if (JSON.stringify(agents[id]) !== before) updated.push(id);
+  }
+
+  const next = { ...config, agents };
+  const serialized = JSON.stringify(next, null, 2) + "\n";
+  if (serialized !== current) writeAtomic(file, serialized);
+  return { file, updated };
+}
+
+export function verifyAgentConfig(
+  file: string,
+  roster: AgentDef[],
+  assignment: Record<string, string> = {},
+): string[] {
+  const config = readJson<Record<string, any>>(file);
+  if (!config || !config.agents) return ["opencode.json=agents"];
+  const missing: string[] = [];
+  for (const a of roster) {
+    const expected = assignment[a.id] ?? a.model;
+    const entry = config.agents[a.id];
+    if (!entry) missing.push(`${a.id}=missing`);
+    else if (entry.model !== expected) missing.push(`${a.id}=model`);
+    else if (!Array.isArray(entry.permissions) || entry.permissions.length === 0) missing.push(`${a.id}=permissions`);
+  }
+  if (config.agents.kobir) missing.push("stale=kobir");
   return missing;
 }
 
@@ -238,6 +390,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   const startedAt = new Date().toISOString();
   let root = ctx?.location?.directory;
   if (!root || typeof root !== "string") root = process.cwd();
+  const layout = detectInstallLayout(root);
 
   const report: Report = {
     plugin: PLUGIN_ID,
@@ -246,7 +399,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     finishedAt: startedAt,
     root,
     steps: [],
-    outputs: {},
+    outputs: { install: layout },
   };
   const cleanups: (() => Promise<void> | void)[] = [];
 
@@ -328,6 +481,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
 
   const config = step("load-config", () => loadConfig(root!)) ?? DEFAULT_CONFIG;
 
+  const migrated = step("migrate-legacy-plan", () => migrateLegacyPlan(root!));
+  if (migrated) report.outputs.migrated = migrated;
+
   // ---- §2 model plan --------------------------------------------------------
   const plan = await stepAsync("resolve-models", async () => {
     // OpenCode 2.x: ctx.provider + ctx.model. Older betas: ctx.catalog.
@@ -391,12 +547,21 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   );
   report.outputs.syllabus = syllabus;
 
-  // ---- §1 agent folder + model binding -------------------------------------
-  // The markdown file is the documented door: frontmatter carries the resolved
-  // model, and the body carries the shared rules. The editor transform sees no
-  // IDs at this point, so pretending it bound them would be a lie in the report.
-  const folder = step("agent-folder", () => ensureAgentFolder(root!, ROSTER, plan?.assignment ?? {}));
+  // ---- §1 agent doors + model binding --------------------------------------
+  // Two documented doors, both written at the install root (never in an
+  // arbitrary working directory):
+  //   <install>/agents/*.md          persona + frontmatter
+  //   <install>/opencode.json agents V2 config (model + permissions + system)
+  // The editor transform sees no IDs at this point, so pretending it bound them
+  // would be a lie in the report.
+  const agentsDir = path.join(layout.dir, "agents");
+  const folder = step("agent-folder", () => ensureAgentFolderAt(agentsDir, ROSTER, plan?.assignment ?? {}));
   report.outputs.agentFolder = folder;
+
+  const agentConfig = step("agent-config", () =>
+    syncAgentConfig(layout.configFile, ROSTER, plan?.assignment ?? {}),
+  );
+  report.outputs.agentConfig = agentConfig;
 
   await stepAsync("agent-reload", async () => {
     await ctx.agent?.reload?.();
@@ -404,11 +569,12 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   });
 
   const bound = step("agent-bind", () => {
-    const missing = verifyAgentMarkdown(root!, ROSTER, plan?.assignment ?? {});
+    const missing = verifyAgentMarkdownAt(agentsDir, ROSTER, plan?.assignment ?? {});
+    if (!agentConfig?.skipped) missing.push(...verifyAgentConfig(layout.configFile, ROSTER, plan?.assignment ?? {}));
     if (missing.length > 0) {
-      throw new Error(`agent markdown incomplete: ${missing.join(", ")}`);
+      throw new Error(`agent binding incomplete: ${missing.join(", ")}`);
     }
-    return `${ROSTER.length} agents carry resolved model + shared rules`;
+    return `${ROSTER.length} agents carry resolved model + shared rules (markdown + config)`;
   });
   report.outputs.bound = bound;
 

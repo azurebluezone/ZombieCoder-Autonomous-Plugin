@@ -1,33 +1,34 @@
 #!/usr/bin/env node
 // ZombieCoder install pipeline — spec §7.
 //
-// What it does, in order:
-//   1. scaffold <target>/.opencode  {agents, plugins, skills}
-//   2. copy the plugin runtime import graph into .opencode/plugins/zombiecoder/
-//   3. ensure @opencode/plugin is declared in .opencode/package.json (merge, never clobber)
-//   4. npm install in .opencode
-//   5. seed .zombiecoder/config.json  (the core config: custom provider URL, MCP URL, API URL)
-//   6. probe MCP (if a URL was supplied) and write .zombiecoder/mcp.json
-//   7. merge opencode.json (custom provider + verified MCP) so the live runtime can see the URL
-//   8. write the agent markdown (resolved models if a plan exists, else baseline)
-//   9. seed .zombiecoder/SSOT.md, syllabus.md and memory/ for THIS working directory
-//  10. write the entrypoint LAST, so OpenCode never boots a half-finished install
+// Two install shapes:
+//   default (--global) : the OpenCode config directory (Linux/macOS ~/.config/opencode,
+//                        Windows %USERPROFILE%\.config\opencode). One install covers
+//                        every working directory; no .opencode is created in projects.
+//   --dir <path>       : a project-local install in <path>/.opencode.
+//   --home             : legacy OS-root install in <home>/.opencode.
 //
-// Default target is the OS user root: os.homedir() resolves to /home/<user> on
-// Linux/macOS and C:\\Users\\<user> on Windows. OpenCode searches .opencode/
-// directories from the working directory up to the filesystem root, so one
-// install there covers every working directory beneath it; each directory still
-// gets its own .zombiecoder on first boot.
+// In global mode the installer writes:
+//   <global>/opencode.json      provider + models + V2 agents + permissions + MCP
+//   <global>/agents/*.md        persona markdown (second documented agent door)
+//   <global>/plugins/…          plugin runtime + entrypoint
+//   <global>/zombiecoder/…      internal config/model-plan/MCP probe state
+//
+// Per working directory the runtime creates only .zombiecoder (SSOT, syllabus,
+// memory, footprint, models). Skills are lazy: .zombiecoder/skills appears only
+// when a skill is actually added. No .opencode in arbitrary working directories.
 //
 // NO backups, NO .bak files, NO archives: the owner keeps their own. Writes are atomic
 // (temp + rename) and existing files are only replaced when the content actually differs.
 //
 // Usage:
 //   node --experimental-strip-types bin/install.mjs
+//   node --experimental-strip-types bin/install.mjs --global
 //   node --experimental-strip-types bin/install.mjs --dir /path/to/project
-//   node --experimental-strip-types bin/install.mjs --dir X --no-install
-//   node --experimental-strip-types bin/install.mjs --dir X --no-provider-config
-//   node --experimental-strip-types bin/install.mjs --dir X --provider-url https://host/v1
+//   node --experimental-strip-types bin/install.mjs --home
+//   node --experimental-strip-types bin/install.mjs --no-install
+//   node --experimental-strip-types bin/install.mjs --no-provider-config
+//   node --experimental-strip-types bin/install.mjs --provider-url https://host/v1
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -49,11 +50,29 @@ function value(name, fallback) {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 }
 
-// The owner's rule: the runtime lives at the OS user root. os.homedir() resolves
-// per platform — /home/<user> on Linux/macOS, C:\Users\<user> on Windows — so the
-// installer never hardcodes one OS. Pass --dir to install into a project instead.
-// Every install still prints the resolved target explicitly.
-const TARGET = path.resolve(value("--dir", os.homedir()));
+const GLOBAL_DIR = path.join(
+  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
+  "opencode",
+);
+const HOME_MODE = flag("--home");
+const DIR_FLAG = value("--dir", null);
+const GLOBAL_MODE = !HOME_MODE && (flag("--global") || DIR_FLAG === null);
+
+// The owner's rule: one global install, every working directory underneath it.
+// os.homedir() and XDG_CONFIG_HOME are resolved per platform, so no OS path is
+// hardcoded. --dir keeps the old project-local shape available.
+const TARGET = path.resolve(
+  GLOBAL_MODE ? GLOBAL_DIR : HOME_MODE ? os.homedir() : DIR_FLAG,
+);
+const CONFIG_DIR = GLOBAL_MODE ? TARGET : path.join(TARGET, ".opencode");
+const ZOMBIE_DIR = GLOBAL_MODE ? path.join(TARGET, "zombiecoder") : path.join(TARGET, ".zombiecoder");
+const PLUGINS_DIR = path.join(CONFIG_DIR, "plugins");
+const AGENTS_DIR = path.join(CONFIG_DIR, "agents");
+const ENTRY = path.join(PLUGINS_DIR, "zombiecoder.ts");
+const OPENCODE_JSON = path.join(TARGET, "opencode.json");
+const OPENCODE_JSONC = path.join(TARGET, "opencode.jsonc");
+const ZOMBIE_CONFIG = path.join(ZOMBIE_DIR, "config.json");
+
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
 const PROVIDER_ID = "missionbarisal";
@@ -76,7 +95,7 @@ const mcpFlag = value("--mcp-url", null);
 // resetting it to the shipped default.
 function priorConfig() {
   try {
-    return JSON.parse(fs.readFileSync(path.join(TARGET, ".zombiecoder", "config.json"), "utf8"));
+    return JSON.parse(fs.readFileSync(ZOMBIE_CONFIG, "utf8"));
   } catch {
     return {};
   }
@@ -126,9 +145,11 @@ if (INTERACTIVE) {
   }
 }
 
-const report = { target: TARGET, steps: [] };
+const report = { target: TARGET, mode: GLOBAL_MODE ? "global" : HOME_MODE ? "home" : "project", steps: [] };
 let mcpProbe = null;
+let providerProbe = null;
 let providerReachable = false;
+let installAssignment = {};
 
 async function step(name, fn) {
   try {
@@ -213,27 +234,26 @@ function providerEntry(baseURL, modelIDs) {
 
 console.log("=".repeat(72));
 console.log(`ZombieCoder install — ${PKG.name} v${PKG.version}`);
-console.log(`target: ${TARGET}  [${process.platform} user root]`);
+console.log(
+  `target: ${TARGET}  [${GLOBAL_MODE ? "global OpenCode config" : HOME_MODE ? `${process.platform} home/.opencode` : "project .opencode"}]`,
+);
 console.log("=".repeat(72));
 
-const opencodeDir = path.join(TARGET, ".opencode");
-const pluginsDir = path.join(opencodeDir, "plugins");
-const agentsDir = path.join(opencodeDir, "agents");
-const skillsDir = path.join(opencodeDir, "skills");
-const zombieDir = path.join(TARGET, ".zombiecoder");
-const pluginFolder = path.join(pluginsDir, "zombiecoder");
-
 // ---- 1. scaffold ---------------------------------------------------------------
-await step("scaffold .opencode", () => {
-  for (const d of [opencodeDir, pluginsDir, agentsDir, skillsDir, zombieDir]) ensureDir(d);
-  return [".opencode", ".opencode/plugins", ".opencode/agents", ".opencode/skills", ".zombiecoder"].join(", ");
+await step("scaffold install root", () => {
+  // Skills are intentionally absent: the folder appears only when a skill is added.
+  for (const d of [TARGET, CONFIG_DIR, PLUGINS_DIR, AGENTS_DIR, ZOMBIE_DIR]) ensureDir(d);
+  return [
+    path.relative(TARGET, CONFIG_DIR) || ".",
+    path.relative(TARGET, PLUGINS_DIR),
+    path.relative(TARGET, AGENTS_DIR),
+    path.relative(TARGET, ZOMBIE_DIR),
+  ].join(", ");
 });
 
 // ---- 2. copy the runtime import graph -----------------------------------------
+const pluginFolder = path.join(PLUGINS_DIR, "zombiecoder");
 await step("copy plugin source graph", () => {
-  // Only the runtime graph is deployed. The old documentation generators
-  // (src/agents.ts, ethics.ts, generate.ts, identity.ts, runtime.ts) are not part of it
-  // and must not ship into .opencode/plugins as dead weight.
   const entries = ["plugin.ts", "roster.ts", "zombie"];
   ensureDir(pluginFolder);
   for (const entry of entries) {
@@ -247,7 +267,7 @@ await step("copy plugin source graph", () => {
 
 // ---- 3. declare the dependency ------------------------------------------------
 await step("declare @opencode/plugin dependency", () => {
-  const file = path.join(opencodeDir, "package.json");
+  const file = path.join(CONFIG_DIR, "package.json");
   const dep = PKG.dependencies?.["@opencode/plugin"] ?? "beta";
   const merged = mergeJson(file, {
     name: "zombiecoder-opencode-runtime",
@@ -255,21 +275,21 @@ await step("declare @opencode/plugin dependency", () => {
     type: "module",
     dependencies: { "@opencode/plugin": dep },
   });
-  return `.opencode/package.json -> @opencode/plugin@${merged.dependencies["@opencode/plugin"]}`;
+  return `${path.relative(TARGET, file)} -> @opencode/plugin@${merged.dependencies["@opencode/plugin"]}`;
 });
 
 // ---- 4. npm install ----------------------------------------------------------
 if (DO_INSTALL) {
   await step("npm install", () => {
     const result = spawnSync("npm", ["install", "--no-audit", "--no-fund"], {
-      cwd: opencodeDir,
+      cwd: CONFIG_DIR,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8",
     });
     if (result.status !== 0) {
       throw new Error(`npm exited ${result.status}: ${(result.stderr || "").trim().split("\n").slice(-4).join(" ")}`);
     }
-    if (!fs.existsSync(path.join(opencodeDir, "node_modules", "@opencode", "plugin"))) {
+    if (!fs.existsSync(path.join(CONFIG_DIR, "node_modules", "@opencode", "plugin"))) {
       throw new Error("@opencode/plugin not present after npm install");
     }
     const tail = (result.stdout || "").trim().split("\n").slice(-1)[0] ?? "";
@@ -280,37 +300,31 @@ if (DO_INSTALL) {
 }
 
 // ---- 5. core config ----------------------------------------------------------
-await step("seed .zombiecoder/config.json", () => {
-  const file = path.join(zombieDir, "config.json");
-  if (fs.existsSync(file)) {
-    let current;
-    try {
-      current = JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-      return "kept existing config.json (not strict JSON; not modified)";
-    }
-    const next = {
-      ...current,
-      version: PKG.version,
-      customProviderUrl: PROVIDER_URL,
-      customProviderID: current.customProviderID ?? PROVIDER_ID,
-      mcpUrl: MCP_URL,
-    };
-    const changed = writeIfChanged(file, JSON.stringify(next, null, 2) + "\n");
-    return changed ? "updated existing config.json" : "kept existing config.json";
-  }
-  const config = {
+await step("seed zombiecoder config", () => {
+  const existing = fs.existsSync(ZOMBIE_CONFIG)
+    ? (() => {
+        try {
+          return JSON.parse(fs.readFileSync(ZOMBIE_CONFIG, "utf8"));
+        } catch {
+          return null;
+        }
+      })()
+    : {};
+  if (existing === null) return "kept existing config (not strict JSON; not modified)";
+  const next = {
+    ...existing,
     version: PKG.version,
+    installMode: GLOBAL_MODE ? "global" : "home",
     customProviderUrl: PROVIDER_URL,
-    customProviderID: PROVIDER_ID,
+    customProviderID: existing.customProviderID ?? PROVIDER_ID,
     mcpUrl: MCP_URL,
-    opencodeApiUrl: "http://127.0.0.1:49374",
-    ssotRefreshMs: 300000,
-    modelStrategy: "auto",
-    createdAt: new Date().toISOString(),
+    opencodeApiUrl: existing.opencodeApiUrl ?? "http://127.0.0.1:49374",
+    ssotRefreshMs: existing.ssotRefreshMs ?? 300000,
+    modelStrategy: existing.modelStrategy ?? "auto",
+    createdAt: existing.createdAt ?? new Date().toISOString(),
   };
-  writeIfChanged(file, JSON.stringify(config, null, 2) + "\n");
-  return "written";
+  writeIfChanged(ZOMBIE_CONFIG, JSON.stringify(next, null, 2) + "\n");
+  return path.relative(TARGET, ZOMBIE_CONFIG);
 });
 
 // ---- 6. probe MCP ------------------------------------------------------------
@@ -318,69 +332,125 @@ await step("probe MCP", async () => {
   if (!MCP_URL) return "skipped (no MCP URL)";
   const { probeMcp } = await import("../src/zombie/mcp.ts");
   mcpProbe = await probeMcp(MCP_URL, { timeoutMs: 6000 });
-  writeIfChanged(path.join(zombieDir, "mcp.json"), JSON.stringify(mcpProbe, null, 2) + "\n");
+  writeIfChanged(path.join(ZOMBIE_DIR, "mcp.json"), JSON.stringify(mcpProbe, null, 2) + "\n");
   if (!mcpProbe.ok) throw new Error(`MCP unreachable: ${mcpProbe.error}`);
   const names = mcpProbe.tools.map((tool) => tool.name).join(", ");
   return `${mcpProbe.tools.length} tool(s)${names ? `: ${names}` : ""}`;
 });
 
-// ---- 7. merge opencode.json --------------------------------------------------
-await step("sync opencode.json", async () => {
+// ---- 7. probe provider + resolve this install's model plan -------------------
+await step("probe provider + assign models", async () => {
+  const roster = await import(path.join(PACKAGE_ROOT, "src", "roster.ts"));
+  const { assignModels } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "models.ts"));
+
+  // A re-install over a live location keeps the runtime's resolved plan.
+  try {
+    const previousPlan = JSON.parse(fs.readFileSync(path.join(ZOMBIE_DIR, "models.json"), "utf8"));
+    if (previousPlan?.assignment && typeof previousPlan.assignment === "object") {
+      installAssignment = previousPlan.assignment;
+    }
+  } catch {
+    /* no plan yet */
+  }
+
+  if (PROVIDER_URL) {
+    providerProbe = await probeProviderModels(PROVIDER_URL);
+    providerReachable = Boolean(providerProbe?.ok);
+  }
+  const candidates = providerReachable
+    ? providerProbe.models.map((id) => `${PROVIDER_ID}/${id}`)
+    : [];
+  if (Object.keys(installAssignment).length === 0) {
+    installAssignment = assignModels(roster.ROSTER, candidates);
+  }
+
+  const plan = {
+    generatedAt: new Date().toISOString(),
+    strategy: providerReachable ? "custom-provider" : "baseline",
+    customProviderUrl: PROVIDER_URL,
+    customProviderID: PROVIDER_ID,
+    probe: providerProbe,
+    candidates,
+    assignment: installAssignment,
+  };
+  writeIfChanged(path.join(ZOMBIE_DIR, "models.json"), JSON.stringify(plan, null, 2) + "\n");
+
+  const summary = !PROVIDER_URL
+    ? "custom provider disabled (OpenCode free models)"
+    : providerReachable
+      ? `${providerProbe.models.length} model(s) from ${providerProbe.url}`
+      : `probe failed: ${providerProbe?.error ?? "not probed"}`;
+  return `${summary}; ${new Set(Object.values(installAssignment)).size} model(s) assigned`;
+});
+
+// ---- 8. opencode.json: provider + V2 agents + permissions + MCP --------------
+await step("sync opencode.json (providers, agents, permissions, MCP)", async () => {
   if (!DO_PROVIDER_CONFIG) return "skipped (--no-provider-config)";
-  const file = path.join(TARGET, "opencode.json");
-  const jsonc = path.join(TARGET, "opencode.jsonc");
-  if (!fs.existsSync(file) && fs.existsSync(jsonc)) {
+  if (!fs.existsSync(OPENCODE_JSON) && fs.existsSync(OPENCODE_JSONC)) {
     return "skipped (opencode.jsonc is present; add the provider by hand)";
   }
   let existing = {};
-  if (fs.existsSync(file)) {
+  if (fs.existsSync(OPENCODE_JSON)) {
     try {
-      existing = JSON.parse(fs.readFileSync(file, "utf8"));
+      existing = JSON.parse(fs.readFileSync(OPENCODE_JSON, "utf8"));
     } catch {
       return "skipped (opencode.json is not strict JSON; add the provider by hand)";
     }
   }
 
-  const seeded = JSON.parse(fs.readFileSync(path.join(zombieDir, "config.json"), "utf8"));
-  const providerUrl = PROVIDER_URL;
+  const roster = await import(path.join(PACKAGE_ROOT, "src", "roster.ts"));
+  const seeded = JSON.parse(fs.readFileSync(ZOMBIE_CONFIG, "utf8"));
   const providerID = seeded.customProviderID || PROVIDER_ID;
-  if (!providerUrl && !mcpProbe?.ok && !fs.existsSync(file)) {
-    return "nothing to write (free models, no MCP)";
-  }
-  const probe = providerUrl ? await probeProviderModels(providerUrl) : null;
-  providerReachable = Boolean(probe?.ok);
-
   const next = { ...existing };
   if (!next.$schema) next.$schema = "https://opencode.ai/config.json";
 
-  if (providerUrl) {
+  if (PROVIDER_URL) {
     next.providers = { ...(existing.providers ?? {}) };
-    const previous = next.providers[providerID] ?? {};
-    const models = { ...(previous.models ?? {}) };
-    if (probe?.ok) {
-      for (const id of probe.models) {
-        models[id] = { ...(providerEntry(providerUrl, [id]).models[id]), ...(models[id] ?? {}) };
+    const previousProvider = next.providers[providerID] ?? {};
+    const models = { ...(previousProvider.models ?? {}) };
+    if (providerProbe?.ok) {
+      for (const id of providerProbe.models) {
+        models[id] = { ...(providerEntry(PROVIDER_URL, [id]).models[id]), ...(models[id] ?? {}) };
       }
     }
     next.providers[providerID] = {
-      ...providerEntry(providerUrl, []),
-      ...previous,
+      ...providerEntry(PROVIDER_URL, []),
+      ...previousProvider,
       settings: {
-        ...(previous.settings ?? {}),
-        baseURL: providerUrl,
-        apiKey: previous.settings?.apiKey ?? "public",
+        ...(previousProvider.settings ?? {}),
+        baseURL: PROVIDER_URL,
+        apiKey: previousProvider.settings?.apiKey ?? "public",
       },
       models,
     };
   }
+
+  // V2 agents: description, mode, model, system prompt, ordered permission rules.
+  // Existing non-roster agents are preserved; `kobir` is removed after the rename.
+  const agents = { ...(existing.agents ?? {}) };
+  for (const id of Object.keys(agents)) {
+    if (id === "kobir" && !roster.ROSTER.some((a) => a.id === "kobir")) delete agents[id];
+  }
+  for (const [id, entry] of Object.entries(roster.renderAgentsConfig(roster.ROSTER, installAssignment))) {
+    agents[id] = { ...(agents[id] ?? {}), ...entry };
+  }
+  next.agents = agents;
+
+  // V2 permissions. Global rules first; the owner's existing rules are appended
+  // after ours so their later rules keep the final say.
+  const existingPermissions = Array.isArray(existing.permissions) ? existing.permissions : [];
+  next.permissions = [...roster.GLOBAL_PERMISSIONS, ...existingPermissions];
+
+  // Default agent + default model. The model is provider/model in V2.
+  next.default_agent = "zombiecoder";
+  const firstCandidate = providerReachable ? `${providerID}/${providerProbe.models[0]}` : null;
+  next.model = existing.model ?? firstCandidate ?? roster.BASELINE_MODEL;
 
   // Only register an MCP server we actually reached. A dead default URL in
   // opencode.json slows every boot and teaches the user to ignore errors.
   if (mcpProbe?.ok) {
     next.mcp = { ...(existing.mcp ?? {}) };
     next.mcp.servers = { ...(next.mcp.servers ?? {}) };
-    // We own this entry, so a new verified URL replaces the old URL while any
-    // user-supplied headers/options on the same entry are preserved.
     next.mcp.servers.zombiecoder = {
       ...(next.mcp.servers.zombiecoder ?? {}),
       type: "remote",
@@ -388,43 +458,40 @@ await step("sync opencode.json", async () => {
     };
   }
 
-  writeIfChanged(file, JSON.stringify(next, null, 2) + "\n");
-  const providerSummary = !providerUrl
+  writeIfChanged(OPENCODE_JSON, JSON.stringify(next, null, 2) + "\n");
+  const providerSummary = !PROVIDER_URL
     ? "custom provider disabled (OpenCode free models)"
-    : probe?.ok
-      ? `provider ${providerID} with ${probe.models.length} model(s) from ${probe.url}`
-      : `provider ${providerID} saved (probe failed: ${probe?.error ?? "not probed"})`;
+    : providerReachable
+      ? `provider ${providerID} with ${providerProbe.models.length} model(s)`
+      : `provider ${providerID} saved (probe failed: ${providerProbe?.error ?? "not probed"})`;
   const mcpSummary = mcpProbe?.ok ? `MCP zombiecoder (${mcpProbe.tools.length} tools)` : "MCP not registered";
-  return `${providerSummary}; ${mcpSummary}`;
+  return `${providerSummary}; ${roster.ROSTER.length} agents + ${next.permissions.length} permission rules; ${mcpSummary}`;
 });
 
-// ---- 8. agent markdown --------------------------------------------------------
-// The roster lives in TS. We do not duplicate it here: import the real module.
-// If the runtime already resolved models (plugin loaded during an update), write
-// the SAME assignment instead of clobbering it with the static baseline.
+// ---- 9. agent markdown --------------------------------------------------------
 await step("write agent markdown", async () => {
   const mod = await import(path.join(PACKAGE_ROOT, "src", "roster.ts"));
-  let assignment = {};
-  try {
-    const plan = JSON.parse(fs.readFileSync(path.join(zombieDir, "models.json"), "utf8"));
-    if (plan?.assignment && typeof plan.assignment === "object") assignment = plan.assignment;
-  } catch {
-    /* no plan yet — baseline models are still valid */
-  }
   let written = 0;
   for (const agent of mod.ROSTER) {
-    const file = path.join(agentsDir, agent.id + ".md");
-    if (writeIfChanged(file, mod.agentMarkdown(agent, assignment[agent.id]))) written += 1;
+    const file = path.join(AGENTS_DIR, agent.id + ".md");
+    if (writeIfChanged(file, mod.agentMarkdown(agent, installAssignment[agent.id]))) written += 1;
   }
-  const resolved = Object.keys(assignment).length > 0 ? "resolved" : "baseline";
-  return `${mod.ROSTER.length} agents (${written} changed, ${resolved} models)`;
+  // Remove the old Kobir file after the rename so two personas cannot coexist.
+  const stale = path.join(AGENTS_DIR, "kobir.md");
+  let pruned = 0;
+  if (fs.existsSync(stale)) {
+    fs.rmSync(stale, { force: true });
+    pruned = 1;
+  }
+  const resolved = Object.keys(installAssignment).length > 0 ? "resolved" : "baseline";
+  return `${mod.ROSTER.length} agents (${written} changed, ${pruned} stale pruned, ${resolved} models)`;
 });
 
-// ---- 9. seed .zombiecoder (SSOT + syllabus + memory) --------------------------
-// The runtime regenerates SSOT at boot and every 5 minutes, but the owner asked
-// for the individual working directory to be populated by the install itself,
-// not only after OpenCode first opens it.
+// ---- 10. seed .zombiecoder (project installs only) ---------------------------
 await step("seed .zombiecoder SSOT + syllabus + memory", async () => {
+  if (GLOBAL_MODE) {
+    return "skipped (global install: .zombiecoder is created per working directory on first boot)";
+  }
   const { bootstrapDirs } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "paths.ts"));
   const { scanProject } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "scan.ts"));
   const { writeSsot } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "ssot.ts"));
@@ -435,24 +502,11 @@ await step("seed .zombiecoder SSOT + syllabus + memory", async () => {
 
   const fp = scanProject(TARGET);
   const agentIds = roster.ROSTER.map((a) => a.id);
-
-  // If the runtime already resolved a plan (re-install over a live location),
-  // reuse it; otherwise SSOT honestly says the plugin will resolve on first boot.
-  let assignment = {};
-  let strategy = "pending (resolved by the plugin on first boot)";
-  try {
-    const plan = JSON.parse(fs.readFileSync(path.join(zombieDir, "models.json"), "utf8"));
-    if (plan?.assignment && typeof plan.assignment === "object") assignment = plan.assignment;
-    if (typeof plan?.strategy === "string" && plan.strategy) strategy = plan.strategy;
-  } catch {
-    /* first install: no runtime plan yet */
-  }
-
   const ssot = writeSsot(TARGET, fp, {
     agentCount: roster.ROSTER.length,
     agentIds,
-    modelStrategy: strategy,
-    modelAssignment: assignment,
+    modelStrategy: providerReachable ? "custom-provider" : "baseline",
+    modelAssignment: installAssignment,
     customProviderUrl: PROVIDER_URL,
     customProviderReachable: providerReachable,
     mcpUrl: MCP_URL,
@@ -463,21 +517,19 @@ await step("seed .zombiecoder SSOT + syllabus + memory", async () => {
   return `SSOT ${ssot.bytes}B, syllabus ${syllabus.created ? "seeded" : "kept"}, memory dir ready`;
 });
 
-// ---- 10. entrypoint LAST ------------------------------------------------------
-// OpenCode watches .opencode/plugins/. Writing the entrypoint only after deps,
-// config, provider/MCP, and agent markdown are ready prevents a mid-install
-// plugin boot that sees half an install (and then gets clobbered by our writes).
+// ---- 11. entrypoint LAST ------------------------------------------------------
+// Writing the entrypoint only after deps, config, provider/MCP, and agent
+// markdown are ready prevents a mid-install plugin boot that sees half an install.
 await step("write entrypoint", () => {
-  const entry = path.join(pluginsDir, "zombiecoder.ts");
   const body = [
     "// GENERATED by zombiecoder-opencode — do not hand edit.",
-    "// OpenCode discovers top-level files in .opencode/plugins/ and follows this",
-    "// import graph into ./zombiecoder/ (source of truth: Plugins/src).",
+    "// OpenCode discovers top-level files in the plugins/ directory and follows",
+    "// this import graph into ./zombiecoder/ (source of truth: Plugins/src).",
     'export { default } from "./zombiecoder/plugin.ts";',
     'export { setup, PLUGIN_ID } from "./zombiecoder/plugin.ts";',
     "",
   ].join("\n");
-  return writeIfChanged(entry, body) ? "written" : "unchanged";
+  return writeIfChanged(ENTRY, body) ? "written" : "unchanged";
 });
 
 // ---- report ------------------------------------------------------------------
@@ -492,9 +544,15 @@ if (!fs.existsSync(path.join(pluginFolder, "plugin.ts"))) {
 }
 console.log("-".repeat(72));
 console.log(`installed: ${report.steps.length - failed.length}/${report.steps.length} steps ok`);
-console.log(`layout: ${TARGET}/.opencode/{agents,plugins,skills} + ${TARGET}/.zombiecoder`);
-console.log("per-directory: every working directory under this target gets its own");
-console.log("  .zombiecoder (SSOT, syllabus, memory) when OpenCode opens it.");
-console.log("next: boot OpenCode in that directory so the plugin's setup() runs.");
+if (GLOBAL_MODE) {
+  console.log(`global: ${TARGET}/{opencode.json,agents,plugins,zombiecoder}`);
+  console.log("per-directory: each working directory gets only .zombiecoder");
+  console.log("  (SSOT, syllabus, memory, footprint, models); no .opencode is created there.");
+  console.log("skills: .zombiecoder/skills is created only when a skill is added.");
+} else {
+  console.log(`project: ${TARGET}/.opencode/{agents,plugins} + ${TARGET}/.zombiecoder`);
+  console.log("per-directory: nested working directories still get their own .zombiecoder.");
+}
+console.log("next: open any working directory so the plugin's setup() runs.");
 console.log("-".repeat(72));
 process.exit(failed.length ? 1 : 0);

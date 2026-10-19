@@ -8,8 +8,10 @@
 // find older context without loading it. This lives per working directory, so two
 // projects never share a memory.
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { appendJsonl, readJson, readJsonl, readText, writeJson } from "./io.ts";
-import { memoryArchiveFile, memoryIndexFile, safe } from "./paths.ts";
+import { memoryArchiveFile, memoryDir, memoryIndexFile, safe } from "./paths.ts";
 
 export const KEEP_RECENT = 10;
 export const INDEX_STORAGE_PREFIX = "memory/index/";
@@ -36,10 +38,24 @@ export type MemoryIndexEntry = {
   lastMessageAt: string;
 };
 
+// Every archive file, so an agent that reads only index.json can find all older
+// context. `archived` is the count written by this index; `bytes` is the live
+// file size, which also makes a truncated/rotated archive visible.
+export type MemoryArchiveEntry = {
+  sessionID: string;
+  file: string;
+  archived: number;
+  bytes: number;
+  firstAt: string;
+  lastAt: string;
+  updatedAt: string;
+};
+
 export type MemoryIndex = {
   projectRoot: string;
   updatedAt: string;
   sessions: Record<string, MemoryIndexEntry>;
+  archives: MemoryArchiveEntry[];
 };
 
 export function storageKey(sessionID: string): string {
@@ -69,18 +85,54 @@ export function toMemoryMessage(item: any): MemoryMessage {
   return { role: roleOf(item), text: textOf(item), at: new Date().toISOString() };
 }
 
+// Disk is the truth. If an archive file exists but predates the index (or was
+// copied in by hand), add it on read so the agent never has to guess.
+function reconcileArchives(projectRoot: string, index: MemoryIndex): MemoryIndex {
+  if (!Array.isArray(index.archives)) index.archives = [];
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(memoryDir(projectRoot)).filter((f) => f.toLowerCase().endsWith(".jsonl"));
+  } catch {
+    return index;
+  }
+  const known = new Set(index.archives.map((a) => a.file));
+  for (const name of files) {
+    const file = path.join(memoryDir(projectRoot), name);
+    if (known.has(file)) continue;
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      continue;
+    }
+    const sessionID = name.replace(/\.jsonl$/i, "");
+    index.archives.push({
+      sessionID,
+      file,
+      archived: index.sessions[sessionID]?.archivedTotal ?? 0,
+      bytes: stat.size,
+      firstAt: stat.birthtime.toISOString(),
+      lastAt: stat.mtime.toISOString(),
+      updatedAt: stat.mtime.toISOString(),
+    });
+  }
+  return index;
+}
+
 export function readIndex(projectRoot: string): MemoryIndex {
-  return (
+  const index =
     readJson<MemoryIndex>(memoryIndexFile(projectRoot)) ?? {
       projectRoot,
       updatedAt: new Date().toISOString(),
       sessions: {},
-    }
-  );
+      archives: [],
+    };
+  return reconcileArchives(projectRoot, index);
 }
 
 export function writeIndex(projectRoot: string, index: MemoryIndex): MemoryIndex {
   index.updatedAt = new Date().toISOString();
+  if (!Array.isArray(index.archives)) index.archives = [];
   writeJson(memoryIndexFile(projectRoot), index);
   return index;
 }
@@ -141,17 +193,45 @@ export async function keepRecent(
     });
   }
 
-  const prev = readIndex(projectRoot).sessions[sessionID];
-  touchIndex(projectRoot, sessionID, {
+  const now = new Date().toISOString();
+  const archiveFile = memoryArchiveFile(projectRoot, sessionID);
+  const index = readIndex(projectRoot);
+  const prev = index.sessions[sessionID];
+  index.sessions[sessionID] = {
+    ...(prev ?? {}),
+    sessionID,
+    updatedAt: now,
     kept: recent.length,
     archivedTotal: (prev?.archivedTotal ?? 0) + older.length,
-    lastMessageAt: recent.length ? recent[recent.length - 1].at : new Date().toISOString(),
-  });
+    archiveFile,
+    lastMessageAt: recent.length ? recent[recent.length - 1].at : now,
+  };
+
+  if (older.length > 0) {
+    let size = 0;
+    try {
+      size = fs.statSync(archiveFile).size;
+    } catch {
+      size = 0;
+    }
+    const previousArchive = index.archives.find((a) => a.sessionID === sessionID);
+    index.archives = index.archives.filter((a) => a.sessionID !== sessionID);
+    index.archives.push({
+      sessionID,
+      file: archiveFile,
+      archived: (previousArchive?.archived ?? 0) + older.length,
+      bytes: size,
+      firstAt: previousArchive?.firstAt ?? now,
+      lastAt: now,
+      updatedAt: now,
+    });
+  }
+  writeIndex(projectRoot, index);
 
   return {
     kept: recent.length,
     archived: older.length,
-    archiveFile: memoryArchiveFile(projectRoot, sessionID),
+    archiveFile,
   };
 }
 
@@ -160,14 +240,18 @@ export function readArchive(projectRoot: string, sessionID: string, limit = 50):
 }
 
 export function archiveSummary(projectRoot: string, sessionID: string): string {
-  const entry = readIndex(projectRoot).sessions[sessionID];
+  const index = readIndex(projectRoot);
+  const entry = index.sessions[sessionID];
   if (!entry) return "No archived memory yet for this session.";
   const exists = readText(entry.archiveFile) !== undefined;
+  const known = index.archives.find((a) => a.sessionID === sessionID);
   return [
     `Session ${sessionID}`,
     `kept in RAM: ${entry.kept}`,
     `archived to disk: ${entry.archivedTotal}`,
     `archive file: ${entry.archiveFile}${exists ? "" : " (not written yet)"}`,
+    `index knows ${index.archives.length} archive file(s); this session: ${known ? `${known.archived} message(s), ${known.bytes} bytes` : "not indexed yet"}`,
     `last message: ${entry.lastMessageAt}`,
+    `index file: ${memoryIndexFile(projectRoot)}`,
   ].join("\n");
 }

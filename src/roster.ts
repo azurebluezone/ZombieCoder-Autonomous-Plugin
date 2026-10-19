@@ -38,6 +38,88 @@ export const SHARED_RULES = [
   "- Identity: পরিচয় নষ্ট হলে নীরব সংশোধন নয়, ঘোষিত বিরতি.",
 ].join("\n");
 
+export type PermissionRule = {
+  action: string;
+  resource: string;
+  effect: "allow" | "deny" | "ask";
+};
+
+// V2 permission names. The old config used `permission` (singular) and `bash`;
+// V2 uses `permissions` (plural) and `shell`. See opencode.ai/v2/docs/permissions.
+export const GLOBAL_PERMISSIONS: PermissionRule[] = [
+  { action: "read", resource: "*", effect: "allow" },
+  { action: "read", resource: "*.env", effect: "ask" },
+  { action: "read", resource: "*.env.*", effect: "ask" },
+  { action: "read", resource: "*.env.example", effect: "allow" },
+  { action: "edit", resource: "*", effect: "allow" },
+  { action: "glob", resource: "*", effect: "allow" },
+  { action: "grep", resource: "*", effect: "allow" },
+  { action: "shell", resource: "*", effect: "ask" },
+  { action: "shell", resource: "git status *", effect: "allow" },
+  { action: "shell", resource: "git diff *", effect: "allow" },
+  { action: "shell", resource: "git log *", effect: "allow" },
+  { action: "shell", resource: "git push *", effect: "ask" },
+  { action: "webfetch", resource: "*", effect: "allow" },
+  { action: "websearch", resource: "*", effect: "allow" },
+  { action: "external_directory", resource: "*", effect: "ask" },
+];
+
+// Only the arbiter orchestrates. Specialists cannot launch more agents, so one
+// bad delegation cannot turn into an unbounded recursion. The security auditor
+// is read-only by default: it inspects, it does not rewrite.
+export function agentPermissions(a: AgentDef): PermissionRule[] {
+  const rules: PermissionRule[] = [
+    {
+      action: "subagent",
+      resource: "*",
+      effect: a.id === "zombiecoder" ? "allow" : "deny",
+    },
+  ];
+  if (a.id === "brishti") rules.push({ action: "edit", resource: "*", effect: "deny" });
+  return rules;
+}
+
+export function agentSystemPrompt(a: AgentDef): string {
+  return [
+    "# " + a.name + " — " + a.callSign,
+    "",
+    "**Role:** " + a.role,
+    "",
+    "**Mission:** " + a.mission,
+    "",
+    "**Core Persona:** \"" + a.persona + "\"",
+    "",
+    "**Responsibilities:** " + a.duties.join(", "),
+    "",
+    "**Decision Rule:** " + a.rule,
+    "",
+    SHARED_RULES,
+    "",
+  ].join("\n");
+}
+
+// V2 config entry. `system` is the agent's whole prompt; `permissions` is the
+// ordered rule list. Both live in the global/project opencode.json so the pack
+// does not depend on a single discovery door.
+export function agentConfigEntry(a: AgentDef, model?: string): Record<string, unknown> {
+  return {
+    description: a.description,
+    mode: a.mode,
+    model: model || a.model,
+    system: agentSystemPrompt(a),
+    permissions: agentPermissions(a),
+  };
+}
+
+export function renderAgentsConfig(
+  roster: AgentDef[] = ROSTER,
+  assignment: Record<string, string> = {},
+): Record<string, Record<string, unknown>> {
+  const agents: Record<string, Record<string, unknown>> = {};
+  for (const a of roster) agents[a.id] = agentConfigEntry(a, assignment[a.id]);
+  return agents;
+}
+
 export const ROSTER: AgentDef[] = [
   {
     id: "manu",
@@ -144,8 +226,8 @@ export const ROSTER: AgentDef[] = [
     rule: "capabilities.tools কে বিশ্বাস কোরো না — probe করে দেখো। একটি মডেল যা পারে না, সেটা তার অজুহাত নয় আমাদের ব্যর্থতা।",
   },
   {
-    id: "kobir",
-    name: "Kobir",
+    id: "zombiecoder",
+    name: "ZombieCoder",
     callSign: "The Chair",
     role: "Chief Arbiter",
     description: "Chief Arbiter — aggregation, conflict resolution, priority and final decision.",
@@ -166,29 +248,18 @@ export const ROSTER: AgentDef[] = [
 // ctx.agent.transform using the resolved plan, and OpenCode's own default carries the
 // load if the plugin ever fails to load. Independence is a choice, not an accident.
 export function agentMarkdown(a: AgentDef, model?: string): string {
-  const body = [
-    "# " + a.name + " — " + a.callSign,
-    "",
-    "**Role:** " + a.role,
-    "",
-    "**Mission:** " + a.mission,
-    "",
-    "**Core Persona:** \"" + a.persona + "\"",
-    "",
-    "**Responsibilities:** " + a.duties.join(", "),
-    "",
-    "**Decision Rule:** " + a.rule,
-    "",
-    SHARED_RULES,
-    "",
-  ].join("\n");
+  const rules = agentPermissions(a)
+    .map((r) => `  - action: ${r.action}\n    resource: "${r.resource}"\n    effect: ${r.effect}`)
+    .join("\n");
   const frontmatter = [
     "---",
     'description: "' + a.description + '"',
     "mode: " + a.mode,
     "model: " + (model || a.model),
+    "permissions:",
+    rules,
     "---",
     "",
   ].join("\n");
-  return frontmatter + body;
+  return frontmatter + agentSystemPrompt(a);
 }

@@ -97,15 +97,44 @@ type Report = {
 
 // Evidence that the installer already exposed this provider to OpenCode. The
 // catalog can lag behind setup; this file cannot.
-function providerConfiguredOnDisk(projectRoot: string, providerID: string): boolean {
-  for (const name of ["opencode.json", "opencode.jsonc"]) {
-    try {
-      const raw = fs.readFileSync(path.join(projectRoot, name), "utf8");
-      // jsonc is only checked for the provider key; comments are not parsed here.
-      const matched = new RegExp(`"${providerID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:`).test(raw);
-      if (matched) return true;
-    } catch {
-      /* file absent or unreadable */
+//
+// OpenCode merges configuration from the current directory up to the filesystem
+// root, plus the user global config and the system config. A working directory
+// under an installed root (e.g. /home/<user>) inherits the provider from an
+// ancestor `opencode.json`, so checking only the location root would wrongly
+// fall back to free models. We mirror OpenCode's search order here.
+export function providerConfigCandidates(projectRoot: string): string[] {
+  const dirs: string[] = [];
+  let dir = path.resolve(projectRoot);
+  for (;;) {
+    dirs.push(dir);
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home) dirs.push(path.join(home, ".config", "opencode"));
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (xdg) dirs.push(path.join(xdg, "opencode"));
+  if (process.platform === "win32") {
+    if (process.env.APPDATA) dirs.push(path.join(process.env.APPDATA, "opencode"));
+    if (process.env.ProgramData) dirs.push(path.join(process.env.ProgramData, "opencode"));
+  } else {
+    dirs.push("/etc/opencode");
+  }
+  return dirs;
+}
+
+export function providerConfiguredOnDisk(projectRoot: string, providerID: string): boolean {
+  // jsonc is only checked for the provider key; comments are not parsed here.
+  const matched = new RegExp(`"${providerID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:`);
+  for (const dir of providerConfigCandidates(projectRoot)) {
+    for (const name of ["opencode.json", "opencode.jsonc"]) {
+      try {
+        if (matched.test(fs.readFileSync(path.join(dir, name), "utf8"))) return true;
+      } catch {
+        /* file absent or unreadable */
+      }
     }
   }
   return false;

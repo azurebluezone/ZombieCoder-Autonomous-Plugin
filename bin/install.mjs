@@ -10,7 +10,14 @@
 //   6. probe MCP (if a URL was supplied) and write .zombiecoder/mcp.json
 //   7. merge opencode.json (custom provider + verified MCP) so the live runtime can see the URL
 //   8. write the agent markdown (resolved models if a plan exists, else baseline)
-//   9. write the entrypoint LAST, so OpenCode never boots a half-finished install
+//   9. seed .zombiecoder/SSOT.md, syllabus.md and memory/ for THIS working directory
+//  10. write the entrypoint LAST, so OpenCode never boots a half-finished install
+//
+// Default target is the OS user root: os.homedir() resolves to /home/<user> on
+// Linux/macOS and C:\\Users\\<user> on Windows. OpenCode searches .opencode/
+// directories from the working directory up to the filesystem root, so one
+// install there covers every working directory beneath it; each directory still
+// gets its own .zombiecoder on first boot.
 //
 // NO backups, NO .bak files, NO archives: the owner keeps their own. Writes are atomic
 // (temp + rename) and existing files are only replaced when the content actually differs.
@@ -42,9 +49,10 @@ function value(name, fallback) {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 }
 
-// The owner's rule: the runtime lives at the OS root working directory
-// (/home/<user>), so that is the default. Pass --dir to install into a specific
-// project instead. Every install is still explicit in the printed target line.
+// The owner's rule: the runtime lives at the OS user root. os.homedir() resolves
+// per platform — /home/<user> on Linux/macOS, C:\Users\<user> on Windows — so the
+// installer never hardcodes one OS. Pass --dir to install into a project instead.
+// Every install still prints the resolved target explicitly.
 const TARGET = path.resolve(value("--dir", os.homedir()));
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
@@ -120,6 +128,7 @@ if (INTERACTIVE) {
 
 const report = { target: TARGET, steps: [] };
 let mcpProbe = null;
+let providerReachable = false;
 
 async function step(name, fn) {
   try {
@@ -204,7 +213,7 @@ function providerEntry(baseURL, modelIDs) {
 
 console.log("=".repeat(72));
 console.log(`ZombieCoder install — ${PKG.name} v${PKG.version}`);
-console.log(`target: ${TARGET}`);
+console.log(`target: ${TARGET}  [${process.platform} user root]`);
 console.log("=".repeat(72));
 
 const opencodeDir = path.join(TARGET, ".opencode");
@@ -339,6 +348,7 @@ await step("sync opencode.json", async () => {
     return "nothing to write (free models, no MCP)";
   }
   const probe = providerUrl ? await probeProviderModels(providerUrl) : null;
+  providerReachable = Boolean(probe?.ok);
 
   const next = { ...existing };
   if (!next.$schema) next.$schema = "https://opencode.ai/config.json";
@@ -410,7 +420,50 @@ await step("write agent markdown", async () => {
   return `${mod.ROSTER.length} agents (${written} changed, ${resolved} models)`;
 });
 
-// ---- 9. entrypoint LAST -------------------------------------------------------
+// ---- 9. seed .zombiecoder (SSOT + syllabus + memory) --------------------------
+// The runtime regenerates SSOT at boot and every 5 minutes, but the owner asked
+// for the individual working directory to be populated by the install itself,
+// not only after OpenCode first opens it.
+await step("seed .zombiecoder SSOT + syllabus + memory", async () => {
+  const { bootstrapDirs } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "paths.ts"));
+  const { scanProject } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "scan.ts"));
+  const { writeSsot } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "ssot.ts"));
+  const { ensureSyllabus } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "syllabus.ts"));
+  const roster = await import(path.join(PACKAGE_ROOT, "src", "roster.ts"));
+
+  for (const dir of bootstrapDirs(TARGET)) ensureDir(dir);
+
+  const fp = scanProject(TARGET);
+  const agentIds = roster.ROSTER.map((a) => a.id);
+
+  // If the runtime already resolved a plan (re-install over a live location),
+  // reuse it; otherwise SSOT honestly says the plugin will resolve on first boot.
+  let assignment = {};
+  let strategy = "pending (resolved by the plugin on first boot)";
+  try {
+    const plan = JSON.parse(fs.readFileSync(path.join(zombieDir, "models.json"), "utf8"));
+    if (plan?.assignment && typeof plan.assignment === "object") assignment = plan.assignment;
+    if (typeof plan?.strategy === "string" && plan.strategy) strategy = plan.strategy;
+  } catch {
+    /* first install: no runtime plan yet */
+  }
+
+  const ssot = writeSsot(TARGET, fp, {
+    agentCount: roster.ROSTER.length,
+    agentIds,
+    modelStrategy: strategy,
+    modelAssignment: assignment,
+    customProviderUrl: PROVIDER_URL,
+    customProviderReachable: providerReachable,
+    mcpUrl: MCP_URL,
+    mcpReachable: Boolean(mcpProbe?.ok),
+    mcpTools: mcpProbe?.tools?.map((tool) => tool.name) ?? [],
+  });
+  const syllabus = ensureSyllabus(TARGET, fp, agentIds);
+  return `SSOT ${ssot.bytes}B, syllabus ${syllabus.created ? "seeded" : "kept"}, memory dir ready`;
+});
+
+// ---- 10. entrypoint LAST ------------------------------------------------------
 // OpenCode watches .opencode/plugins/. Writing the entrypoint only after deps,
 // config, provider/MCP, and agent markdown are ready prevents a mid-install
 // plugin boot that sees half an install (and then gets clobbered by our writes).
@@ -440,6 +493,8 @@ if (!fs.existsSync(path.join(pluginFolder, "plugin.ts"))) {
 console.log("-".repeat(72));
 console.log(`installed: ${report.steps.length - failed.length}/${report.steps.length} steps ok`);
 console.log(`layout: ${TARGET}/.opencode/{agents,plugins,skills} + ${TARGET}/.zombiecoder`);
+console.log("per-directory: every working directory under this target gets its own");
+console.log("  .zombiecoder (SSOT, syllabus, memory) when OpenCode opens it.");
 console.log("next: boot OpenCode in that directory so the plugin's setup() runs.");
 console.log("-".repeat(72));
 process.exit(failed.length ? 1 : 0);

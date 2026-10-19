@@ -24,10 +24,20 @@ npm install
 npm run install-pack -- --dir /path/to/your/project
 ```
 
-`--dir` না দিলে ইনস্টলার **OS-এর root working directory** টার্গেট করে, অর্থাৎ
-`/home/<user>` (এই মেশিনে `/home/xubuntu`)। নির্দিষ্ট কোনো প্রজেক্টে চাইলে
-`--dir /path/to/your/project` দিন — দুই জায়গাতেই `.zombiecoder` আলাদা থাকবে,
-তাই প্রজেক্টের memory আর root-এর memory মিশে যাবে না।
+`--dir` না দিলে ইনস্টলার **OS-এর নিজের user root** নিজে চিনে নেয় —
+`os.homedir()` ব্যবহার করে, তাই hardcoded path নেই:
+
+| OS | Default target |
+| --- | --- |
+| Linux | `/home/<user>` (এই মেশিনে `/home/xubuntu`) |
+| macOS | `/Users/<user>` |
+| Windows | `C:\Users\<user>` |
+
+OpenCode **working directory থেকে filesystem root পর্যন্ত** ancestor `.opencode/`
+খুঁজে, তাই root-এ একবার ইনস্টল করলে তার নিচের **প্রতিটি working directory** সেই
+plugin পায়। আর প্রতিটি working directory নিজের আলাদা `.zombiecoder`
+(SSOT, syllabus, memory, agents) পায় — Plugin সংখ্যাগুলো মিশে যায় না।
+নির্দিষ্ট প্রজেক্টে আলাদা ইনস্টল চাইলে `--dir /path/to/your/project` দিন।
 
 ইনস্টলার **প্রশ্ন করবে** (TTY থাকলে):
 
@@ -49,7 +59,7 @@ URL এবং কোনো MCP নয়।
 
 | Flag | অর্থ |
 | --- | --- |
-| `--dir <path>` | ইনস্টল টার্গেট (default: `$HOME`) |
+| `--dir <path>` | ইনস্টল টার্গেট (default: OS user root, `os.homedir()`) |
 | `--provider-url <url>` | কাস্টম OpenAI-compatible URL; `none` দিলে ফ্রি মডেল |
 | `--mcp-url <url>` | MCP URL; `none`/বাদ দিলে skip |
 | `--yes` / `--defaults` | কোনো প্রশ্ন নয়, ডিফল্ট ব্যবহার |
@@ -66,8 +76,10 @@ URL এবং কোনো MCP নয়।
 6. MCP URL দিলে probe করে `.zombiecoder/mcp.json` লেখে
 7. `opencode.json`-এ provider + MCP merge করে (শুধু probe-verified MCP)
 8. নয়টি agent markdown লেখে (runtime plan থাকলে resolved model, নাহলে baseline)
-9. `.opencode/plugins/zombiecoder.ts` entrypoint **সবার শেষে** লেখে, যাতে OpenCode
-   কখনো half-finished install boot না করে
+9. **এই working directory-র জন্য** `.zombiecoder/SSOT.md`, `syllabus.md` ও `memory/`
+   সাথে সাথে seed করে — OpenCode খোলার আগেই ফাইলগুলো থাকে
+10. `.opencode/plugins/zombiecoder.ts` entrypoint **সবার শেষে** লেখে, যাতে OpenCode
+    কখনো half-finished install boot না করে
 
 সব write atomic (temp + rename)। কোনো `.bak`, archive বা silent overwrite নেই।
 
@@ -98,7 +110,9 @@ URL এবং কোনো MCP নয়।
 
 1. কাস্টম provider-এর **নিজের** `baseURL` live probe করা হয় — শুধু config-এ লেখা আছে
    বলেই মৃত server-এ agent পাঠানো হয় না।
-2. provider reachable + `opencode.json`-এ configured → সেখানকার মডেল।
+2. provider reachable + `opencode.json`-এ configured (নিজের, ancestor অথবা global) →
+   সেখানকার মডেল। তাই root-এ একবার provider লিখলে নিচের প্রতিটি working directory
+   সেটাই inheritance হিসেবে পায়, free model-এ পড়ে না।
 3. নাহলে OpenCode-এর cost `0/0` ফ্রি মডেল।
 4. কিছুই না পেলে baseline `opencode/big-pickle`।
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { setup } from "../src/plugin.ts";
+import { setup, providerConfiguredOnDisk } from "../src/plugin.ts";
 
 type Fake = ReturnType<typeof makeContext>;
 
@@ -132,4 +132,19 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(toolStep.detail, "5 registered");
 
   await cleanup();
+});
+
+test("providerConfiguredOnDisk inherits a provider from an ancestor opencode.json", () => {
+  const ancestor = tempProject();
+  const child = path.join(ancestor, "packages", "app");
+  fs.mkdirSync(child, { recursive: true });
+  fs.writeFileSync(
+    path.join(ancestor, "opencode.json"),
+    JSON.stringify({ providers: { "zc-ancestor-A": { models: {} } } }),
+  );
+
+  assert.equal(providerConfiguredOnDisk(child, "zc-ancestor-A"), true, "ancestor provider not detected");
+  assert.equal(providerConfiguredOnDisk(child, "zc-ancestor-B"), false, "unknown provider falsely detected");
+
+  fs.rmSync(ancestor, { recursive: true, force: true });
 });

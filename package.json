@@ -12,6 +12,7 @@
   },
   "scripts": {
     "install-pack": "node --experimental-strip-types bin/install.mjs",
+    "setup": "node scripts/setup.mjs",
     "configure": "node --experimental-strip-types scripts/configure.mjs",
     "generate": "node --experimental-strip-types src/generate.ts",
     "typecheck": "tsc --noEmit",

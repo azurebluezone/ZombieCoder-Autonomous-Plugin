@@ -189,6 +189,34 @@ CI বা `--yes`-এ কোনো প্রশ্ন থাকে না; flag 
 
 সব write atomic (temp + rename)। কোনো `.bak`, archive বা silent overwrite নেই।
 
+## One-command setup (clone → run)
+
+নতুন মেশিনে শুধু clone করে এক command — install + configure + verify:
+
+```bash
+git clone https://github.com/azurebluezone/ZombieCoder-Autonomous-Plugin.git zombiecoder
+cd zombiecoder
+node scripts/setup.mjs --dir /path/to/project
+```
+
+এটা করবে:
+
+1. Node >= 22.6 check
+2. global pack install (`bin/install.mjs --yes`) — ৯ agent, `mode: all`, `subagent allow`
+3. target project configure — `scripts/configure.mjs` চালিয়ে `SSOT.md` + `syllabus.md`
+4. verify — SSOT/syllabus/project map/agent team/global agents
+
+শুধু যাচাই করতে (কিছু লিখবে না):
+
+```bash
+node scripts/setup.mjs --status --dir /path/to/project
+npm run setup -- --status
+```
+
+Flags: `--dir`, `--url`, `--no-install`, `--no-reload`, `--force`,
+`--force-install`, `--status`, `--json`, `--help`।
+Windows, Linux, macOS। কিছু delete করে না।
+
 ## Project configure script
 
 OpenCode না চললেও যেকোনো project-এ `SSOT.md` ও `syllabus.md` তৈরি করতে এক command:

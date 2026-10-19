@@ -42,6 +42,7 @@ export const SHARED_RULES = [
   "- Evidence Before Confidence — প্রমাণের আগে আত্মবিশ্বাস নয়.",
   "- Tool Before Guess — টুল থাকলে অনুমান নয়, টুল ব্যবহার করো.",
   "- State Uncertainty — নিশ্চিত না হলে Unknown / Unable to Verify বলো.",
+  "- File/state যাচাই — কোনো ফাইল/ডিরেক্টরি/SSOT/syllabus আছে কি না তা না দেখে বলা যাবে না। `stat`/`read` বা `node scripts/setup.mjs --status` চালিয়ে দেখে বলো; যাচাই ছাড়া মন্তব্য = UNVERIFIED, আর সেটাই ভুল।",
   "- Labels: SOURCE_VERIFIED, CONFIG_VALIDATED, LIVE_PROBE_PASSED, END_TO_END_TESTED, NOT_TESTED, UNVERIFIED. একটি লেবেল অন্য স্তরের প্রমাণ নয়.",
   "- Regression Mindset — Fix One → Check All → Nothing Broken? → Approve.",
   "- Dual Validation — Engineer Validation ও User Validation আলাদা করে রিপোর্ট করো.",

@@ -83,12 +83,13 @@ plugin নিজে তৈরি করে।
 
 1. Provider-এর নিজের base URL-এ `GET /models` probe করা হয়।
 2. Probe সফল হলে `/v1/models`-এর model IDs দিয়ে agent assignment তৈরি হয়।
-3. Provider configured কিন্তু unreachable হলে OpenCode-এর cost `0/0` free model
-   ব্যবহৃত হয়।
-4. Free model পাওয়া না গেলে `opencode/big-pickle` baseline ব্যবহৃত হয়।
-5. Global install-এ provider live হলে বা configured provider outage হলে runtime
+3. Provider reachable কিন্তু `/v1/models` খালি হলে সেটি unusable ধরা হয়;
+   OpenCode-এর cost `0/0` free model-এ fallback হয়।
+4. Provider configured কিন্তু unreachable হলেও একই free-model fallback হয়।
+5. Free model পাওয়া না গেলে `opencode/big-pickle` baseline ব্যবহৃত হয়।
+6. Global install-এ provider live হলে বা configured provider outage হলে runtime
    plan global agent assignment update করতে পারে।
-6. প্রজেক্ট নিজে provider disable করলে (`customProviderUrl: ""`) global
+7. প্রজেক্ট নিজে provider disable করলে (`customProviderUrl: ""`) global
    assignment downgrade হয় না।
 
 ---
@@ -400,6 +401,10 @@ Tool ব্যবহার করতে হলে gateway/model-এ native tool 
 llama.cpp-ভিত্তিক gateway-এ প্রযোজ্য হলে chat template/`--jinja` এবং
 tool-capable model ব্যবহার করুন।
 
+যাচাইয়ের নিয়ম: response-এ `choices[0].message.tool_calls` থাকতে হবে। শুধু
+text-এর ভিতরে JSON থাকলে সেটি OpenCode execute করবে না—তখন model অথবা chat
+template বদলাতে হবে, plugin-এ tool যোগ করলে সমস্যা মিটবে না।
+
 ### ৬.৫ Origin URL handshake (URL-only)
 
 Cloud runtime-এ provider-এর public URL মাঝে মাঝে বদলাতে পারে, কিন্তু API key
@@ -635,11 +640,25 @@ Skill directory lazy; skill থাকলে তবেই register হয়।
 
 ### SSOT refresh
 
-Plugin প্রতি ৫ মিনিটে project SSOT refresh করে। Manual refresh:
+Plugin প্রতি ৫ মিনিটে project SSOT refresh করে। Manual refresh করতে RPC door ব্যবহার করুন:
 
 ```text
-zombiecoder.get_working_directory
+POST /api/rpc/zombiecoder/ssot_refresh
 ```
+
+`zombiecoder.get_working_directory` শুধু path/layout দেয়; এটি SSOT refresh করে না।
+
+### RPC control surface
+
+Plugin-এর `ctx.rpc` door `POST /api/rpc/zombiecoder/<method>`-এ reachable। এটি আলাদা server নয়—একই plugin process-এর read-mostly control surface।
+
+| Method | কাজ |
+|---|---|
+| `working_directory`, `status`, `agents` | Bound root, plugin version, roster |
+| `ssot`, `ssot_refresh` | SSOT পড়া / refresh |
+| `syllabus`, `syllabus_append` | Syllabus পড়া / append-only lesson |
+| `memory`, `memory_index`, `audit` | Recent context, archive index, audit log |
+| `models`, `fingerprint` | Current model plan, live project scan |
 
 ---
 

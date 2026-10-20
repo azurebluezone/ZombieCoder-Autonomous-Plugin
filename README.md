@@ -1,90 +1,65 @@
 # ZombieCoder Autonomous Plugin
 
-> **ZombieCoder** — যেখানে কোড ও কথা বলে
-> Owner: **Sahon Srabon** (Developer Zone), Dhaka, Bangladesh
+**OpenCode-এর জন্য local-first এজেন্ট প্যাক**
+
+**Owner:** Sahon Srabon (Developer Zone), Dhaka, Bangladesh<br>
+**License:** Proprietary — Local Freedom Protocol
 
 [![OpenCode](https://img.shields.io/badge/OpenCode-2.0.32%2B-111111)](https://opencode.ai)
 [![Node](https://img.shields.io/badge/Node-22.6%2B-339933)](https://nodejs.org)
-[![License](https://img.shields.io/badge/license-Proprietary%20%E2%80%94%20Local%20Freedom-blue)](#license)
-
-OpenCode-এর জন্য একটি **লোকাল-ফার্স্ট, স্বয়ংসম্পূর্ণ** এজেন্ট প্যাক। একবার ইনস্টল
-করলে যেকোনো working directory-তে:
-
-- `.zombiecoder/SSOT.md` — live filesystem scan + shared agent team/persona
-- `.zombiecoder/syllabus.md` — hierarchical footprint + append-only lessons
-- `.zombiecoder/memory/` — শেষ ৫টি message context-এ রাখে, বাকিগুলো archive করে
-- `.zombiecoder/.state/` — internal setup report + audit log (user-facing নয়)
-- ৯টি এজেন্ট, সবাই `mode: primary` (প্রতিটি main agent, dropdown-এ সরাসরি selectable)
-- shared persona: সত্যবাদিতা, সময়-সচেতনতা, root-level OS/UI-UX/AIML/MCP/SAP/LSP baseline
-- ৬টি `zombiecoder.*` টুল
-- ৫ মিনিট পরপর SSOT refresh
-
-প্রতি response শুরু হয় **“ভাইয়া”** দিয়ে; chat বাংলায়, কিন্তু code/command/shortcut
-ইংরেজিতে। মিথ্যে বলা নয় — না জানলে “জানি না”, ভুল হলে স্বীকার।
-
-কাস্টম OpenAI-compatible provider বা MCP URL না থাকলে এটি OpenCode-এর ফ্রি
-মডেলে **নিরবে ফলব্যাক** করে — কিছুই ভাঙে না।
 
 ---
 
-## সূচিপত্র
+## ১. পরিচিতি
 
-1. [কেন এই প্যাক](#কেন-এই-প্যাক)
-2. [এক নজরে আর্কিটেকচার](#এক-নজরে-আর্কিটেকচার)
-3. [Requirements](#requirements)
-4. [Quick install — global (default)](#quick-install--global-default)
-5. [Installer flags](#installer-flags)
-6. [Installer কী কী করে](#installer-কী-কী-করে)
-7. [Global `opencode.json` — V2 shape](#global-opencodejson--v2-shape)
-8. [চালু করার পর কী হয়](#চালু-করার-পর-কী-হয়)
-9. [Model routing](#model-routing)
-10. [MCP](#mcp)
-11. [Memory ও archive index](#memory-ও-archive-index)
-12. [Tools](#tools)
-13. [Skills — lazy, দুই স্তর](#skills--lazy-দুই-স্তর)
-14. [Layout](#layout)
-15. [Optional project config override](#optional-project-config-override)
-16. [Agent roster](#agent-roster)
-17. [Verification checklist](#verification-checklist)
-18. [Troubleshooting](#troubleshooting)
-19. [Development](#development)
-20. [Evidence labels](#evidence-labels)
-21. [License](#license)
+ZombieCoder একটি স্বয়ংসম্পূর্ণ OpenCode এজেন্ট প্যাক। এটি একবার ইনস্টল করে
+একাধিক প্রজেক্টে ব্যবহার করা যায়। প্রতিটি প্রজেক্টে এটি শুধু প্রয়োজনীয়
+runtime state তৈরি করে; প্রজেক্টের ভিতরে আলাদা `.opencode` install তৈরি করে না।
+
+প্রধান বৈশিষ্ট্য:
+
+- ৯টি এজেন্ট, প্রত্যেকটি `mode: primary`; কোনো এজেন্ট subagent নয়।
+- OpenCode-এর agent dropdown থেকে প্রত্যেক এজেন্ট সরাসরি নির্বাচন করা যায়।
+- OpenAI-compatible provider-এর `/v1/models` থেকে মডেল তালিকা নেওয়া হয়।
+- Provider unavailable হলে OpenCode-এর free model এবং সর্বশেষে baseline model-এ
+  fallback হয়।
+- প্রতিটি প্রজেক্টের জন্য `.zombiecoder/SSOT.md`, `syllabus.md`, memory ও
+  audit state তৈরি হয়।
+- MCP server শুধু probe সফল হলে register হয়।
+- API key, provider URL, provider ID, model strategy ও baseline model
+  configuration/environment/flags দিয়ে পরিবর্তন করা যায়।
+
+> এই ডকুমেন্ট GitHub Markdown-এর জন্য লেখা। বাংলা অংশে standard Unicode
+> Bengali ব্যবহৃত হয়েছে; code, command, path, API নাম ও identifier ইংরেজিতে
+> রাখা হয়েছে।
 
 ---
 
-## কেন এই প্যাক
-
-বেশিরভাগ এজেন্ট প্যাক একটা project-এ আটকে থাকে, অথবা প্রতিটি working
-directory-তে `.opencode` তৈরি করে জায়গা নষ্ট করে। ZombieCoder উল্টো পথে চলে:
-
-| সমস্যা | ZombieCoder-এর উত্তর |
-| --- | --- |
-| প্রতিটি project-এ আলাদা ইনস্টল | **একটি global install** (`~/.config/opencode`) সব working directory-তে কাজ করে |
-| project-এর ভেতরে `.opencode` clutter | working directory-তে শুধু **`.zombiecoder`**; `.opencode` নেই |
-| সবসময় মৃত provider-এ request | provider **live probe**; না পেলে free model |
-| ভুলে যাওয়া context | শেষ ৫টি message context-এ + **archive index**; বাকি সব append-only archive |
-| project-এ config clutter | global config global-ই; project-এ শুধু SSOT, syllabus, memory |
-| footprint আলাদা ফাইলে | hierarchical footprint **syllabus.md**-এর ভিতরে; আলাদা ফাইল নেই |
-| agent dropdown-এ আসে না | সব agent `mode: primary` — প্রতিটি main agent হিসেবে selectable |
-| দীর্ঘ, অপ্রয়োজনীয় উত্তর | shared persona: time-value, two-to-the-point, নির্দিষ্ট context |
-| অন্ধভাবে SSOT লেখা | bounded filesystem scan, signature, setup report |
-| agent-এর নাম বদলালেও পুরনো agent থেকে যায় | rename করলে পুরনো markdown ও config entry **prune** হয় |
-
-## এক নজরে আর্কিটেকচার
+## ২. আর্কিটেকচার
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│  ~/.config/opencode  (GLOBAL — একবার)                                │
-│  ├── opencode.json      provider + models + agents + permissions+MCP │
-│  ├── agents/*.md        ৯টি persona (markdown door)                  │
-│  ├── plugins/           ZombieCoder runtime (auto-discovered)        │
-│  └── zombiecoder/       config.json · models.json · mcp.json         │
+│ Install root                                                         │
+│                                                                      │
+│  opencode.json       provider, models, agents, permissions, MCP      │
+│  agents/*.md          ৯টি agent persona                              │
+│  plugins/             ZombieCoder runtime                            │
+│  zombiecoder/         config.json, models.json, mcp.json             │
+│  node_modules/        runtime dependencies                           │
 └───────────────────────────────┬──────────────────────────────────────┘
-                                │  একই plugin সব জায়গায়
+                                │
+                                │ OpenCode global loader
+                                ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ OpenCode                                                             │
+│  ├── ৯টি primary agent                                               │
+│  ├── zombiecoder.* tools                                             │
+│  └── প্রতি প্রজেক্টে plugin setup                                    │
+└───────────────────────────────┬──────────────────────────────────────┘
+                                │
         ┌───────────────────────┼────────────────────────┐
         ▼                       ▼                        ▼
-  /project/a/.zombiecoder  /project/b/.zombiecoder  /project/c/.zombiecoder
+  project-a/.zombiecoder  project-b/.zombiecoder  project-c/.zombiecoder
   ├── SSOT.md              ├── SSOT.md              ├── SSOT.md
   ├── syllabus.md          ├── syllabus.md          ├── syllabus.md
   ├── memory/              ├── memory/              ├── memory/
@@ -92,571 +67,725 @@ directory-তে `.opencode` তৈরি করে জায়গা নষ্
   └── skills/ (lazy)       └── skills/ (lazy)       └── skills/ (lazy)
 ```
 
-`.state/` internal; `.zombiecoder/config.json` optional manual override, auto-created নয়।
-`fingerprint.json`, `models.json`, `footprint.jsonl`, `mcp.json` project-এ থাকে না।
+### ২.১ দুই স্তরের state
 
-## Requirements
+| স্তর | অবস্থান | উদ্দেশ্য |
+|---|---|---|
+| Install state | `~/.opencode` অথবা `~/.config/opencode` | Provider, agent, plugin, model plan |
+| Project state | `<project>/.zombiecoder` | SSOT, syllabus, memory, audit |
 
-- Node.js **22.6+** (type stripping; Node 24 recommended)
-- OpenCode **2.0.32+**
-- ইন্টারনেট — শুধু কাস্টম provider/MCP probe-এর জন্য; না থাকলে free model
+Install state একবার তৈরি হয়। Project state প্রথমবার প্রজেক্ট খোলার সময়
+plugin নিজে তৈরি করে।
 
-## Quick install — global (default)
+### ২.২ Model routing
+
+1. Provider-এর নিজের base URL-এ `GET /models` probe করা হয়।
+2. Probe সফল হলে `/v1/models`-এর model IDs দিয়ে agent assignment তৈরি হয়।
+3. Provider configured কিন্তু unreachable হলে OpenCode-এর cost `0/0` free model
+   ব্যবহৃত হয়।
+4. Free model পাওয়া না গেলে `opencode/big-pickle` baseline ব্যবহৃত হয়।
+5. Global install-এ provider live হলে বা configured provider outage হলে runtime
+   plan global agent assignment update করতে পারে।
+6. প্রজেক্ট নিজে provider disable করলে (`customProviderUrl: ""`) global
+   assignment downgrade হয় না।
+
+---
+
+## ৩. প্রয়োজনীয়তা
+
+| উপাদান | ন্যূনতম |
+|---|---|
+| Node.js | 22.6 বা তার বেশি |
+| npm | Node-এর সাথে bundled |
+| Git | যেকোনো সাম্প্রতিক version |
+| OpenCode | 2.0.32 বা তার বেশি |
+| Internet | Provider/MCP probe-এর সময়; না থাকলে free fallback |
+
+Node version যাচাই:
 
 ```bash
+node --version
+npm --version
+```
+
+---
+
+## ৪. সরাসরি ক্লোন ও ইনস্টল
+
+### ৪.১ Linux / macOS
+
+```bash
+# ১. রিপোজিটরি ক্লোন
 git clone https://github.com/azurebluezone/ZombieCoder-Autonomous-Plugin.git
 cd ZombieCoder-Autonomous-Plugin
-npm install
+
+# ২. dependency ইনস্টল
+npm ci
+
+# ৩. validation
+npm run typecheck
+npm test
+
+# ৪. self-contained install
+npm run install-pack -- --config-dir "$HOME/.opencode" --yes
+```
+
+### ৪.২ Windows PowerShell
+
+```powershell
+# ১. রিপোজিটরি ক্লোন
+git clone https://github.com/azurebluezone/ZombieCoder-Autonomous-Plugin.git
+cd ZombieCoder-Autonomous-Plugin
+
+# ২. dependency ইনস্টল
+npm.cmd ci
+
+# ৩. validation
+npm.cmd run typecheck
+npm.cmd test
+
+# ৪. self-contained install
+npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
+```
+
+> PowerShell-এ `npm.ps1` blocked হলে `npm.cmd` ব্যবহার করুন।
+
+### ৪.৩ Standard global install (বিকল্প)
+
+`~/.config/opencode`-এ ইনস্টল করতে চাইলে:
+
+```bash
 npm run install-pack -- --yes
 ```
 
-এটি OpenCode-এর **প্রকৃত global config directory**-তে ইনস্টল করে:
+Windows PowerShell:
 
-| OS | Global target |
-| --- | --- |
-| Linux / macOS | `~/.config/opencode` (`$XDG_CONFIG_HOME` থাকলে সেটি) |
-| Windows | `%USERPROFILE%\.config\opencode` |
+```powershell
+npm.cmd run install-pack -- --yes
+```
 
-> **গুরুত্বপূর্ণ:** সাধারণ OpenCode global config হলো `~/.config/opencode`।
-> কিন্তু `--config-dir ~/.opencode` দিলে `~/.opencode` নিজেই সম্পূর্ণ install
-> root হয়ে যায় — `opencode.json`, `agents/`, `plugins/`, `zombiecoder/config.json`
-> সব একই directory-তে থাকে। `--dir` বা `--home` দিলে পুরনো layout-ই থাকে।
-
-> **`--dir` legacy:** project-local install এখনো `.opencode` ও project-local
-> config/model cache তৈরি করে। পরিষ্কার working directory চাইলে **global**
-> ইনস্টল ব্যবহার করুন; normal path-এ `.zombiecoder`-এ config/models থাকে না।
-
-প্রয়োজনে project-local ইনস্টল (legacy):
+Self-contained `.opencode` install ব্যবহার করলে OpenCode-এর global loader-এর
+জন্য pointer প্রয়োজন। Linux:
 
 ```bash
-npm run install-pack -- --dir /path/to/your/project --yes
+mkdir -p "$HOME/.config/opencode"
+for item in opencode.json agents plugins zombiecoder node_modules package.json; do
+  ln -sfn "$HOME/.opencode/$item" "$HOME/.config/opencode/$item"
+done
 ```
 
-পুরনো OS-root `.opencode` আচরণ চাইলে:
+Windows PowerShell (Developer Mode অথবা Administrator প্রয়োজন):
 
-```bash
-npm run install-pack -- --home --yes
-```
-
-সম্পূর্ণ self-contained install (সব config একই directory-তে):
-
-```bash
-npm run install-pack -- --config-dir ~/.opencode --yes
-```
-
-> **Global loader:** OpenCode 2.1.1 নিজের global config `~/.config/opencode` থেকে
-> পড়ে। `--config-dir ~/.opencode` দিলে canonical ফাইল `.opencode`-এ থাকে; সব
-> working directory-তে সেই config পেতে `~/.config/opencode/opencode.json` এবং
-> দরকারি `agents/`, `plugins/`, `zombiecoder/`, `node_modules/`-এর symlink দিন।
-> ফাইল duplicate করবেন না।
-
-ইনস্টলার TTY থাকলে প্রশ্ন করবে:
-
-```text
-ZombieCoder setup — press Enter to accept the bracketed value.
-OpenAI-compatible URL [<ZOMBIECODER_PROVIDER_URL default>] ("none" = OpenCode free models only):
-MCP URL [skip]:
-```
-
-- **OpenAI-compatible URL** — Enter চাপলে `ZOMBIECODER_PROVIDER_URL` (বা আগের
-  install-এর saved URL); `none` লিখলে শুধু OpenCode-এর ফ্রি মডেল।
-- **MCP URL** — দিলে installer `initialize → notifications/initialized →
-  tools/list` probe করে টুলের তালিকা আনে; খালি রাখলে কোনো MCP server register
-  হয় না।
-- **Provider key** — prompt-এ জিজ্ঞেস করা হয় না (terminal-এ echo হয়ে যেত)।
-  `ZOMBIECODER_PROVIDER_KEY`/`ZOMBIECODER_API_KEY` বা `--provider-key` দিন।
-
-CI বা `--yes`-এ কোনো প্রশ্ন থাকে না; flag/env না দিলে documented default URL
-এবং কোনো MCP নয়।
-
-## Installer flags
-
-| Flag | অর্থ |
-| --- | --- |
-| `--global` | OpenCode global config directory-তে ইনস্টল (default) |
-| `--dir <path>` | নির্দিষ্ট project-এ `.opencode`-সহ ইনস্টল |
-| `--config-dir <path>` | Self-contained install root: `opencode.json`, `agents/`, `plugins/`, `zombiecoder/` সব একই directory-তে |
-| `--home` | পুরনো OS-root `~/.opencode` ইনস্টল (`opencode.json` home root-এ থাকে) |
-| `--provider-url <url>` | কাস্টম OpenAI-compatible URL; `none` দিলে free model |
-| `--provider-id <id>` | OpenCode provider ID (default: `ZOMBIECODER_PROVIDER_ID`, নাহলে আগের install) |
-| `--provider-key <key>` | Gateway API key; `ZOMBIECODER_PROVIDER_KEY`/`ZOMBIECODER_API_KEY`-ও চলে। কখনো print হয় না |
-| `--mcp-url <url>` | MCP URL; `none`/বাদ দিলে skip |
-| `--yes` / `--defaults` | কোনো প্রশ্ন নয়, ডিফল্ট ব্যবহার |
-| `--no-install` | `npm install` চালাবে না |
-| `--no-provider-config` | `opencode.json` merge করবে না |
-
-## Installer কী কী করে
-
-1. install root scaffold — global: `~/.config/opencode/{agents,plugins}`,
-   project: `<project>/.opencode/{agents,plugins}`, self-contained:
-   `<config-dir>/{agents,plugins,zombiecoder}`; **skills directory বানায় না**
-2. plugin runtime graph কপি — `plugin.ts`, `roster.ts`, `zombie/*`
-3. `package.json`-এ `@opencode/plugin@^2.0.32` যোগ করে (merge, clobber নয়)
-4. `npm install` চালায়
-5. install root-এর `zombiecoder/config.json` seed/update করে
-6. MCP URL দিলে probe করে install root-এর `zombiecoder/mcp.json` লেখে
-7. provider live probe করে install root-এর deterministic model plan তৈরি করে
-8. `opencode.json`-এ **provider + models + V2 agents + permissions + MCP** merge করে
-9. ৯টি agent markdown লেখে (সবগুলো `mode: primary`); পুরনো `kobir.md` ও `agents.kobir` prune করে
-10. **শুধু project-local legacy install-এ** `.zombiecoder` seed করে; global
-    install-এ skip — runtime first boot-এ শুধু `SSOT.md`, `syllabus.md`,
-    `memory/`, `.state/` তৈরি করে। project-এ `config.json`, `models.json`,
-    `fingerprint.json`, `footprint.jsonl`, `mcp.json` auto-create হয় না
-11. plugin entrypoint **সবার শেষে** লেখে, যাতে OpenCode কখনো half-finished
-    install boot না করে
-
-সব write atomic (temp + rename)। কোনো `.bak`, archive বা silent overwrite নেই।
-
-## One-command setup (clone → run)
-
-নতুন মেশিনে শুধু clone করে এক command — install + configure + verify:
-
-```bash
-git clone https://github.com/azurebluezone/ZombieCoder-Autonomous-Plugin.git zombiecoder
-cd zombiecoder
-node scripts/setup.mjs --dir /path/to/project
-```
-
-এটা করবে:
-
-1. Node >= 22.6 check
-2. global pack install (`bin/install.mjs --yes`) — ৯ agent, `mode: primary`, delegation allow
-3. target project configure — `scripts/configure.mjs` চালিয়ে `SSOT.md` + `syllabus.md`
-4. verify — SSOT/syllabus/project map/agent team/global agents
-
-শুধু যাচাই করতে (কিছু লিখবে না):
-
-```bash
-node scripts/setup.mjs --status --dir /path/to/project
-npm run setup -- --status
-```
-
-Flags: `--dir`, `--url`, `--no-install`, `--no-reload`, `--force`,
-`--force-install`, `--status`, `--json`, `--help`।
-Windows, Linux, macOS। কিছু delete করে না।
-
-## Project configure script
-
-OpenCode না চললেও যেকোনো project-এ `SSOT.md` ও `syllabus.md` তৈরি করতে এক command:
-
-```bash
-# Linux / macOS
-node --experimental-strip-types scripts/configure.mjs --dir /path/to/project
-
-# Windows (PowerShell / cmd)
-node --experimental-strip-types scripts\configure.mjs --dir "C:\path\to\project"
-
-# repo থেকে npm দিয়ে
-npm run configure -- --dir /path/to/project
-```
-
-কী করে:
-
-1. global install verify করে (৯ agent, `mode: primary`, delegation allow); না থাকলে
-   `bin/install.mjs --yes` চালায়
-2. `.zombiecoder/{memory,.state}` বানায়
-3. running OpenCode server-কে location reload করতে বলে — plugin `setup()` তখন
-   `SSOT.md` + `syllabus.md` লেখে
-4. OpenCode না চললে plugin-এর নিজের `scan`/`ssot`/`syllabus` module দিয়ে সরাসরি
-   `SSOT.md` + `syllabus.md` লেখে
-5. `.zombiecoder/.state/configure-report.json` + audit line লেখে
-
-Flags: `--dir`, `--url`, `--no-install`, `--no-reload`, `--force`, `--json`, `--help`।
-কিছু delete করে না; syllabus-এর lessons অপরিবর্তিত থাকে। Windows, Linux, macOS।
-
-## Global `opencode.json` — V2 shape
-
-OpenCode **V2** uses `agents` (plural), `permissions` (plural), `shell` (not
-`bash`), and `mcp.servers`. পুরনো `agent` / `permission` / `bash` shape হলো V1;
-এই installer সেটি লেখে না।
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "model": "<provider-id>/<model-id>",
-  "default_agent": "zombiecoder",
-  "providers": {
-    "<provider-id>": {
-      "name": "ZombieCoder Gateway",
-      "package": "@opencode/ai/providers/openai-compatible",
-      "settings": {
-        "baseURL": "<gateway-url>/v1",
-        "apiKey": "<ZOMBIECODER_PROVIDER_KEY>"
-      },
-      "models": {
-        "<model-id>": {
-          "name": "<model-id>",
-          "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
-          "cost": { "input": 0, "output": 0 }
-        }
-      }
-    }
-  },
-  "permissions": [
-    { "action": "read", "resource": "*", "effect": "allow" },
-    { "action": "edit", "resource": "*", "effect": "allow" },
-    { "action": "shell", "resource": "*", "effect": "ask" },
-    { "action": "shell", "resource": "git status *", "effect": "allow" },
-    { "action": "shell", "resource": "git push *", "effect": "ask" }
-  ],
-  "agents": {
-    "zombiecoder": {
-      "description": "Chief Arbiter — aggregation, conflict resolution, priority and final decision.",
-      "mode": "primary",
-      "model": "<provider-id>/<model-id>",
-      "system": "# ZombieCoder — The Chair\n\n…shared rules…",
-      "permissions": [
-        { "action": "subagent", "resource": "*", "effect": "allow" }
-      ]
-    },
-    "manu": {
-      "description": "Chief Systems Architect — architecture, data flow, agent orchestration, SSOT.",
-      "mode": "primary",
-      "model": "<provider-id>/<model-id>",
-      "system": "# Manu — The Builder\n\n…shared rules + cross-domain baseline…",
-      "permissions": [
-        { "action": "subagent", "resource": "*", "effect": "allow" }
-      ]
-    }
-  },
-  "mcp": {
-    "servers": {
-      "zombiecoder": { "type": "remote", "url": "https://…/mcp" }
-    }
-  }
+```powershell
+$source = "$env:USERPROFILE\.opencode"
+$target = "$env:USERPROFILE\.config\opencode"
+New-Item -ItemType Directory -Force $target | Out-Null
+foreach ($item in @("opencode.json","agents","plugins","zombiecoder","node_modules","package.json")) {
+  New-Item -ItemType SymbolicLink -Force `
+    -Path (Join-Path $target $item) `
+    -Target (Join-Path $source $item) | Out-Null
 }
 ```
 
-- **provider** — live probe pass করলে সেই model; probe fail করলে আগের resolved
-  plan অপরিবর্তিত থাকে, আর HTTP error স্পষ্ট দেখানো হয়।
-- **agents** — ৯টি agent-এর description, mode, model, system prompt ও permissions।
-  সবগুলো `mode: primary`: প্রতিটি main agent, dropdown-এ সরাসরি selectable;
-  কোনো roster agent subagent mode-এ নেই। shared persona + cross-domain baseline
-  প্রতিটি prompt-এ যায়।
-- **permissions** — global rules আগে, user-এর নিজের rules পরে; তাই user-এর
-  later rule শেষ কথা বলে।
-- **mcp.servers** — শুধু probe-verified server।
-- **plugins** — global `plugins/` directory auto-discovered; installer আপনার
-  existing `plugins` array মুছে না।
+> Symlink না দিলে `.opencode` config শুধু home directory-এর অধীনস্থ প্রজেক্টে
+> পাওয়া যাবে। Standard global install ব্যবহার করলে symlink প্রয়োজন নেই।
 
-## চালু করার পর কী হয়
+### ৪.৪ ইনস্টলের পর কী হবে
 
-ওই working directory-তে OpenCode খুললেই `setup()` চলে:
+Installer নিচের কাজগুলো ধাপে ধাপে সম্পন্ন করে:
 
-| ধাপ | ফল |
-| --- | --- |
-| `bootstrap-dirs` | শুধু `.zombiecoder/{memory,.state}`; skills lazy, `.opencode` নয় |
-| `load-config` | shipped default < global `zombiecoder/config.json` < optional manual `.zombiecoder/config.json` (auto-create নয়) |
-| `scan-project` | bounded live filesystem scan (files/dirs/bytes/languages/key files) |
-| `resolve-models` | কাস্টম provider live probe → না হলে cost 0/0 ফ্রি মডেল; plan শুধু memory-তে, project-এ `.zombiecoder/models.json` নয় |
-| `probe-mcp` | MCP URL থাকলে টুলের তালিকা global `zombiecoder/mcp.json`-এ; project-এ নয় |
-| `write-ssot` | `.zombiecoder/SSOT.md` — project scan + agent team/shared persona; global model/MCP config নেই |
-| `ensure-syllabus` | `.zombiecoder/syllabus.md` — নতুন হলে hierarchical footprint seed; পুরনো হলে একবার upgrade (`### Project map` যোগ, `kobir`→`zombiecoder`, lessons অপরিবর্তিত) |
-| `agent-folder` / `agent-config` | install root-এ ৯টি markdown + V2 `agents` config; সব `mode: primary` |
-| `agent-bind` | markdown ও config দুই door-এই resolved model + permissions verify |
-| `register-tools` | `zombiecoder` namespace-এ ৬টি টুল |
-| `register-skills` | `.zombiecoder/skills/*.md` থাকলে তবেই register |
-| `hook-*` | context, compaction, model.request, session index, tool audit |
-| `refresh` | প্রতি ৫ মিনিটে SSOT rewrite + branded signature |
+1. Install root তৈরি করে।
+2. Plugin runtime graph copy করে।
+3. `@opencode/plugin` dependency যোগ করে।
+4. `npm install` চালায় (অথবা `--no-install` দিলে skip করে)।
+5. `zombiecoder/config.json` seed বা update করে।
+6. MCP URL থাকলে probe করে।
+7. Provider-এর `/v1/models` probe করে model plan তৈরি করে।
+8. `opencode.json`-এ provider, models, agents, permissions ও MCP merge করে।
+9. ৯টি agent markdown লেখে এবং পুরনো legacy agent prune করে।
+10. Project-local legacy install-এ `.zombiecoder` seed করে।
 
-সবকিছুর durable প্রমাণ থাকে: `.zombiecoder/.state/setup-report.json`।
-Action audit: `.zombiecoder/.state/audit.jsonl`।
+Install শেষ হলে কোথায় কী থাকবে:
 
-> **Project clean:** global install-এ project-এ `config.json`, `models.json`,
-> `fingerprint.json`, `footprint.jsonl`, `mcp.json` তৈরি হয় না। `project_fingerprint`
-> টুল live scan করে; footprint `syllabus.md`-এর ভিতরে থাকে।
+| Path | বিষয়বস্তু |
+|---|---|
+| `~/.opencode/opencode.json` | Provider, model, agent ও permission config |
+| `~/.opencode/agents/*.md` | ৯টি agent persona |
+| `~/.opencode/plugins/zombiecoder.ts` | Plugin entrypoint |
+| `~/.opencode/zombiecoder/config.json` | Runtime configuration |
+| `~/.opencode/zombiecoder/models.json` | Model plan ও probe result |
+| `~/.opencode/node_modules/` | Runtime dependencies |
+| `<project>/.zombiecoder/SSOT.md` | Project scan ও agent team |
+| `<project>/.zombiecoder/syllabus.md` | Project footprint ও lessons |
+| `<project>/.zombiecoder/memory/` | Conversation context ও archive index |
+| `<project>/.zombiecoder/.state/` | Setup report ও audit log |
 
-> **Global agent config ও fallback:** global install-এ `<global>/opencode.json`
-> ও `<global>/agents/*.md` installer seed করে। Runtime `auto` plan-এ provider live
-> থাকলে global agents সেই provider model-এ update হয়; provider outage হলে
-> free-fallback model-এ নামে। যে project শুধু নিজের config-এ provider disable
-> করে (`customProviderUrl: ""`), সে global assignment downgrade করে না।
+> Project-এ `config.json`, `models.json`, `fingerprint.json`, `footprint.jsonl`
+> বা `mcp.json` তৈরি হয় না।
 
-### Model routing
+---
 
-1. কাস্টম provider-এর **নিজের** `baseURL` live probe করা হয় — শুধু config-এ
-   লেখা আছে বলেই মৃত server-এ agent পাঠানো হয় না। Probe fail করলে installer
-   আগের resolved plan রাখে (নতুন model বানায় না) এবং HTTP error দেখায়;
-   runtime `auto` plan configured provider outage দেখলে free-fallback-এ যায় এবং
-   global agent assignment-ও সেই plan অনুযায়ী update করে।
-2. provider reachable + `opencode.json`-এ configured (নিজের, ancestor অথবা
-   global) → সেখানকার মডেল। global config ব্যবহার করলে নিচের প্রতিটি working
-   directory সেটাই inheritance হিসেবে পায়।
-3. নাহলে OpenCode-এর cost `0/0` ফ্রি মডেল।
-4. কিছুই না পেলে baseline `opencode/big-pickle`।
+## ৫. প্রথমবার চালু ও যাচাই
 
-Mapping ডিফল্টে **deterministic** (agent id-এর stable hash), যাতে footprint
-reproducible থাকে। চাইলে optional manual `.zombiecoder/config.json`-এ
-`"modelStrategy": "random"` দিতে পারেন — ফাইলটি auto-create হয় না।
+### ৫.১ OpenCode চালু করা
 
-> **Native tool calls:** gateway/model OpenAI-র native `tool_calls` না দিলে
-> OpenCode text-embedded JSON (`{"name":"glob",...}`) execute করে না। তাই simple
-> chat pass হলেও tool path আলাদাভাবে `NOT_TESTED`; tool-capable model অথবা
-> gateway chat template/`--jinja` দরকার।
+OpenCode খুলে যেকোনো প্রজেক্ট select করুন। প্রথমবার plugin setup চালাবে এবং
+প্রজেক্টে `.zombiecoder` তৈরি করবে।
 
-> **Session model আলাদা:** OpenCode একটি session-এর selected model আলাদা রাখে।
-> Agent config-এর `model` নতুন session-এর জন্য default দেয়; চলমান session-এর
-> model বদলাতে desktop-এ model picker ব্যবহার করুন।
+Agent dropdown থেকে `zombiecoder` অথবা অন্য যেকোনো agent নির্বাচন করা যাবে।
+সব agent primary; কোনো agent subagent হিসেবে configure করা নেই।
 
-> **Global agents ও runtime plan:** global install-এ agent model global
-> `opencode.json`/`agents/*.md` থেকে আসে। live provider বা outage — দুই ক্ষেত্রেই
-> runtime plan নতুন প্রমাণ হিসেবে global assignment update করতে পারে। শুধু
-> project-নিজে provider disable করলে (`customProviderUrl: ""`) global model
-> downgrade হয় না।
+### ৫.২ Configuration যাচাই
 
-### MCP
+OpenCode CLI available থাকলে:
 
-- Installer শুধু **probe-verified** MCP server `mcp.servers`-এ লেখে; dead URL
-  লিখে বুট slow করে না।
-- Runtime-এ প্রতিবার `tools/list` probe হয় (read-only)। কোনো arbitrary tool
-  call করা হয় না, কারণ tool-এর side effect থাকতে পারে।
-- MCP tool-এর আসল call হয় OpenCode-এর নিজের MCP client দিয়ে।
-
-### Memory ও archive index
-
-- `.zombiecoder/memory/index.json` — প্রতি session-এর kept/archived count
-  **এবং `archives[]`** — প্রতিটি archive file, sessionID, message count, bytes,
-  first/last timestamp।
-- `.zombiecoder/memory/<session>.jsonl` — archive (append-only)।
-- শেষ ৫টি message RAM/context-এ থাকে; বাকিগুলো compaction hook-এ archive-এ যায়।
-- `readIndex()` disk স্ক্যান করে index-এ না থাকা পুরনো `.jsonl`-ও খুঁজে নেয়,
-  তাই agent `index.json` দেখলেই সব archive খুঁজে পায়।
-- `.zombiecoder/.state/audit.jsonl` — internal action audit line (footprint নয়;
-  user-facing ফাইল নয়)।
-
-### Tools
-
-`zombiecoder` namespace-এ ৬টি টুল:
-
-| Tool | কাজ |
-| --- | --- |
-| `get_working_directory` | working directory + `.zombiecoder` layout (SSOT, syllabus, memory) |
-| `read_ssot` | SSOT markdown (project scan + shared team/persona) |
-| `read_syllabus` | syllabus markdown (hierarchical footprint + lessons) |
-| `append_syllabus` | append-only lesson যোগ; audit `.state/audit.jsonl`-এ |
-| `project_fingerprint` | live filesystem scan; কোনো fingerprint file লেখে না |
-| `memory_archive` | `index.json`-এর sessionID নিয়ে archive rows পড়া |
-
-### Skills — lazy, দুই স্তর
-
-- **workstation tier:** `<project>/.zombiecoder/skills/*.md` — প্লাগইন register
-  করে। ফোল্ডার **আগে থেকে তৈরি হয় না**; skill দরকার হলে নিজে বানান বা
-  agent-কে বলুন।
-- **project tier:** `<project>/.opencode/skills/*.md` — OpenCode নিজেই পায়, তাই
-  duplicate এড়াতে প্লাগইন দ্বিতীয়বার register করে না।
-
-## Layout
-
-### Global install (default)
-
-```text
-~/.config/opencode/
-├── opencode.json                 # provider + models + agents + permissions + MCP
-├── agents/*.md                   # ৯টি agent persona (markdown door)
-├── plugins/zombiecoder.ts        # entrypoint (auto-discovered)
-├── plugins/zombiecoder/          # runtime graph
-├── package.json                  # @opencode/plugin
-├── node_modules/
-└── zombiecoder/
-    ├── config.json               # global ZombieCoder config
-    ├── models.json               # install-time plan
-    └── mcp.json                  # probe result (if configured)
+```bash
+opencode debug config
+opencode debug agents
+opencode plugin list
+opencode models
 ```
 
-### Every working directory (runtime)
+প্রত্যাশিত ফলাফল:
 
-```text
-<project>/
-└── .zombiecoder/
-    ├── SSOT.md                   # project scan + agent team/shared persona
-    ├── syllabus.md               # hierarchical footprint + lessons
-    ├── memory/
-    │   ├── index.json            # sessions + archives[]
-    │   └── <session>.jsonl       # conversation archive
-    ├── .state/                   # internal: setup-report.json, audit.jsonl
-    ├── skills/                   # only if a skill is added
-    └── config.json               # optional manual override; never auto-created
+- `debug config` install root-এর `opencode.json` দেখাবে।
+- `debug agents`-এ ৯টি roster agent থাকবে, প্রত্যেকের `mode: primary`।
+- `plugin list`-এ `zombiecoder` local plugin দেখাবে।
+- `models`-এ provider model এবং প্রয়োজন হলে `opencode/big-pickle` থাকবে।
+
+### ৫.৩ প্রথম inference test
+
+```bash
+opencode run --agent zombiecoder \
+  --model "<provider-id>/<model-id>" \
+  "Reply with exactly: OK"
 ```
 
-**No `.opencode` in the working directory** when the plugin is installed globally.
-**No** `fingerprint.json`, `models.json`, `footprint.jsonl`, `mcp.json`,
-`setup-report.json` at the project root; those belong to the global install or
-the internal `.state/` directory.
+Windows PowerShell:
 
-## Optional project config override
+```powershell
+opencode run --agent zombiecoder `
+  --model "<provider-id>/<model-id>" `
+  "Reply with exactly: OK"
+```
 
-Global install-এর আসল config: `~/.config/opencode/zombiecoder/config.json`
-(Windows: `%USERPROFILE%\.config\opencode\zombiecoder\config.json`)।
-প্রয়োজন হলে একটি project manually `.zombiecoder/config.json` বানিয়ে global
-config override করতে পারে; প্লাগইন সেটি **auto-create করে না**।
+Provider ও model ID `opencode models` output থেকে নিন।
+
+### ৫.৪ Setup report
+
+কোনো step ব্যর্থ হলে দেখুন:
+
+```bash
+cat <project>/.zombiecoder/.state/setup-report.json
+cat <project>/.zombiecoder/.state/audit.jsonl
+```
+
+Windows PowerShell:
+
+```powershell
+Get-Content <project>\.zombiecoder\.state\setup-report.json
+Get-Content <project>\.zombiecoder\.state\audit.jsonl
+```
+
+---
+
+## ৬. OpenAI-compatible URL পরিবর্তন
+
+### ৬.১ Recommended: installer আবার চালানো
+
+বর্তমান install root `.opencode` হলে Linux:
+
+```bash
+export ZOMBIECODER_PROVIDER_URL="https://new-provider.example/v1"
+export ZOMBIECODER_PROVIDER_KEY="new-api-key"
+export ZOMBIECODER_PROVIDER_ID="my-gateway"
+
+npm run install-pack -- --config-dir "$HOME/.opencode" --yes
+```
+
+Windows PowerShell:
+
+```powershell
+$env:ZOMBIECODER_PROVIDER_URL = "https://new-provider.example/v1"
+$env:ZOMBIECODER_PROVIDER_KEY = "new-api-key"
+$env:ZOMBIECODER_PROVIDER_ID = "my-gateway"
+
+npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
+
+Remove-Item Env:ZOMBIECODER_PROVIDER_KEY
+```
+
+নিয়ম:
+
+- URL অবশ্যই OpenAI-compatible base URL হতে হবে, সাধারণত `/v1` পর্যন্ত।
+- নতুন key না দিলে installer আগের saved key ব্যবহার করে।
+- Provider ID না দিলে আগের provider ID ব্যবহার হয়।
+- URL পরিবর্তন করলে installer নতুন provider model plan তৈরি করে।
+- `/v1/models` খালি হলে custom model assign হয় না; free fallback active থাকে।
+
+### ৬.২ Manual configuration (advanced)
+
+Installer না চালিয়ে দুই ফাইল একসাথে update করতে হবে:
+
+1. `~/.opencode/zombiecoder/config.json`
+2. `~/.opencode/opencode.json`
+
+`config.json`-এ:
 
 ```json
 {
-  "version": "0.1.0",
-  "customProviderUrl": "https://gpu.zombiecoder.my.id/v1",
-  "customProviderID": "missionbarisal",
-  "customProviderApiKey": "<ZOMBIECODER_PROVIDER_KEY>",
-  "baselineModel": "opencode/big-pickle",
-  "mcpUrl": "",
-  "opencodeApiUrl": "http://127.0.0.1:49374",
-  "ssotRefreshMs": 300000,
+  "customProviderUrl": "https://new-provider.example/v1",
+  "customProviderID": "my-gateway",
+  "customProviderApiKey": "<api-key>",
   "modelStrategy": "auto"
 }
 ```
 
-- `customProviderUrl: ""` → শুধু OpenCode ফ্রি মডেল।
-- `customProviderApiKey: ""` → কোনো `Authorization: Bearer` header পাঠানো হয় না;
-  gateway key চাইলে env/flag/config দিয়ে দিন।
-- `baselineModel` → শেষ অবলম্বন মডেল; `ZOMBIECODER_BASELINE_MODEL` দিয়েও বদলানো যায়।
-- `mcpUrl: ""` → MCP নেই।
-- `modelStrategy`: `auto` (custom → free → baseline), `custom` (custom; fail করলে
-  baseline, কখনো dead provider নয়), `free` (শুধু cost 0/0), `baseline` (pinned),
-  `random` (auto + random mapping)।
-- Global install-এ `zombiecoder/config.json` baseline।
-
-### Environment overrides
-
-সব deployment value environment দিয়ে override করা যায়; env file-এর চেয়ে
-আগে। `ZOMBIECODER_PROVIDER_URL`, `ZOMBIECODER_PROVIDER_ID`,
-`ZOMBIECODER_PROVIDER_KEY` (অথবা `ZOMBIECODER_API_KEY`),
-`ZOMBIECODER_BASELINE_MODEL`, `ZOMBIECODER_MODEL_STRATEGY`,
-`ZOMBIECODER_MCP_URL`, `OPENCODE_API_URL` (অথবা `OPENCODE_BASE`)।
-
-## Agent roster
-
-| # | Agent ID | Name | Role |
-| --- | --- | --- | --- |
-| 1 | `manu` | Manu | Chief Systems Architect |
-| 2 | `jarin` | Jarin | Principal Debug & Root Cause Engineer |
-| 3 | `brishti` | Brishti | Chief Security & Trust Analyst |
-| 4 | `rashed` | Rashed | Principal Performance Engineer |
-| 5 | `halim` | Halim | Documentation & Knowledge Engineer |
-| 6 | `majnu` | Majnu | Chief Quality Assurance Engineer |
-| 7 | `nila` | Nila | UI/UX Designer |
-| 8 | `tuhin` | Tuhin | AIML & Model Auditor |
-| 9 | `zombiecoder` | ZombieCoder | Chief Arbiter |
-
-`zombiecoder` হলো আগের `kobir`-এর নতুন নাম। পুরনো `kobir.md` ও `agents.kobir`
-ইনস্টলার/রানটাইম দুই জায়গা থেকেই মুছে যায়।
-
-সব ৯টি agent **`mode: primary`** — প্রতিটি main agent, dropdown থেকে ইচ্ছেমতো select করা যায়। প্রতিটি agent
-একই **shared rules** ও **cross-domain baseline** পায়:
-
-- শুরুতে “ভাইয়া”; chat বাংলায়, code/shortcut ইংরেজিতে।
-- মিথ্যে নয়; ভুল স্বীকার; না জানলে “জানি না”।
-- সময় মূল্য: প্রথম pass-এ module map, পরের pass-এ নির্দিষ্ট module; shortest
-  evidence-backed উত্তর।
-- Filer না পড়ে মনে রাখার ভরসা নয়; SSOT/syllabus আগে পড়ো; footprint syllabus-এ
-  লিখো, আলাদা ফাইল নয়।
-- Provider-এ শুধু দরকারি context; বড় window দাবি নয়; dependency কমাও।
-- UI/UX, AI/ML, MCP, SAP, LSP, Linux/POSIX, Windows Win32 — root level চিন্তা;
-  regex/parser/code-generation/CLI-এর shortcut জানো।
-- দরকার হলে skill নিজে খোঁজো/ব্যবহার করো; স্বাধীনভাবে কাজ করো।
-
-## Verification checklist
-
-Global install-এর পরে এই প্রমাণগুলো রাখুন:
+`opencode.json`-এ provider entry-এর `settings.baseURL`, `settings.apiKey` এবং
+প্রয়োজনীয় `models` update করতে হবে। এরপর:
 
 ```bash
-# 1. global config-এ provider + ৯টি agent + permissions
-python3 - <<'PY'
-import json
-d=json.load(open("/home/$USER/.config/opencode/opencode.json"))
-print("providers:", list(d.get("providers", {})))
-print("agents:", sorted(d.get("agents", {})))
-print("permissions:", len(d.get("permissions", [])))
-assert "zombiecoder" in d["agents"] and "kobir" not in d["agents"]
-PY
-
-# 2. global agents markdown-এ rename
-ls ~/.config/opencode/agents | sort
-
-# 3. working directory-তে .opencode নেই, .zombiecoder আছে
-cd /path/to/project
-test ! -d .opencode && echo "no .opencode (correct)"
-find .zombiecoder -maxdepth 2 | sort
-
-# 4. project clean: no config/models/fingerprint/footprint/mcp, internal state only
-cd /path/to/project
-for f in config.json models.json fingerprint.json footprint.jsonl mcp.json; do
-  test ! -e ".zombiecoder/$f" && echo "clean: no .zombiecoder/$f"
-done
-test -f .zombiecoder/.state/setup-report.json && echo "setup report in .state (correct)"
-test -f .zombiecoder/.state/audit.jsonl && echo "audit in .state (correct)"
-
-# 5. setup report (internal)
-python3 - <<'PY'
-import json
-d=json.load(open(".zombiecoder/.state/setup-report.json"))
-print(d["outputs"]["install"])
-print(d["outputs"].get("bound"))
-print([(s["step"], s["ok"]) for s in d["steps"]])
-PY
-
-# 6. syllabus: hierarchical footprint present, kobir gone, lessons intact
-grep -q '^## 2\. Footprint' .zombiecoder/syllabus.md && echo "footprint present"
-grep -q '^### Project map' .zombiecoder/syllabus.md && echo "hierarchical map present"
-! grep -q '^- `kobir`$' .zombiecoder/syllabus.md && echo "kobir renamed"
-grep -n '^### ' .zombiecoder/syllabus.md || echo "no lessons yet (fine)"
-
-# 7. SSOT carries team/persona, not global model/MCP config
-grep -q '^## 7\. Agent team' .zombiecoder/SSOT.md && echo "team/persona present"
-! grep -q '^## .*Model plan' .zombiecoder/SSOT.md && echo "no model plan in SSOT"
-
-# 8. every agent is mode: primary (main agent, never a subagent)
-python3 - <<'PY'
-import json
-d=json.load(open("/home/$USER/.config/opencode/opencode.json"))
-agents=d["agents"]
-assert all(a.get("mode")=="primary" for a in agents.values()), agents
-assert all(any(r.get("action")=="subagent" and r.get("effect")=="allow" for r in a.get("permissions",[])) for a in agents.values())
-print("all agents mode:primary + delegation allow")
-PY
-
-# 9. memory index archives
-python3 - <<'PY'
-import json
-d=json.load(open(".zombiecoder/memory/index.json"))
-print("sessions:", len(d.get("sessions", {})), "archives:", len(d.get("archives", [])))
-PY
+opencode reload
+opencode models
 ```
 
-লেবেল: install path = `CONFIG_VALIDATED`, live provider/models = `LIVE_PROBE_PASSED`,
-setup report + tool list = `END_TO_END_TESTED`, LLM rule-following = `NOT_TESTED`
-(এটি আলাদা behavioural test)।
+> শুধু `config.json` edit করলে `opencode.json`-এর provider base URL নিজে থেকে
+> বদলায় না। তাই installer ব্যবহার করা নিরাপদ।
 
-## Troubleshooting
+### ৬.৩ Model strategy
 
-| লক্ষণ | কারণ / সমাধান |
-| --- | --- |
-| `Location plugins did not finish activating` | global `~/.config/opencode`-এ `npm install` হয়নি। `npm run install-pack -- --yes` আবার চালান। |
-| agent-এ কাস্টম মডেল নেই | `opencode.json`-এ provider আছে কি দেখুন; `.zombiecoder/.state/setup-report.json`-এর `resolve-models` ও `agent-bind`। |
-| global agent model free হয়ে গেছে | configured provider probe fail করলে runtime `auto` ইচ্ছাকৃতভাবে free fallback-এ যায়। gateway ফিরলে reload/installer চালান; unexpected হলে `setup-report.json`-এর `resolve-models` দেখুন। |
-| agent dropdown-এ নেই | সব agent `mode: primary` হওয়া উচিত; global `opencode.json` check করে `npm run install-pack -- --yes` আবার চালান। |
-| agent tool execute করছে না | model native OpenAI `tool_calls` না দিয়ে text-এ JSON tool call দিচ্ছে কি না দেখুন। text JSON OpenCode execute করে না; tool-capable model অথবা gateway chat template/`--jinja` দরকার। |
-| `--config-dir` install অন্য directory-তে দেখা যাচ্ছে না | OpenCode global loader `~/.config/opencode` পড়ে; canonical `.opencode` root-এর `opencode.json`, `agents/`, `plugins/`, `zombiecoder/`, `node_modules/`-এ symlink দিন। |
-| পুরনো syllabus-এ hierarchical footprint নেই | runtime `ensure-syllabus`-এ একবার upgrade করে (`### Project map` যোগ); `.zombiecoder/.state/setup-report.json`-এর step দেখুন। |
-| MCP register হয়নি | MCP URL probe fail করেছে; global `~/.config/opencode/zombiecoder/mcp.json`-এর `error` দেখুন। |
-| কিছু step fail | `.zombiecoder/.state/setup-report.json`-এ প্রতিটি step-এর `ok`/`error`; কনসোলেও `[zombiecoder] step failed`। |
-| project-এ পুরনো config/models/fingerprint দেখা যাচ্ছে | পুরনো version-এর ফাইল। backup নিয়ে `.zombiecoder/config.json`, `models.json`, `fingerprint.json`, `footprint.jsonl`, `mcp.json`, `setup-report.json`, `agents/` সরিয়ে দিন; নতুন setup আর তৈরি করবে না। |
-| SSOT stale | refresh ৫ মিনিট; `zombiecoder.get_working_directory` tool দিয়ে manual check। |
-| `.opencode` এখনো আছে | পুরনো project-local ইনস্টল; global ব্যবহারে working directory থেকে `.opencode` মুছে ফেলুন। |
-| পুরনো session ভিন্ন model ব্যবহার করছে | session-এর selected model আলাদা; নতুন session নিন বা model picker থেকে বদলান। |
+`~/.opencode/zombiecoder/config.json`-এ:
 
-## Development
+| Value | আচরণ |
+|---|---|
+| `auto` | Custom provider → free model → baseline |
+| `custom` | Custom provider; ব্যর্থ হলে baseline |
+| `free` | শুধু OpenCode-এর cost `0/0` model |
+| `baseline` | শুধু baseline model |
+| `random` | Auto routing, কিন্তু agent mapping random |
+
+Environment override:
 
 ```bash
-npm run generate     # doc/*.md + doc/identity.json
-npm run typecheck    # tsc --noEmit
-npm test             # node:test (models, MCP, memory, plugin setup)
+export ZOMBIECODER_MODEL_STRATEGY="auto"
+export ZOMBIECODER_BASELINE_MODEL="opencode/big-pickle"
 ```
 
-## Evidence labels
+Windows PowerShell:
 
-রিপোর্টে ব্যবহৃত label: `SOURCE_VERIFIED`, `CONFIG_VALIDATED`,
-`LIVE_PROBE_PASSED`, `END_TO_END_TESTED`, `NOT_TESTED`, `UNVERIFIED`।
-একটি label অন্য স্তরের প্রমাণ নয়।
+```powershell
+$env:ZOMBIECODER_MODEL_STRATEGY = "auto"
+$env:ZOMBIECODER_BASELINE_MODEL = "opencode/big-pickle"
+```
 
-## License
+### ৬.৪ Native tool calls
 
-Proprietary — **Local Freedom Protocol**.
+OpenCode tool execute করে רק যখন provider/model OpenAI-এর native
+`tool_calls` return করে। Model text-এর ভিতরে JSON tool call দিলে OpenCode সেটি
+execute করে না।
+
+উদাহরণ—যা কাজ করে না:
+
+```json
+{"name": "glob", "arguments": {"pattern": "*"}}
+```
+
+Tool ব্যবহার করতে হলে gateway/model-এ native tool calling সক্রিয় থাকতে হবে।
+llama.cpp-ভিত্তিক gateway-এ প্রযোজ্য হলে chat template/`--jinja` এবং
+tool-capable model ব্যবহার করুন।
+
+---
+
+## ৭. MCP configuration
+
+MCP URL installer flag অথবা environment দিয়ে দিন:
+
+```bash
+export ZOMBIECODER_MCP_URL="https://mcp.example.com/mcp"
+npm run install-pack -- --config-dir "$HOME/.opencode" --yes
+```
+
+Windows PowerShell:
+
+```powershell
+$env:ZOMBIECODER_MCP_URL = "https://mcp.example.com/mcp"
+npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
+```
+
+Installer শুধু probe-verified MCP server register করে। Probe fail করলে কোনো dead
+URL `opencode.json`-এ লেখা হয় না। MCP state:
+
+```text
+~/.opencode/zombiecoder/mcp.json
+```
+
+---
+
+## ৮. এজেন্ট পার্সোনা পরিবর্তন
+
+### ৮.১ Source of truth
+
+Agent-এর একমাত্র source:
+
+```text
+src/roster.ts
+```
+
+প্রত্যেক entry-তে থাকে:
+
+- `id`, `name`, `callSign`
+- `role`, `description`
+- `mode` — অবশ্যই `primary`
+- `model` — installer/runtime resolve করে
+- `mission`, `persona`, `duties`, `rule`
+
+সব agent-এর shared rules:
+
+```text
+SHARED_RULES
+```
+
+`SHARED_RULES` পরিবর্তন করলে সব agent-এর prompt পরিবর্তিত হয়।
+
+### ৮.২ Persona পরিবর্তনের ধাপ
+
+1. `src/roster.ts` খুলুন।
+2. নির্দিষ্ট agent-এর `mission`, `persona`, `duties` অথবা `rule` edit করুন।
+3. `mode: "primary"` রাখুন।
+4. Validation চালান:
+
+```bash
+npm run typecheck
+npm test
+```
+
+5. Documentation regenerate করুন:
+
+```bash
+npm run generate
+```
+
+6. Install root update করুন:
+
+```bash
+npm run install-pack -- --config-dir "$HOME/.opencode" --yes
+```
+
+7. OpenCode reload করুন:
+
+```bash
+opencode reload
+```
+
+Windows PowerShell-এ শেষ দুই ধাপ:
+
+```powershell
+npm.cmd run generate
+npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
+opencode reload
+```
+
+### ৮.৩ শুধু installed copy edit (temporary)
+
+দ্রুত পরীক্ষার জন্য:
+
+```text
+~/.opencode/agents/<agent-id>.md
+~/.opencode/opencode.json → agents.<agent-id>.system
+```
+
+এরপর `opencode reload` করুন। সতর্কতা: পরবর্তী installer run
+`src/roster.ts` থেকে generated agent markdown ও config আবার লিখে দেবে।
+
+### ৮.৪ নতুন agent যোগ করা
+
+1. `src/roster.ts`-এর `ROSTER`-এ নতুন unique `id` দিয়ে entry যোগ করুন।
+2. `mode: "primary"` দিন।
+3. `npm run typecheck && npm test` চালান।
+4. `npm run generate` চালান।
+5. Installer আবার চালান।
+
+Installer নতুন agent-এর markdown ও `opencode.json` entry তৈরি করবে।
+
+### ৮.৫ Agent removal
+
+কোনো agent বাদ দিতে:
+
+1. `ROSTER` থেকে entry সরান।
+2. প্রযোজ্য হলে `LEGACY_AGENT_IDS`-এ সেই `id` যোগ করুন।
+3. Installer আবার চালান।
+
+`LEGACY_AGENT_IDS`-এ না থাকলে installer অচেনা agent automatically prune করে না।
+প্রয়োজনে installed `agents/<id>.md` এবং `opencode.json`-এর entry manually
+সরাতে হবে।
+
+---
+
+## ৯. Agent roster
+
+| # | ID | Name | Role | Call Sign |
+|---|---|---|---|---|
+| ১ | `manu` | Manu | Chief Systems Architect | The Builder |
+| ২ | `jarin` | Jarin | Principal Debug & Root Cause Engineer | The Hunter |
+| ৩ | `brishti` | Brishti | Chief Security & Trust Analyst | The Guardian |
+| ৪ | `rashed` | Rashed | Principal Performance Engineer | The Optimizer |
+| ৫ | `halim` | Halim | Documentation & Knowledge Engineer | The Librarian |
+| ৬ | `majnu` | Majnu | Chief Quality Assurance Engineer | The Judge |
+| ৭ | `nila` | Nila | UI/UX Designer | The Painter |
+| ৮ | `tuhin` | Tuhin | AIML & Model Auditor | The Auditor |
+| ৯ | `zombiecoder` | ZombieCoder | Chief Arbiter | The Chair |
+
+সব agent:
+
+- `mode: primary`
+- একই shared rules ও cross-domain baseline ব্যবহার করে
+- আলাদা model assignment installer/runtime থেকে পায়
+- agent dropdown-এ সরাসরি selectable
+
+---
+
+## ১০. Tools
+
+| Tool | কাজ |
+|---|---|
+| `zombiecoder.read_ssot` | Project SSOT পড়া |
+| `zombiecoder.read_syllabus` | Syllabus ও lessons পড়া |
+| `zombiecoder.get_working_directory` | Working directory ও `.zombiecoder` layout দেখা |
+| `zombiecoder.project_fingerprint` | Live project scan |
+| `zombiecoder.memory_archive` | Archive করা conversation পড়া |
+| `zombiecoder.append_syllabus` | নতুন lesson append করা |
+
+Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
+
+---
+
+## ১১. Skills, memory ও refresh
+
+### Skills
+
+```text
+<project>/.zombiecoder/skills/*.md
+```
+
+Skill directory lazy; skill থাকলে তবেই register হয়।
+
+### Memory
+
+- শেষ ৫টি message context-এ রাখা হয়।
+- পুরনো message archive হয়।
+- Archive index: `.zombiecoder/memory/index.json`।
+
+### SSOT refresh
+
+Plugin প্রতি ৫ মিনিটে project SSOT refresh করে। Manual refresh:
+
+```text
+zombiecoder.get_working_directory
+```
+
+---
+
+## ১২. Installer flags
+
+| Flag | কাজ |
+|---|---|
+| `--global` | OpenCode global config directory-তে install (default) |
+| `--dir <path>` | নির্দিষ্ট project-এ `.opencode` install |
+| `--config-dir <path>` | Self-contained install root |
+| `--home` | পুরনো OS-root `~/.opencode` layout |
+| `--provider-url <url>` | OpenAI-compatible base URL; `none` দিলে free model |
+| `--provider-id <id>` | Provider ID |
+| `--provider-key <key>` | API key; log-এ print হয় না |
+| `--mcp-url <url>` | MCP URL; `none`/বাদ দিলে skip |
+| `--yes` | কোনো prompt ছাড়া install |
+| `--no-install` | `npm install` skip |
+| `--no-provider-config` | `opencode.json` provider merge skip |
+
+Environment variables:
+
+```text
+ZOMBIECODER_PROVIDER_URL
+ZOMBIECODER_PROVIDER_ID
+ZOMBIECODER_PROVIDER_KEY
+ZOMBIECODER_API_KEY
+ZOMBIECODER_BASELINE_MODEL
+ZOMBIECODER_MODEL_STRATEGY
+ZOMBIECODER_MCP_URL
+OPENCODE_API_URL
+OPENCODE_BASE
+```
+
+---
+
+## ১৩. আপডেট, clean reinstall ও uninstall
+
+### Update
+
+```bash
+cd ZombieCoder-Autonomous-Plugin
+git pull --ff-only
+npm ci
+npm run typecheck
+npm test
+npm run install-pack -- --config-dir "$HOME/.opencode" --yes
+opencode reload
+```
+
+Windows PowerShell:
+
+```powershell
+cd ZombieCoder-Autonomous-Plugin
+git pull --ff-only
+npm.cmd ci
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
+opencode reload
+```
+
+Installer existing `opencode.json` merge করে; user-এর নিজের permissions রাখে এবং
+legacy `kobir` entry prune করে।
+
+### Clean reinstall
+
+পুরনো generated state না রেখে install করতে:
+
+```bash
+mv "$HOME/.opencode" "$HOME/.opencode.bak-$(date +%s)"
+npm run install-pack -- --config-dir "$HOME/.opencode" --yes
+```
+
+Windows PowerShell:
+
+```powershell
+Move-Item "$env:USERPROFILE\.opencode" "$env:USERPROFILE\.opencode.bak-$(Get-Date -Format yyyyMMddHHmmss)"
+npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
+```
+
+Backup-এ API key থাকতে পারে; permission restrict করুন।
+
+### Uninstall
+
+1. OpenCode বন্ধ করুন।
+2. `~/.opencode` অথবা `~/.config/opencode` থেকে ZombieCoder entry সরান।
+3. চাইলে install root backup/delete করুন।
+4. Project-level `.zombiecoder` রাখতে পারেন; এটি project data, install নয়।
+
+---
+
+## ১৪. সমস্যা সমাধান
+
+| লক্ষণ | কারণ ও সমাধান |
+|---|---|
+| `node: command not found` | Node 22.6+ install করুন; `node --version` যাচাই করুন |
+| `npm.ps1 cannot be loaded` | PowerShell-এ `npm.cmd` ব্যবহার করুন |
+| `Location plugins did not finish activating` | Install root-এ `npm install` হয়নি; installer আবার চালান |
+| Provider 401/403 | `ZOMBIECODER_PROVIDER_KEY` অথবা `config.json`-এর key যাচাই করুন |
+| `/v1/models` empty | Provider-এ model load হয়নি; free fallback active থাকবে |
+| Agent dropdown-এ নেই | `opencode debug agents`; `mode: primary` এবং install root যাচাই করুন |
+| Agent tool execute করছে না | Native `tool_calls` নেই; tool-capable model বা gateway template ঠিক করুন |
+| `.opencode` অন্য directory-তে পাওয়া যাচ্ছে না | `~/.config/opencode`-এ symlink/pointer দিন |
+| Windows symlink তৈরি হচ্ছে না | Developer Mode চালু করুন অথবা Administrator PowerShell ব্যবহার করুন |
+| MCP register হয়নি | `~/.opencode/zombiecoder/mcp.json`-এর error দেখুন |
+| কোনো setup step fail | `.zombiecoder/.state/setup-report.json` দেখুন |
+| SSOT stale | ৫ মিনিট অপেক্ষা করুন অথবা plugin tool দিয়ে refresh করুন |
+| পুরনো session ভিন্ন model ব্যবহার করছে | নতুন session নিন অথবা model picker থেকে বদলান |
+
+Debug command:
+
+```bash
+opencode debug config
+opencode debug agents
+opencode debug paths
+opencode plugin list
+opencode models
+```
+
+---
+
+## ১৫. নিরাপত্তা
+
+- API key `opencode.json` এবং `zombiecoder/config.json`-এ থাকে।
+- দুই ফাইলের permission `600` রাখুন:
+
+```bash
+chmod 600 "$HOME/.opencode/opencode.json" "$HOME/.opencode/zombiecoder/config.json"
+```
+
+Windows PowerShell:
+
+```powershell
+icacls "$env:USERPROFILE\.opencode\opencode.json" /inheritance:r /grant:r "$env:USERNAME:(R,W)"
+icacls "$env:USERPROFILE\.opencode\zombiecoder\config.json" /inheritance:r /grant:r "$env:USERNAME:(R,W)"
+```
+
+- `~/.opencode` বা `~/.config/opencode` Git-এ commit করবেন না।
+- Chat, log বা screenshot-এ API key প্রকাশ করবেন না।
+- Key প্রকাশ হলে provider dashboard থেকে rotate করুন এবং দুই config ফাইলে নতুন key দিন।
+- Installer key কখনো stdout-এ print করে না।
+
+---
+
+## ১৬. ফাইল স্ট্রাকচার
+
+```text
+ZombieCoder-Autonomous-Plugin/
+├── bin/
+│   └── install.mjs
+├── scripts/
+│   ├── configure.mjs
+│   └── setup.mjs
+├── src/
+│   ├── agents.ts
+│   ├── ethics.ts
+│   ├── generate.ts
+│   ├── identity.ts
+│   ├── plugin.ts
+│   ├── roster.ts
+│   ├── runtime.ts
+│   └── zombie/
+│       ├── defaults.ts
+│       ├── io.ts
+│       ├── mcp.ts
+│       ├── memory.ts
+│       ├── models.ts
+│       ├── paths.ts
+│       ├── scan.ts
+│       ├── server.ts
+│       ├── skills.ts
+│       ├── ssot.ts
+│       ├── syllabus.ts
+│       └── transform.ts
+├── test/
+├── doc/
+├── package.json
+└── README.md
+```
+
+`doc/*.md` build artifact; edit `src/agents.ts`, `src/runtime.ts` অথবা
+`src/ethics.ts` এবং `npm run generate` চালান।
+
+---
+
+## ১৭. Development
+
+```bash
+npm run typecheck    # TypeScript check
+npm test             # node:test suite
+npm run generate     # doc/*.md ও doc/identity.json
+```
+
+Test labels:
+
+- `SOURCE_VERIFIED` — source ও test pass
+- `CONFIG_VALIDATED` — OpenCode config load pass
+- `LIVE_PROBE_PASSED` — provider/models live probe pass
+- `END_TO_END_TESTED` — setup + inference path pass
+- `NOT_TESTED` — 해당 path এখনো probe করা হয়নি
+- `UNVERIFIED` — প্রমাণ নেই
+
+---
+
+## ১৮. License
+
+**Proprietary — Local Freedom Protocol**

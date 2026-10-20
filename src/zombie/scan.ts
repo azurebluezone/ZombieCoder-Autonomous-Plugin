@@ -14,7 +14,6 @@ export const DEFAULT_IGNORE = [
   ".hg",
   ".zombiecoder",
   ".opencode",
-  ".archive-2026-10-19",
   ".backups",
   "dist",
   "build",

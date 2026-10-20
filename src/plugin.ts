@@ -16,20 +16,36 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ROSTER, GLOBAL_PERMISSIONS, agentMarkdown, renderAgentsConfig, type AgentDef } from "./roster.ts";
+import {
+  ROSTER,
+  GLOBAL_PERMISSIONS,
+  LEGACY_AGENT_IDS,
+  BASELINE_MODEL,
+  agentMarkdown,
+  renderAgentsConfig,
+  type AgentDef,
+} from "./roster.ts";
 import { bootstrapDirs, configFile, setupReportFile } from "./zombie/paths.ts";
-import { ensureDir, readJson, writeJson, writeAtomic, PLUGIN_VERSION } from "./zombie/io.ts";
+import { ensureDir, readJson, writeJson, writeAtomic, redact, PLUGIN_VERSION } from "./zombie/io.ts";
 import { scanProject } from "./zombie/scan.ts";
 import { writeSsot } from "./zombie/ssot.ts";
 import { ensureSyllabus } from "./zombie/syllabus.ts";
 import { keepRecent, readRecent, touchIndex } from "./zombie/memory.ts";
-import { resolveModels, DEFAULT_CUSTOM_PROVIDER_URL, type CatalogDoors } from "./zombie/models.ts";
+import { resolveModels, type CatalogDoors, type ModelStrategy } from "./zombie/models.ts";
+import {
+  DEFAULT_CUSTOM_PROVIDER_ID,
+  DEFAULT_CUSTOM_PROVIDER_KEY,
+  DEFAULT_CUSTOM_PROVIDER_URL,
+  DEFAULT_MCP_URL,
+  DEFAULT_OPENCODE_API_URL,
+  DEFAULT_SSOT_REFRESH_MS,
+} from "./zombie/defaults.ts";
 import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
 import { registerRpc, registerTools, audit } from "./zombie/server.ts";
 
 export const PLUGIN_ID = "zombiecoder";
-export const DEFAULT_SSOT_REFRESH_MS = 5 * 60 * 1000; // spec §3.3 — every 5 minutes
+export { DEFAULT_SSOT_REFRESH_MS }; // spec §3.3 — every 5 minutes; one definition in defaults.ts
 // OpenCode applies a transform AFTER setup() returns. Waiting inside setup blocks
 // the very apply we are waiting for, so registration is reported as "pending" and
 // the report is updated when the deferred callback actually fires.
@@ -38,17 +54,21 @@ export const TRANSFORM_APPLY_TIMEOUT_MS = 15000;
 export type ZombieConfig = {
   customProviderUrl: string;
   customProviderID: string;
+  customProviderApiKey: string;
+  baselineModel: string;
   mcpUrl: string;
   opencodeApiUrl: string;
   ssotRefreshMs: number;
-  modelStrategy: "auto" | "custom" | "free" | "baseline" | "random";
+  modelStrategy: ModelStrategy;
 };
 
 export const DEFAULT_CONFIG: ZombieConfig = {
   customProviderUrl: DEFAULT_CUSTOM_PROVIDER_URL,
-  customProviderID: "missionbarisal",
-  mcpUrl: "",
-  opencodeApiUrl: "http://127.0.0.1:49374",
+  customProviderID: DEFAULT_CUSTOM_PROVIDER_ID,
+  customProviderApiKey: DEFAULT_CUSTOM_PROVIDER_KEY,
+  baselineModel: BASELINE_MODEL,
+  mcpUrl: DEFAULT_MCP_URL,
+  opencodeApiUrl: DEFAULT_OPENCODE_API_URL,
   ssotRefreshMs: DEFAULT_SSOT_REFRESH_MS,
   modelStrategy: "auto",
 };
@@ -64,6 +84,10 @@ export const GLOBAL_CONFIG_DIR = path.join(
   "opencode",
 );
 export const GLOBAL_ZOMBIE_CONFIG = path.join(GLOBAL_CONFIG_DIR, "zombiecoder", "config.json");
+// A self-contained install (--config-dir) stores its config beside the plugin
+// graph. Read it as a fallback so /home/<user>/.opencode works without
+// duplicating the file into ~/.config/opencode.
+const INSTALL_ZOMBIE_CONFIG = path.join(PLUGIN_PARENT, "zombiecoder", "config.json");
 
 export type InstallLayout = {
   dir: string;
@@ -80,11 +104,19 @@ export function detectInstallLayout(locationRoot: string): InstallLayout {
     fs.existsSync(entry) ||
     (path.basename(candidate) === ".opencode" && fs.existsSync(path.join(candidate, "plugins")));
   if (looksLikeInstall) {
-    const global = path.basename(candidate) !== ".opencode";
+    // Self-contained install (--config-dir): the config lives inside the same
+    // directory as agents/ and plugins/, even when that directory is named
+    // .opencode. The old project shape keeps opencode.json at the project root.
+    const selfContained =
+      fs.existsSync(path.join(candidate, "opencode.json")) ||
+      fs.existsSync(path.join(candidate, "zombiecoder", "config.json"));
+    const global = selfContained || path.basename(candidate) !== ".opencode";
     return {
       dir: candidate,
       global,
-      configFile: global ? path.join(candidate, "opencode.json") : path.join(path.dirname(candidate), "opencode.json"),
+      configFile: global
+        ? path.join(candidate, "opencode.json")
+        : path.join(path.dirname(candidate), "opencode.json"),
     };
   }
   // Source layout (tests, direct loading): behave like a project install rooted
@@ -166,7 +198,10 @@ export function providerConfigCandidates(projectRoot: string): string[] {
     dir = parent;
   }
   const home = process.env.HOME || process.env.USERPROFILE;
-  if (home) dirs.push(path.join(home, ".config", "opencode"));
+  if (home) {
+    dirs.push(path.join(home, ".config", "opencode"));
+    dirs.push(path.join(home, ".opencode"));
+  }
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) dirs.push(path.join(xdg, "opencode"));
   if (process.platform === "win32") {
@@ -193,13 +228,39 @@ export function providerConfiguredOnDisk(projectRoot: string, providerID: string
   return false;
 }
 
+function envOverride(name: string): string | undefined {
+  const value = process.env[name];
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function loadConfig(projectRoot: string): ZombieConfig {
   // Merge order mirrors OpenCode: shipped default < global ZombieCoder config
   // < optional manual .zombiecoder/config.json. We never auto-create the project
-  // file: global config is the source, and the project stays clean.
-  const global = readJson<Partial<ZombieConfig>>(GLOBAL_ZOMBIE_CONFIG) ?? {};
+  // file: global config is the source, and the project stays clean. Deployment
+  // environment variables win over every file, so a key never has to be written
+  // into a checked-in config.
+  const global =
+    readJson<Partial<ZombieConfig>>(INSTALL_ZOMBIE_CONFIG) ??
+    readJson<Partial<ZombieConfig>>(GLOBAL_ZOMBIE_CONFIG) ??
+    {};
   const existing = readJson<Partial<ZombieConfig>>(configFile(projectRoot));
-  return { ...DEFAULT_CONFIG, ...global, ...(existing ?? {}) };
+  const merged = { ...DEFAULT_CONFIG, ...global, ...(existing ?? {}) };
+  const env: Record<string, string | undefined> = {
+    customProviderUrl: envOverride("ZOMBIECODER_PROVIDER_URL"),
+    customProviderID: envOverride("ZOMBIECODER_PROVIDER_ID"),
+    customProviderApiKey:
+      envOverride("ZOMBIECODER_PROVIDER_KEY") ?? envOverride("ZOMBIECODER_API_KEY"),
+    baselineModel: envOverride("ZOMBIECODER_BASELINE_MODEL"),
+    mcpUrl: envOverride("ZOMBIECODER_MCP_URL"),
+    opencodeApiUrl: envOverride("OPENCODE_API_URL") ?? envOverride("OPENCODE_BASE"),
+    modelStrategy: envOverride("ZOMBIECODER_MODEL_STRATEGY") as ModelStrategy | undefined,
+  };
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  return merged;
 }
 
 // Spec §3.1 — create the layout only when it is not already there.
@@ -308,7 +369,7 @@ export function syncAgentConfig(
 
   // Renamed agent: never leave the old persona behind to compete with the new one.
   for (const id of Object.keys(agents)) {
-    if (id === "kobir" && !wanted[id]) delete agents[id];
+    if ((LEGACY_AGENT_IDS as readonly string[]).includes(id) && !wanted[id]) delete agents[id];
   }
   for (const [id, entry] of Object.entries(wanted)) {
     const before = JSON.stringify(agents[id] ?? null);
@@ -337,7 +398,9 @@ export function verifyAgentConfig(
     else if (entry.model !== expected) missing.push(`${a.id}=model`);
     else if (!Array.isArray(entry.permissions) || entry.permissions.length === 0) missing.push(`${a.id}=permissions`);
   }
-  if (config.agents.kobir) missing.push("stale=kobir");
+  for (const id of LEGACY_AGENT_IDS) {
+    if (config.agents[id]) missing.push(`stale=${id}`);
+  }
   return missing;
 }
 
@@ -365,7 +428,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       report.steps.push({ step: name, ok: true, detail: typeof value === "string" ? value : undefined });
       return value;
     } catch (error: any) {
-      const message = String(error?.message ?? error);
+      const message = redact(String(error?.message ?? error));
       report.steps.push({ step: name, ok: false, error: message });
       // Loud, never silent: the console is the fallback when disk write fails.
       console.error(`[zombiecoder] step failed: ${name}: ${message}`);
@@ -379,7 +442,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       report.steps.push({ step: name, ok: true, detail: typeof value === "string" ? value : undefined });
       return value;
     } catch (error: any) {
-      const message = String(error?.message ?? error);
+      const message = redact(String(error?.message ?? error));
       report.steps.push({ step: name, ok: false, error: message });
       console.error(`[zombiecoder] step failed: ${name}: ${message}`);
       return undefined;
@@ -447,8 +510,10 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     const resolved = await resolveModels(doors, ROSTER, {
       customProviderUrl: config.customProviderUrl,
       customProviderID: config.customProviderID,
+      customProviderApiKey: config.customProviderApiKey,
       providerConfigured: providerConfiguredOnDisk(root!, config.customProviderID),
-      randomize: config.modelStrategy === "random",
+      strategy: config.modelStrategy,
+      baselineModel: config.baselineModel,
     });
     return resolved;
   });
@@ -461,12 +526,22 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   // free models cannot rewrite the global agents. Project installs keep the
   // project plan.
   const globalAssignment = layout.global ? globalAgentAssignment(layout.configFile, ROSTER) : {};
+  // A live provider plan (or a real outage fallback) is newer evidence than the
+  // installer-owned assignment. A project that merely disables the provider
+  // (`customProviderUrl: ""`) must not rewrite the global agents.
+  const runtimePlanWins =
+    plan?.strategy === "custom-provider" ||
+    (plan?.strategy === "free-fallback" && Boolean(plan?.customProviderUrl));
   const agentAssignment = layout.global
-    ? { ...(plan?.assignment ?? {}), ...globalAssignment }
+    ? runtimePlanWins
+      ? (plan?.assignment ?? {})
+      : { ...(plan?.assignment ?? {}), ...globalAssignment }
     : (plan?.assignment ?? {});
   report.outputs.agentAssignment = agentAssignment;
   report.outputs.agentAssignmentSource = layout.global
-    ? "global opencode.json (installer-owned)"
+    ? runtimePlanWins
+      ? `runtime model plan (${plan?.strategy})`
+      : "global opencode.json (installer-owned)"
     : "project model plan";
 
   // ---- §6/§7 MCP probe ------------------------------------------------------
@@ -607,7 +682,11 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         const agentID = String(event?.agent ?? "unknown");
         const sessionID = String(event?.sessionID ?? "unknown");
         const def = ROSTER.find((a) => a.id === agentID);
-        const model = event?.model ? `${event.model.providerID}/${event.model.id}` : undefined;
+        const modelID = event?.model?.modelID ?? event?.model?.id;
+        const model =
+          event?.model?.providerID && modelID
+            ? `${event.model.providerID}/${modelID}`
+            : undefined;
 
         const recent = await readRecent(ctx.storage, sessionID);
         if (Array.isArray(event?.system) && typeof event.system.push === "function") {
@@ -664,7 +743,10 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         audit(root!, String(event?.agent ?? "unknown"), {
           kind: "model.request",
           sessionID: event?.sessionID,
-          model: event?.model ? `${event.model.providerID}/${event.model.id}` : undefined,
+          model:
+            event?.model?.providerID && (event?.model?.modelID ?? event?.model?.id)
+              ? `${event.model.providerID}/${event.model.modelID ?? event.model.id}`
+              : undefined,
           requestKind: event?.kind,
         });
       }),
@@ -675,7 +757,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     const sessionHook = await stepAsync("hook-session-index", () =>
       ctx.session!.hook!("prompt", (event: any) => {
         const sessionID = String(event?.sessionID ?? "unknown");
-        touchIndex(root!, sessionID, { kept: 0 });
+        // An empty patch only refreshes updatedAt; it must not reset the kept
+        // count written by the compaction hook.
+        touchIndex(root!, sessionID, {});
       }),
     );
     if (sessionHook) cleanups.push(() => sessionHook.dispose());

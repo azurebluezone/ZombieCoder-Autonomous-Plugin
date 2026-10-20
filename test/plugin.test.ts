@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { setup, providerConfiguredOnDisk } from "../src/plugin.ts";
+import { setup, detectInstallLayout, providerConfiguredOnDisk } from "../src/plugin.ts";
 
 type Fake = ReturnType<typeof makeContext>;
 
@@ -140,11 +140,11 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   // V2 config is the second agent door: provider, agents, models, permissions.
   const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
   assert.equal(config.$schema, "https://opencode.ai/config.json");
-  assert.equal(config.agents.zombiecoder.mode, "all");
+  assert.equal(config.agents.zombiecoder.mode, "primary");
   assert.equal(config.agents.zombiecoder.model, "opencode/big-pickle");
-  assert.equal(config.agents.manu.mode, "all");
+  assert.equal(config.agents.manu.mode, "primary");
   for (const agent of Object.values(config.agents) as any[]) {
-    assert.equal(agent.mode, "all", "every agent must be selectable as a main agent");
+    assert.equal(agent.mode, "primary", "every agent must be a main agent, not a subagent");
     assert.ok(
       Array.isArray(agent.permissions) &&
         agent.permissions.some((rule: any) => rule.action === "subagent" && rule.effect === "allow"),
@@ -219,7 +219,7 @@ test("global install writes agents/config at the global root and leaves the work
     assert.ok(fs.existsSync(path.join(globalDir, "agents", "zombiecoder.md")));
     assert.ok(fs.existsSync(path.join(globalDir, "opencode.json")));
     const config = JSON.parse(fs.readFileSync(path.join(globalDir, "opencode.json"), "utf8"));
-    assert.equal(config.agents.zombiecoder.mode, "all");
+    assert.equal(config.agents.zombiecoder.mode, "primary");
     assert.ok(Array.isArray(config.agents.zombiecoder.permissions));
 
     const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
@@ -279,6 +279,56 @@ test("global install keeps global agent models when a project plan falls back to
     assert.equal(report.outputs.modelStrategy, "free-fallback");
     assert.equal(report.outputs.agentAssignmentSource, "global opencode.json (installer-owned)");
     assert.equal(report.outputs.bound.includes("global model"), true);
+
+    await cleanup();
+  } finally {
+    if (previous === undefined) delete process.env.ZOMBIECODER_INSTALL_PARENT;
+    else process.env.ZOMBIECODER_INSTALL_PARENT = previous;
+  }
+});
+
+test("global install falls back to free models when the configured provider is down", async () => {
+  const root = tempProject();
+  const globalDir = tempProject();
+  const roster = await import("../src/roster.ts");
+  const custom = "missionbarisal/dead-model";
+  const customAssignment = Object.fromEntries(roster.ROSTER.map((agent) => [agent.id, custom]));
+  fs.writeFileSync(
+    path.join(globalDir, "opencode.json"),
+    JSON.stringify({
+      $schema: "https://opencode.ai/config.json",
+      model: custom,
+      agents: roster.renderAgentsConfig(roster.ROSTER, customAssignment),
+    }, null, 2),
+  );
+
+  fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "config.json"),
+    JSON.stringify({
+      version: "0.0.0-test",
+      customProviderUrl: "http://127.0.0.1:1/v1",
+      customProviderID: "missionbarisal",
+      mcpUrl: "",
+      opencodeApiUrl: "",
+      ssotRefreshMs: 300000,
+      modelStrategy: "auto",
+    }),
+  );
+
+  const previous = process.env.ZOMBIECODER_INSTALL_PARENT;
+  process.env.ZOMBIECODER_INSTALL_PARENT = globalDir;
+  try {
+    const fake = makeContext(root);
+    const cleanup = await setup(fake.ctx);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    const after = JSON.parse(fs.readFileSync(path.join(globalDir, "opencode.json"), "utf8"));
+    assert.equal(after.agents.zombiecoder.model, "opencode/big-pickle");
+    assert.equal(after.agents.manu.model, "opencode/big-pickle");
+    const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
+    assert.equal(report.outputs.modelStrategy, "free-fallback");
+    assert.match(report.outputs.agentAssignmentSource, /^runtime model plan /);
 
     await cleanup();
   } finally {
@@ -350,4 +400,23 @@ test("providerConfiguredOnDisk inherits a provider from an ancestor opencode.jso
   assert.equal(providerConfiguredOnDisk(child, "zc-ancestor-B"), false, "unknown provider falsely detected");
 
   fs.rmSync(ancestor, { recursive: true, force: true });
+});
+
+test("detectInstallLayout treats a .opencode root with its own config as self-contained", () => {
+  const root = tempProject();
+  const configDir = path.join(root, ".opencode");
+  fs.mkdirSync(path.join(configDir, "plugins"), { recursive: true });
+  fs.mkdirSync(path.join(configDir, "zombiecoder"), { recursive: true });
+  fs.writeFileSync(path.join(configDir, "opencode.json"), "{}");
+  fs.writeFileSync(path.join(configDir, "zombiecoder", "config.json"), "{}");
+  process.env.ZOMBIECODER_INSTALL_PARENT = configDir;
+  try {
+    const layout = detectInstallLayout(root);
+    assert.equal(layout.dir, configDir);
+    assert.equal(layout.global, true);
+    assert.equal(layout.configFile, path.join(configDir, "opencode.json"));
+  } finally {
+    delete process.env.ZOMBIECODER_INSTALL_PARENT;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

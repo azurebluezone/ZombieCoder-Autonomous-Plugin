@@ -30,17 +30,51 @@
 //   node --experimental-strip-types bin/install.mjs --no-install
 //   node --experimental-strip-types bin/install.mjs --no-provider-config
 //   node --experimental-strip-types bin/install.mjs --provider-url https://host/v1
+//   node --experimental-strip-types bin/install.mjs --provider-id my-gateway
+//   ZOMBIECODER_PROVIDER_KEY=... node --experimental-strip-types bin/install.mjs
+//   node --experimental-strip-types bin/install.mjs --provider-key <key>
+//   node --experimental-strip-types bin/install.mjs --config-dir ~/.opencode
+//
+// --config-dir makes one directory the complete install root: opencode.json,
+// agents/, plugins/, node_modules/ and zombiecoder/config.json all live inside
+// it. That is different from --dir, which keeps the project's opencode.json at
+// the project root and .opencode only for OpenCode-owned files.
+//
+// The provider API key is read from --provider-key, ZOMBIECODER_PROVIDER_KEY
+// (or ZOMBIECODER_API_KEY), or the previous install. It is written to
+// opencode.json because OpenCode needs it, and is never printed by this script.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createInterface } from "node:readline/promises";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(HERE, "..");
 const PKG = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
+
+// Import the runtime's own defaults instead of copying provider URLs, IDs,
+// baseline model or API URL into this installer.
+const defaults = await import(
+  pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "defaults.ts")).href
+);
+const modelsModule = await import(
+  pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "models.ts")).href
+);
+const { redact } = await import(
+  pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "io.ts")).href
+);
+const {
+  DEFAULT_CUSTOM_PROVIDER_URL,
+  DEFAULT_CUSTOM_PROVIDER_ID,
+  DEFAULT_CUSTOM_PROVIDER_KEY,
+  DEFAULT_OPENCODE_API_URL,
+  DEFAULT_MCP_URL: DEFAULT_MCP_URL_FROM_DEFAULTS,
+  BASELINE_MODEL,
+} = defaults;
+const { modelRef } = modelsModule;
 
 const argv = process.argv.slice(2);
 function flag(name) {
@@ -57,16 +91,20 @@ const GLOBAL_DIR = path.join(
 );
 const HOME_MODE = flag("--home");
 const DIR_FLAG = value("--dir", null);
-const GLOBAL_MODE = !HOME_MODE && (flag("--global") || DIR_FLAG === null);
+const CONFIG_DIR_FLAG = value("--config-dir", null);
+const SELF_MODE = CONFIG_DIR_FLAG !== null;
+const GLOBAL_MODE = !SELF_MODE && !HOME_MODE && (flag("--global") || DIR_FLAG === null);
 
 // The owner's rule: one global install, every working directory underneath it.
 // os.homedir() and XDG_CONFIG_HOME are resolved per platform, so no OS path is
-// hardcoded. --dir keeps the old project-local shape available.
+// hardcoded. --dir keeps the old project-local shape available. --config-dir
+// makes that directory the complete root (config + agents + plugins + state).
 const TARGET = path.resolve(
-  GLOBAL_MODE ? GLOBAL_DIR : HOME_MODE ? os.homedir() : DIR_FLAG,
+  SELF_MODE ? CONFIG_DIR_FLAG : GLOBAL_MODE ? GLOBAL_DIR : HOME_MODE ? os.homedir() : DIR_FLAG,
 );
-const CONFIG_DIR = GLOBAL_MODE ? TARGET : path.join(TARGET, ".opencode");
-const ZOMBIE_DIR = GLOBAL_MODE ? path.join(TARGET, "zombiecoder") : path.join(TARGET, ".zombiecoder");
+const CONFIG_DIR = SELF_MODE || GLOBAL_MODE ? TARGET : path.join(TARGET, ".opencode");
+const ZOMBIE_DIR =
+  SELF_MODE || GLOBAL_MODE ? path.join(TARGET, "zombiecoder") : path.join(TARGET, ".zombiecoder");
 const PLUGINS_DIR = path.join(CONFIG_DIR, "plugins");
 const AGENTS_DIR = path.join(CONFIG_DIR, "agents");
 const ENTRY = path.join(PLUGINS_DIR, "zombiecoder.ts");
@@ -76,11 +114,9 @@ const ZOMBIE_CONFIG = path.join(ZOMBIE_DIR, "config.json");
 
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
-const PROVIDER_ID = "missionbarisal";
 const OPENAI_COMPATIBLE_PACKAGE = "@opencode/ai/providers/openai-compatible";
-const DEFAULT_PROVIDER_URL =
-  process.env.ZOMBIECODER_PROVIDER_URL ?? "https://gpu.zombiecoder.my.id/v1";
-const DEFAULT_MCP_URL = "";
+const DEFAULT_PROVIDER_URL = DEFAULT_CUSTOM_PROVIDER_URL;
+const DEFAULT_MCP_URL = DEFAULT_MCP_URL_FROM_DEFAULTS;
 
 function cleanUrl(input, fallback) {
   if (input === null || input === undefined) return fallback;
@@ -90,7 +126,19 @@ function cleanUrl(input, fallback) {
 }
 
 const providerFlag = value("--provider-url", null);
+const providerIdFlag = value("--provider-id", null);
+const providerKeyFlag = value("--provider-key", null);
 const mcpFlag = value("--mcp-url", null);
+
+// Environment wins over a previous install, matching the runtime's loadConfig().
+const envText = (name) => {
+  const raw = process.env[name];
+  const text = typeof raw === "string" ? raw.trim() : "";
+  return text || null;
+};
+const envProviderId = envText("ZOMBIECODER_PROVIDER_ID");
+const envProviderUrl = envText("ZOMBIECODER_PROVIDER_URL");
+const envMcpUrl = envText("ZOMBIECODER_MCP_URL");
 
 // Re-install should remember the owner's previous answer instead of silently
 // resetting it to the shipped default.
@@ -105,18 +153,33 @@ const previous = priorConfig();
 const initialProvider =
   providerFlag !== null
     ? cleanUrl(providerFlag, DEFAULT_PROVIDER_URL)
-    : typeof previous.customProviderUrl === "string"
-      ? previous.customProviderUrl
-      : DEFAULT_PROVIDER_URL;
+    : envProviderUrl ??
+      (typeof previous.customProviderUrl === "string"
+        ? previous.customProviderUrl
+        : DEFAULT_PROVIDER_URL);
 const initialMcp =
   mcpFlag !== null
     ? cleanUrl(mcpFlag, DEFAULT_MCP_URL)
-    : typeof previous.mcpUrl === "string"
-      ? previous.mcpUrl
-      : DEFAULT_MCP_URL;
+    : envMcpUrl ??
+      (typeof previous.mcpUrl === "string" ? previous.mcpUrl : DEFAULT_MCP_URL);
 
 let PROVIDER_URL = initialProvider;
 let MCP_URL = initialMcp;
+
+// Provider identity and credential, resolved once. A flag wins, then the
+// environment, then the previous install, then the shipped default. The key is
+// never printed.
+const PROVIDER_ID =
+  String(
+    providerIdFlag ?? envProviderId ?? previous.customProviderID ?? DEFAULT_CUSTOM_PROVIDER_ID,
+  ).trim() || DEFAULT_CUSTOM_PROVIDER_ID;
+let PROVIDER_KEY =
+  providerKeyFlag !== null
+    ? String(providerKeyFlag).trim()
+    : DEFAULT_CUSTOM_PROVIDER_KEY ||
+      (typeof previous.customProviderApiKey === "string"
+        ? previous.customProviderApiKey.trim()
+        : "");
 
 // Ask only when a human is actually there. CI and `--yes` use the flags or the
 // documented defaults, so an automated install can never hang on a prompt.
@@ -146,10 +209,15 @@ if (INTERACTIVE) {
   }
 }
 
-const report = { target: TARGET, mode: GLOBAL_MODE ? "global" : HOME_MODE ? "home" : "project", steps: [] };
+const report = {
+  target: TARGET,
+  mode: SELF_MODE || GLOBAL_MODE ? "global" : HOME_MODE ? "home" : "project",
+  steps: [],
+};
 let mcpProbe = null;
 let providerProbe = null;
 let providerReachable = false;
+let candidates = [];
 let installAssignment = {};
 
 async function step(name, fn) {
@@ -158,8 +226,9 @@ async function step(name, fn) {
     report.steps.push({ step: name, ok: true, detail: typeof detail === "string" ? detail : undefined });
     return detail;
   } catch (error) {
-    report.steps.push({ step: name, ok: false, error: String(error?.message ?? error) });
-    console.error(`  FAIL  ${name}: ${error?.message ?? error}`);
+    const message = redact(String(error?.message ?? error));
+    report.steps.push({ step: name, ok: false, error: message });
+    console.error(`  FAIL  ${name}: ${message}`);
     return undefined;
   }
 }
@@ -199,11 +268,16 @@ function listFiles(dir, rel = "") {
 
 // OpenAI-compatible gateways disagree about the envelope. A `data` array of ids is
 // the one thing every implementation returns, so that is what we accept.
-async function probeProviderModels(url, timeoutMs = 5000) {
+async function probeProviderModels(url, timeoutMs = 5000, apiKey = "") {
   const base = String(url).replace(/\/+$/, "");
   const target = base.endsWith("/v1") ? `${base}/models` : `${base}/v1/models`;
+  const headers = {};
+  if (String(apiKey).trim()) headers.authorization = `Bearer ${String(apiKey).trim()}`;
   try {
-    const response = await fetch(target, { signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetch(target, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers,
+    });
     if (!response.ok) return { ok: false, url: target, models: [], error: `HTTP ${response.status}` };
     const body = await response.json();
     if (!Array.isArray(body?.data)) {
@@ -216,7 +290,7 @@ async function probeProviderModels(url, timeoutMs = 5000) {
   }
 }
 
-function providerEntry(baseURL, modelIDs) {
+function providerEntry(baseURL, modelIDs, apiKey = "") {
   const models = {};
   for (const id of modelIDs) {
     models[id] = {
@@ -225,10 +299,12 @@ function providerEntry(baseURL, modelIDs) {
       cost: { input: 0, output: 0 },
     };
   }
+  const settings = { baseURL };
+  if (String(apiKey).trim()) settings.apiKey = String(apiKey).trim();
   return {
-    name: "ZombieCoder Gateway",
+    name: defaults.DEFAULT_PROVIDER_NAME,
     package: OPENAI_COMPATIBLE_PACKAGE,
-    settings: { baseURL, apiKey: "public" },
+    settings,
     models,
   };
 }
@@ -236,7 +312,15 @@ function providerEntry(baseURL, modelIDs) {
 console.log("=".repeat(72));
 console.log(`ZombieCoder install — ${PKG.name} v${PKG.version}`);
 console.log(
-  `target: ${TARGET}  [${GLOBAL_MODE ? "global OpenCode config" : HOME_MODE ? `${process.platform} home/.opencode` : "project .opencode"}]`,
+  `target: ${TARGET}  [${
+    SELF_MODE
+      ? "self-contained config root"
+      : GLOBAL_MODE
+        ? "global OpenCode config"
+        : HOME_MODE
+          ? `${process.platform} home/.opencode`
+          : "project .opencode"
+  }]`,
 );
 console.log("=".repeat(72));
 
@@ -315,12 +399,13 @@ await step("seed zombiecoder config", () => {
   const next = {
     ...existing,
     version: PKG.version,
-    installMode: GLOBAL_MODE ? "global" : "home",
+    installMode: SELF_MODE || GLOBAL_MODE ? "global" : HOME_MODE ? "home" : "project",
     customProviderUrl: PROVIDER_URL,
-    customProviderID: existing.customProviderID ?? PROVIDER_ID,
+    customProviderID: PROVIDER_ID,
+    customProviderApiKey: PROVIDER_KEY,
     mcpUrl: MCP_URL,
-    opencodeApiUrl: existing.opencodeApiUrl ?? "http://127.0.0.1:49374",
-    ssotRefreshMs: existing.ssotRefreshMs ?? 300000,
+    opencodeApiUrl: existing.opencodeApiUrl ?? DEFAULT_OPENCODE_API_URL,
+    ssotRefreshMs: existing.ssotRefreshMs ?? defaults.DEFAULT_SSOT_REFRESH_MS,
     modelStrategy: existing.modelStrategy ?? "auto",
     createdAt: existing.createdAt ?? new Date().toISOString(),
   };
@@ -355,14 +440,27 @@ await step("probe provider + assign models", async () => {
   }
 
   if (PROVIDER_URL) {
-    providerProbe = await probeProviderModels(PROVIDER_URL);
-    providerReachable = Boolean(providerProbe?.ok);
+    providerProbe = await probeProviderModels(PROVIDER_URL, 5000, PROVIDER_KEY);
+    // `ok` with an empty list is not a usable provider. Treating it as one was
+    // what produced the `provider/undefined` default model.
+    providerReachable = Boolean(providerProbe?.ok && providerProbe.models.length > 0);
   }
-  const candidates = providerReachable
-    ? providerProbe.models.map((id) => `${PROVIDER_ID}/${id}`)
+  candidates = providerReachable
+    ? providerProbe.models
+        .map((id) => modelRef(PROVIDER_ID, id))
+        .filter((ref) => typeof ref === "string")
     : [];
+
+  // Reuse a previous assignment only while every model still exists on the
+  // provider we just probed. A changed URL/ID must not inherit stale refs.
+  if (Object.keys(installAssignment).length > 0 && providerReachable) {
+    const allowed = new Set(candidates);
+    installAssignment = Object.fromEntries(
+      Object.entries(installAssignment).filter(([, ref]) => allowed.has(ref)),
+    );
+  }
   if (Object.keys(installAssignment).length === 0) {
-    installAssignment = assignModels(roster.ROSTER, candidates);
+    installAssignment = assignModels(roster.ROSTER, candidates, false, BASELINE_MODEL);
   }
 
   const plan = {
@@ -414,23 +512,29 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
         models[id] = { ...(providerEntry(PROVIDER_URL, [id]).models[id]), ...(models[id] ?? {}) };
       }
     }
+    const settings = {
+      ...(previousProvider.settings ?? {}),
+      baseURL: PROVIDER_URL,
+    };
+    if (PROVIDER_KEY) settings.apiKey = PROVIDER_KEY;
     next.providers[providerID] = {
-      ...providerEntry(PROVIDER_URL, []),
+      ...providerEntry(PROVIDER_URL, [], PROVIDER_KEY),
       ...previousProvider,
-      settings: {
-        ...(previousProvider.settings ?? {}),
-        baseURL: PROVIDER_URL,
-        apiKey: previousProvider.settings?.apiKey ?? "public",
-      },
+      settings,
       models,
     };
   }
 
   // V2 agents: description, mode, model, system prompt, ordered permission rules.
-  // Existing non-roster agents are preserved; `kobir` is removed after the rename.
+  // Existing non-roster agents are preserved; legacy personas are removed.
   const agents = { ...(existing.agents ?? {}) };
   for (const id of Object.keys(agents)) {
-    if (id === "kobir" && !roster.ROSTER.some((a) => a.id === "kobir")) delete agents[id];
+    if (
+      roster.LEGACY_AGENT_IDS.includes(id) &&
+      !roster.ROSTER.some((a) => a.id === id)
+    ) {
+      delete agents[id];
+    }
   }
   for (const [id, entry] of Object.entries(roster.renderAgentsConfig(roster.ROSTER, installAssignment))) {
     agents[id] = { ...(agents[id] ?? {}), ...entry };
@@ -448,8 +552,29 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
 
   // Default agent + default model. The model is provider/model in V2.
   next.default_agent = "zombiecoder";
-  const firstCandidate = providerReachable ? `${providerID}/${providerProbe.models[0]}` : null;
-  next.model = existing.model ?? firstCandidate ?? roster.BASELINE_MODEL;
+  const firstCandidate = providerReachable
+    ? modelRef(providerID, providerProbe.models[0])
+    : null;
+  const existingModel = typeof existing.model === "string" ? existing.model : null;
+  const existingIsUsable =
+    existingModel !== null &&
+    !/\/undefined$/.test(existingModel) &&
+    (!providerReachable ||
+      !existingModel.startsWith(providerID + "/") ||
+      candidates.includes(existingModel));
+  const existingIsProviderModel =
+    existingModel !== null &&
+    existingModel.startsWith(providerID + "/") &&
+    candidates.includes(existingModel);
+  // When the gateway is live, the default model must be a gateway model. A
+  // previous free fallback is kept only while the provider is unreachable.
+  next.model = providerReachable
+    ? existingIsProviderModel
+      ? existingModel
+      : firstCandidate ?? BASELINE_MODEL
+    : existingIsUsable
+      ? existingModel
+      : BASELINE_MODEL;
 
   // Only register an MCP server we actually reached. A dead default URL in
   // opencode.json slows every boot and teaches the user to ignore errors.
@@ -481,12 +606,15 @@ await step("write agent markdown", async () => {
     const file = path.join(AGENTS_DIR, agent.id + ".md");
     if (writeIfChanged(file, mod.agentMarkdown(agent, installAssignment[agent.id]))) written += 1;
   }
-  // Remove the old Kobir file after the rename so two personas cannot coexist.
-  const stale = path.join(AGENTS_DIR, "kobir.md");
+  // Remove legacy persona files after a rename so two personas cannot coexist.
   let pruned = 0;
-  if (fs.existsSync(stale)) {
-    fs.rmSync(stale, { force: true });
-    pruned = 1;
+  for (const id of mod.LEGACY_AGENT_IDS) {
+    if (mod.ROSTER.some((agent) => agent.id === id)) continue;
+    const stale = path.join(AGENTS_DIR, id + ".md");
+    if (fs.existsSync(stale)) {
+      fs.rmSync(stale, { force: true });
+      pruned += 1;
+    }
   }
   const resolved = Object.keys(installAssignment).length > 0 ? "resolved" : "baseline";
   return `${mod.ROSTER.length} agents (${written} changed, ${pruned} stale pruned, ${resolved} models)`;
@@ -494,7 +622,7 @@ await step("write agent markdown", async () => {
 
 // ---- 10. seed .zombiecoder (project installs only) ---------------------------
 await step("seed .zombiecoder SSOT + syllabus + memory", async () => {
-  if (GLOBAL_MODE) {
+  if (SELF_MODE || GLOBAL_MODE) {
     return "skipped (global install: .zombiecoder is created per working directory on first boot)";
   }
   const { bootstrapDirs } = await import(path.join(PACKAGE_ROOT, "src", "zombie", "paths.ts"));
@@ -507,17 +635,9 @@ await step("seed .zombiecoder SSOT + syllabus + memory", async () => {
 
   const fp = scanProject(TARGET);
   const agentIds = roster.ROSTER.map((a) => a.id);
-  const ssot = writeSsot(TARGET, fp, {
-    agentCount: roster.ROSTER.length,
-    agentIds,
-    modelStrategy: providerReachable ? "custom-provider" : "baseline",
-    modelAssignment: installAssignment,
-    customProviderUrl: PROVIDER_URL,
-    customProviderReachable: providerReachable,
-    mcpUrl: MCP_URL,
-    mcpReachable: Boolean(mcpProbe?.ok),
-    mcpTools: mcpProbe?.tools?.map((tool) => tool.name) ?? [],
-  });
+  // writeSsot() takes exactly (projectRoot, fingerprint); the old third argument
+  // was silently ignored. Keep the SSOT free of installer-only metadata.
+  const ssot = writeSsot(TARGET, fp);
   const syllabus = ensureSyllabus(TARGET, fp, agentIds);
   return `SSOT ${ssot.bytes}B, syllabus ${syllabus.created ? "seeded" : "kept"}, memory dir ready`;
 });
@@ -549,7 +669,7 @@ if (!fs.existsSync(path.join(pluginFolder, "plugin.ts"))) {
 }
 console.log("-".repeat(72));
 console.log(`installed: ${report.steps.length - failed.length}/${report.steps.length} steps ok`);
-if (GLOBAL_MODE) {
+if (SELF_MODE || GLOBAL_MODE) {
   console.log(`global: ${TARGET}/{opencode.json,agents,plugins,zombiecoder}`);
   console.log("per-directory: each working directory gets only .zombiecoder");
   console.log("  (SSOT, syllabus, memory, .state); no .opencode is created there.");

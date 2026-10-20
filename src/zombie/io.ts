@@ -4,9 +4,36 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { PRODUCT, PLUGIN_VERSION } from "./defaults.ts";
 
-export const PRODUCT = "ZombieCoder";
-export const PLUGIN_VERSION = "0.1.0";
+export { PRODUCT, PLUGIN_VERSION };
+
+// Audit records leave the process, so credentials must be removed at the
+// boundary. The patterns cover the shapes this plugin can actually see:
+// bearer headers, OpenAI-style keys, and key/token/password assignments.
+export function redact(text: string): string {
+  return String(text)
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
+    .replace(/\bsk-[A-Za-z0-9_-]{6,}\b/g, "[REDACTED]")
+    .replace(
+      /((?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*["']?\s*[:=]\s*["']?)[^\s,;"'}\]]+/gi,
+      "$1[REDACTED]",
+    );
+}
+
+/** Recursive form of redact(), for audit records and report details. */
+export function redactValue<T>(value: T): T {
+  if (typeof value === "string") return redact(value) as T;
+  if (Array.isArray(value)) return value.map((item) => redactValue(item)) as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = redactValue(item);
+    }
+    return out as T;
+  }
+  return value;
+}
 
 export function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });

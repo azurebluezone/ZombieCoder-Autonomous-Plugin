@@ -15,11 +15,16 @@
 // `modelStrategy: "random"` when they explicitly want random mapping.
 
 import type { AgentDef } from "../roster.ts";
+import {
+  BASELINE_MODEL,
+  DEFAULT_CUSTOM_PROVIDER_ID,
+  DEFAULT_CUSTOM_PROVIDER_URL,
+} from "./defaults.ts";
 
-export const DEFAULT_CUSTOM_PROVIDER_URL =
-  process.env.ZOMBIECODER_PROVIDER_URL ?? "https://gpu.zombiecoder.my.id/v1";
-export const BASELINE_MODEL = "opencode/big-pickle";
+export { BASELINE_MODEL, DEFAULT_CUSTOM_PROVIDER_ID, DEFAULT_CUSTOM_PROVIDER_URL };
 export const DEFAULT_PROBE_TIMEOUT_MS = 4000;
+
+export type ModelStrategy = "auto" | "custom" | "free" | "baseline" | "random";
 
 export type CatalogModel = {
   ref: string;
@@ -192,17 +197,27 @@ export function modelsUrl(url: string): string {
   return base.endsWith("/v1") ? `${base}/models` : `${base}/v1/models`;
 }
 
+/** Build a provider/model reference without ever producing `provider/undefined`. */
+export function modelRef(providerID: string, modelID: string | null | undefined): string | null {
+  const provider = String(providerID ?? "").trim();
+  const model = typeof modelID === "string" ? modelID.trim() : "";
+  return provider && model ? `${provider}/${model}` : null;
+}
+
 export async function probeOpenAiCompatible(
   url: string,
   timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+  apiKey = "",
 ): Promise<ProbeResult> {
   const started = Date.now();
   const target = modelsUrl(url);
   const result: ProbeResult = { url: target, ok: false, status: null, models: [], ms: 0 };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const headers: Record<string, string> = {};
+  if (apiKey.trim()) headers.authorization = `Bearer ${apiKey.trim()}`;
   try {
-    const response = await fetch(target, { signal: controller.signal });
+    const response = await fetch(target, { signal: controller.signal, headers });
     result.status = response.status;
     if (!response.ok) {
       result.error = `HTTP ${response.status}`;
@@ -243,16 +258,17 @@ export function assignModels(
   agents: AgentDef[],
   candidates: string[],
   randomize = false,
+  baseline = BASELINE_MODEL,
 ): Record<string, string> {
   const assignment: Record<string, string> = {};
   if (candidates.length === 0) {
-    for (const a of agents) assignment[a.id] = BASELINE_MODEL;
+    for (const a of agents) assignment[a.id] = baseline;
     return assignment;
   }
   for (const a of agents) {
     // A roster entry pinned by hand wins; otherwise the mapping is stable by
     // default, and intentionally random only when the owner asks for it.
-    if (a.model && a.model !== BASELINE_MODEL && candidates.includes(a.model)) {
+    if (a.model && a.model !== baseline && candidates.includes(a.model)) {
       assignment[a.id] = a.model;
       continue;
     }
@@ -267,12 +283,17 @@ export function assignModels(
 export type ResolveOptions = {
   customProviderUrl?: string;
   customProviderID?: string;
+  customProviderApiKey?: string;
   probeTimeoutMs?: number;
   skipProbe?: boolean;
   /** True when opencode.json already declares this provider (installer wrote it). */
   providerConfigured?: boolean;
-  /** Spec §2 "random mapping" mode. Default is deterministic, for reproducible footprints. */
+  /** auto | custom | free | baseline | random. Unknown values behave like auto. */
+  strategy?: ModelStrategy;
+  /** Legacy boolean equivalent of strategy: "random". */
   randomize?: boolean;
+  /** Override the last-resort model (defaults to roster BASELINE_MODEL). */
+  baselineModel?: string;
 };
 
 export async function resolveModels(
@@ -281,7 +302,11 @@ export async function resolveModels(
   options: ResolveOptions = {},
 ): Promise<ModelPlan> {
   const notes: string[] = [];
-  const customProviderID = options.customProviderID ?? "missionbarisal";
+  const mode: ModelStrategy = options.strategy ?? "auto";
+  const randomize = mode === "random" || options.randomize === true;
+  const baselineModel = options.baselineModel?.trim() || BASELINE_MODEL;
+  const customProviderID =
+    options.customProviderID?.trim() || DEFAULT_CUSTOM_PROVIDER_ID;
   const configuredUrl = (options.customProviderUrl ?? DEFAULT_CUSTOM_PROVIDER_URL).trim();
 
   const catalog = await readCatalog(doors);
@@ -297,27 +322,39 @@ export async function resolveModels(
   const provider = configuredUrl ? findProvider(catalog, customProviderID) : undefined;
   const providerBase = provider?.baseURL ?? null;
   const probeTarget = providerBase ?? configuredUrl;
+  const wantsProbe =
+    mode !== "free" && mode !== "baseline" && configuredUrl.length > 0;
 
   let probe: ProbeResult;
-  if (!configuredUrl) {
-    // The owner chose "no custom provider" (installer `none` / empty config).
-    // Do not probe a relative URL and do not quietly reuse a stale catalog entry.
+  if (!wantsProbe) {
+    // The owner chose free/baseline, or no custom provider at all. Do not probe
+    // a relative URL and do not quietly reuse a stale catalog entry.
     probe = {
       url: "",
       ok: false,
       status: null,
       models: [],
       ms: 0,
-      error: "no custom provider configured",
+      error: !configuredUrl
+        ? "no custom provider configured"
+        : `probe skipped (modelStrategy: ${mode})`,
     };
-    notes.push("custom provider disabled by config — free-model fallback");
+    notes.push(
+      !configuredUrl
+        ? "custom provider disabled by config — free-model fallback"
+        : `custom provider skipped by modelStrategy: ${mode}`,
+    );
   } else if (options.skipProbe) {
     probe = { url: probeTarget, ok: false, status: null, models: [], ms: 0, error: "probe skipped" };
   } else {
-    probe = await probeOpenAiCompatible(probeTarget, options.probeTimeoutMs);
+    probe = await probeOpenAiCompatible(
+      probeTarget,
+      options.probeTimeoutMs,
+      options.customProviderApiKey ?? "",
+    );
   }
 
-  if (configuredUrl) {
+  if (wantsProbe) {
     if (provider) {
       notes.push(`custom provider "${customProviderID}" in catalog with ${provider.modelCount} models, baseURL ${providerBase ?? "(not exposed)"}`);
     } else {
@@ -329,7 +366,15 @@ export async function resolveModels(
   let strategy: ModelPlan["strategy"];
   let candidates: string[] = [];
 
-  if (configuredUrl && (provider || options.providerConfigured) && probe.ok) {
+  if (mode === "baseline") {
+    strategy = "baseline";
+    candidates = [baselineModel];
+    notes.push(`modelStrategy: baseline — pinned to ${baselineModel}`);
+  } else if (mode === "free") {
+    strategy = "free-fallback";
+    candidates = free.map((m) => m.ref);
+    notes.push("modelStrategy: free — OpenCode cost 0/0 models only");
+  } else if (configuredUrl && (provider || options.providerConfigured) && probe.ok) {
     // Prefer the catalog's fully-hydrated model records, then the live probe.
     // The provider is often registered a moment AFTER setup starts (OpenCode
     // loads provider config in parallel), so a missing catalog entry must not
@@ -339,12 +384,26 @@ export async function resolveModels(
       .map((m) => m.ref);
     candidates = fromCatalog.length > 0
       ? fromCatalog
-      : probe.models.map((id) => `${customProviderID}/${id}`);
-    strategy = candidates.length > 0 ? "custom-provider" : "free-fallback";
-    if (candidates.length === 0) notes.push("provider reachable but exposes no models — falling back");
-    else if (fromCatalog.length === 0) {
+      : probe.models.map((id) => modelRef(customProviderID, id)).filter((ref): ref is string => ref !== null);
+    strategy = "custom-provider";
+    if (candidates.length === 0) {
+      if (mode === "custom") {
+        strategy = "baseline";
+        candidates = [baselineModel];
+        notes.push(`provider reachable but exposes no models — pinned to ${baselineModel}`);
+      } else {
+        strategy = "free-fallback";
+        candidates = free.map((m) => m.ref);
+        notes.push("provider reachable but exposes no models — free-model fallback");
+      }
+    } else if (fromCatalog.length === 0) {
       notes.push("provider not in catalog yet — using model IDs from the live probe");
     }
+  } else if (mode === "custom") {
+    // modelStrategy: custom must never silently point agents at a dead server.
+    strategy = "baseline";
+    candidates = [baselineModel];
+    notes.push(`modelStrategy: custom but the provider is unusable — pinned to ${baselineModel}`);
   } else {
     // Either the provider is not registered, or it is registered and its server is down.
     strategy = "free-fallback";
@@ -353,14 +412,14 @@ export async function resolveModels(
   }
 
   if (candidates.length === 0) {
-    candidates = [BASELINE_MODEL];
+    candidates = [baselineModel];
     strategy = "baseline";
-    notes.push(`no free models available — pinned to baseline ${BASELINE_MODEL}`);
+    notes.push(`no free models available — pinned to baseline ${baselineModel}`);
   }
 
-  const assignment = assignModels(agents, candidates, options.randomize === true);
+  const assignment = assignModels(agents, candidates, randomize, baselineModel);
   notes.push(
-    options.randomize
+    randomize
       ? `random mapping over ${candidates.length} candidate(s) (modelStrategy: random)`
       : `deterministic FNV-1a mapping over ${candidates.length} candidate(s)`,
   );

@@ -152,14 +152,14 @@ export function renderSsot(fp: Fingerprint): string {
   lines.push(`## 7. Agent team (shared persona)`);
   lines.push("");
   lines.push(
-    `All ${ROSTER.length} agents are main agents (\`mode: all\`): select any from the dropdown, and any agent may delegate to another.`,
+    `All ${ROSTER.length} agents are main agents (\`mode: primary\`): select any of them directly from the agent dropdown.`,
   );
   lines.push("");
   for (const a of ROSTER) {
     lines.push(`### ${a.name} — ${a.callSign} (\`${a.id}\`)`);
     lines.push("");
     lines.push(`- **Role:** ${a.role}`);
-    lines.push(`- **Mode:** ${a.mode} (primary + subagent)`);
+    lines.push(`- **Mode:** ${a.mode} (main agent)`);
     lines.push(`- **Mission:** ${a.mission}`);
     lines.push(`- **Core Persona:** "${a.persona}"`);
     lines.push(`- **Decision Rule:** ${a.rule}`);

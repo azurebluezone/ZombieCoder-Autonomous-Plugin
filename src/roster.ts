@@ -15,9 +15,14 @@ export type AgentDef = {
   rule: string;
 };
 
-// Verified live: opencode/big-pickle — status active, cost 0/0 USD per million tokens.
-// Used as the static baseline; the plugin re-resolves it at runtime.
-export const BASELINE_MODEL = "opencode/big-pickle";
+// Last-resort model. The plugin re-resolves it at runtime; set
+// ZOMBIECODER_BASELINE_MODEL (or config.baselineModel) to use another model.
+export const BASELINE_MODEL =
+  process.env.ZOMBIECODER_BASELINE_MODEL?.trim() || "opencode/big-pickle";
+
+// Agents that were renamed or removed. Kept in one list so the plugin, the
+// installer and the syllabus upgrader cannot disagree about what is stale.
+export const LEGACY_AGENT_IDS = ["kobir"] as const;
 
 export const SHARED_RULES = [
   "## ZombieCoder Shared Rules (bound by plugin — do not remove)",
@@ -92,9 +97,9 @@ export const GLOBAL_PERMISSIONS: PermissionRule[] = [
   { action: "external_directory", resource: "*", effect: "ask" },
 ];
 
-// Every agent is a main agent and may delegate to any teammate. The shared
-// rules require minimal context and a named teammate, so delegation stays
-// purposeful instead of becoming a recursion trap.
+// Every agent runs in `primary` mode: users can select each one directly.
+// The delegation permission is retained for builds that expose the subagent
+// tool; it does not make any roster agent a subagent itself.
 export function agentPermissions(_a: AgentDef): PermissionRule[] {
   return [{ action: "subagent", resource: "*", effect: "allow" }];
 }
@@ -149,7 +154,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Builder",
     role: "Chief Systems Architect",
     description: "Chief Systems Architect — architecture, data flow, agent orchestration, SSOT.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "সিস্টেমের architecture, data flow, agent orchestration ও SSOT বজায় রাখা।",
     persona: "আমি নতুন সত্য তৈরি করি না। বিদ্যমান সত্যকে সঠিক জায়গায় বসাই।",
@@ -162,7 +167,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Hunter",
     role: "Principal Debug & Root Cause Engineer",
     description: "Principal Debug & Root Cause Engineer — evidence-led diagnosis.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "যে কোনো সমস্যা কেন হয়েছে, তার মূল কারণ বের করা।",
     persona: "Error কখনো শত্রু না। Error সত্যের ঠিকানা।",
@@ -175,7 +180,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Guardian",
     role: "Chief Security & Trust Analyst",
     description: "Chief Security & Trust Analyst — security, secrets, verification.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "সিস্টেম নিরাপদ রাখা এবং প্রতিটি দাবি যাচাই করা।",
     persona: "বিশ্বাস করা যায়। কিন্তু যাচাই করতেই হবে।",
@@ -188,7 +193,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Optimizer",
     role: "Principal Performance Engineer",
     description: "Principal Performance Engineer — measured performance and stability.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "সর্বোচ্চ গতি, কম resource এবং স্থিতিশীলতা নিশ্চিত করা।",
     persona: "দ্রুত হওয়া ভালো। কিন্তু স্থিতিশীল হওয়া আরও ভালো।",
@@ -201,7 +206,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Librarian",
     role: "Documentation & Knowledge Engineer",
     description: "Documentation & Knowledge Engineer — explainable systems and docs.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "জ্ঞানকে মানুষের জন্য সহজ করা।",
     persona: "যে কোড ব্যাখ্যা করা যায় না, সে কোড শেষ পর্যন্ত টেকে না।",
@@ -214,7 +219,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Judge",
     role: "Chief Quality Assurance Engineer",
     description: "Chief Quality Assurance Engineer — final acceptance based on evidence.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "চূড়ান্ত সিদ্ধান্তের আগে প্রতিটি output যাচাই করা।",
     persona: "Quality কোনো ভাগ্যের বিষয় না। এটা শৃঙ্খলার ফল।",
@@ -227,7 +232,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Painter",
     role: "UI/UX Designer",
     description: "UI/UX Designer — interface, accessibility, interaction and error states.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "ইন্টারফেস, accessibility, responsive আচরণ, interaction state ও error UX নিশ্চিত করা।",
     persona: "ব্যবহারকারী না বুঝলে ডিজাইন হয়নি। সুন্দর হলেও হবে না।",
@@ -240,7 +245,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Auditor",
     role: "AIML & Model Auditor",
     description: "AIML & Model Auditor — model capability, hallucination, routing and cost audit.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "মডেল ও প্রোভাইডারের আচরণ, hallucination, prompt injection, routing এবং token cost অডিট করা।",
     persona: "মডেল যেটা বলল, সেটা প্রমাণ নয়। মডেল কী পারে, সেটাই প্রশ্ন।",
@@ -253,7 +258,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Chair",
     role: "Chief Arbiter",
     description: "Chief Arbiter — aggregation, conflict resolution, priority and final decision.",
-    mode: "all",
+    mode: "primary",
     model: BASELINE_MODEL,
     mission: "বিশেষজ্ঞদের ফল মিলিয়ে দ্বন্দ্ব ভাঙা, SSOT lock করা, চূড়ান্ত রায় দেওয়া এবং release gate চালানো।",
     persona: "সবার মত শুনো, প্রমাণে সিদ্ধান্ত নাও, শেষে দায়িত্ব নিজে নাও।",

@@ -8,7 +8,7 @@
 //   npm run configure -- [target-dir]
 //
 // For the target project it:
-//   1. verifies the global install (9 agents, mode: all, subagent allow)
+//   1. verifies the global install (every roster agent, mode: primary, subagent allow)
 //   2. creates .zombiecoder/{memory,.state}
 //   3. asks the running OpenCode server to reload the location
 //      (the plugin's setup() then writes SSOT.md + syllabus.md)
@@ -29,7 +29,6 @@ const SCRIPT_FILE = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = path.dirname(SCRIPT_FILE);
 const REPO_ROOT = path.dirname(SCRIPT_DIR);
 const TS_FLAG = "--experimental-strip-types";
-const DEFAULT_API = "http://127.0.0.1:49374";
 
 // Node < 23.6 needs the flag to import .ts modules. Re-exec once with it so the
 // same command works on both Node eras and on both operating systems.
@@ -45,6 +44,15 @@ function hasNativeTypescript() {
   const feature = process.features && process.features.typescript;
   return feature === "strip" || feature === "transform" || feature === true;
 }
+
+// Read defaults and the roster instead of copying the API URL or the agent
+// count into this script.
+const { DEFAULT_OPENCODE_API_URL, PLUGIN_VERSION } = await import(
+  pathToFileURL(path.join(REPO_ROOT, "src", "zombie", "defaults.ts")).href
+);
+const { ROSTER } = await import(pathToFileURL(path.join(REPO_ROOT, "src", "roster.ts")).href);
+const DEFAULT_API = DEFAULT_OPENCODE_API_URL;
+const EXPECTED_AGENT_IDS = ROSTER.map((agent) => agent.id);
 
 function parseArgs(argv) {
   const out = { target: null, url: null, install: true, reload: true, force: false, json: false, help: false };
@@ -100,14 +108,21 @@ function globalAgentReport(configDir) {
   if (!fs.existsSync(file)) return { ok: false, reason: "opencode.json missing" };
   const cfg = readJsonFile(file);
   if (!cfg || typeof cfg.agents !== "object") return { ok: false, reason: "agents block missing" };
-  const ids = Object.keys(cfg.agents);
-  const badMode = ids.filter((id) => cfg.agents[id]?.mode !== "all");
-  const badPerm = ids.filter(
+  const missing = EXPECTED_AGENT_IDS.filter((id) => !cfg.agents[id]);
+  const badMode = EXPECTED_AGENT_IDS.filter((id) => cfg.agents[id]?.mode !== "primary");
+  const badPerm = EXPECTED_AGENT_IDS.filter(
     (id) =>
       !Array.isArray(cfg.agents[id]?.permissions) ||
       !cfg.agents[id].permissions.some((r) => r?.action === "subagent" && r?.effect === "allow"),
   );
-  return { ok: ids.length >= 9 && badMode.length === 0 && badPerm.length === 0, count: ids.length, badMode, badPerm };
+  return {
+    ok: missing.length === 0 && badMode.length === 0 && badPerm.length === 0,
+    count: Object.keys(cfg.agents).length,
+    expected: EXPECTED_AGENT_IDS.length,
+    missing,
+    badMode,
+    badPerm,
+  };
 }
 
 function hasSourceGraph(dir) {
@@ -258,7 +273,7 @@ Options:
   -h, --help     this text
 
 What it does:
-  1. verifies the global install (9 agents, mode:all, subagent allow)
+  1. verifies the global install (${EXPECTED_AGENT_IDS.length} roster agents, mode:primary, subagent allow)
   2. creates .zombiecoder/{memory,.state}
   3. asks the running OpenCode server to reload the location
   4. if OpenCode is not running, generates SSOT.md and syllabus.md directly
@@ -285,7 +300,7 @@ async function main() {
   const startedAt = new Date().toISOString();
   const report = {
     tool: "zombiecoder-configure",
-    version: "0.1.0",
+    version: PLUGIN_VERSION,
     platform: process.platform,
     arch: process.arch,
     node: process.version,

@@ -7,6 +7,7 @@
 import { appendJsonl, docWithSignature, readText, writeAtomic } from "./io.ts";
 import { syllabusFile } from "./paths.ts";
 import type { Fingerprint } from "./scan.ts";
+import { LEGACY_AGENT_IDS } from "../roster.ts";
 
 export type SyllabusResult = {
   file: string;
@@ -142,10 +143,11 @@ export function ensureSyllabus(projectRoot: string, fp: Fingerprint, agentIds: s
   const file = syllabusFile(projectRoot);
   const existing = readText(file);
   if (existing !== undefined && existing.trim().length > 0) {
+    const hasLegacyAgent = LEGACY_AGENT_IDS.some((id) => existing.includes("- `" + id + "`"));
     const needsUpgrade =
       !existing.includes("## 2. Footprint") ||
       !existing.includes("### Project map") ||
-      existing.includes("- `kobir`");
+      hasLegacyAgent;
     if (!needsUpgrade) {
       return { file, created: false, bytes: Buffer.byteLength(existing, "utf8") };
     }

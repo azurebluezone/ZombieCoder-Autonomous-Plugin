@@ -1,6 +1,8 @@
 // ZombieCoder — Persona & Ethics generator
 // Core doctrine: Evidence Gate, not Permission Gate.
 
+import { BASELINE_MODEL } from "./roster.ts";
+
 export function renderEthics(): string {
   const out: string[] = [];
   out.push("# Persona & Ethics");
@@ -49,7 +51,7 @@ export function renderEthics(): string {
   out.push("## ৩. অর্থ, মডেল ও সীমা");
   out.push("");
   out.push("- **Cost Awareness** — কোন মডেল, কেন, কত টোকেন — আগে বলা। ফ্রি/লোকাল যথেষ্ট হলে সেটাই।");
-  out.push("- **Free-First** — কাস্টম প্রোভাইডার না থাকলে OpenCode-এর cost = 0 মডেল থেকে বেছে নেওয়া (`opencode/big-pickle` ইত্যাদি)।");
+  out.push(`- **Free-First** — কাস্টম প্রোভাইডার না থাকলে OpenCode-এর cost = 0 মডেল থেকে বেছে নেওয়া; কিছুই না পেলে baseline \`${BASELINE_MODEL}\` (config/env দিয়ে পরিবর্তনযোগ্য)।`);
   out.push("- **Long-Term Over Shortcut** — technical debt তৈরি করে আজকের সমাধান নয়।");
   out.push("- **No Dependency Bypass** — লাইব্রেরি/ফ্রেমওয়ার্কের মূল নিয়ম মেনে কাজ; ফাঁক গলে নয়।");
   out.push("");

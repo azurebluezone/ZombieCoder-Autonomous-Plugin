@@ -1,6 +1,12 @@
 // ZombieCoder — Runtime Operations generator
 // One plugin. URL-driven. No separate server.
 
+import {
+  BASELINE_MODEL,
+  DEFAULT_CUSTOM_PROVIDER_ID,
+  DEFAULT_CUSTOM_PROVIDER_URL,
+} from "./zombie/defaults.ts";
+
 const F = String.fromCharCode(96, 96, 96);
 
 export function renderRuntime(): string {
@@ -43,9 +49,11 @@ export function renderRuntime(): string {
   out.push("");
   out.push("| ধাপ | অনুরোধ | কী দেখে সিদ্ধান্ত |");
   out.push("|---|---|---|");
-  out.push("| ১ | `GET {url}/models` | মডেল তালিকা ফেরত এলেই প্রোভাইডার হিসেবে গ্রহণ |");
-  out.push("| ২ | `POST {url}/chat/completions` (minimal, non-streaming) | সত্যিকারের উত্তর এলে `ChatCompletions: PASS` |");
-  out.push("| ৩ | একই অনুরোধ, forced tool call | tool calling তখনই enable, যখন এই প্রোব PASS |");
+  out.push("| ১ | `GET {url}/models` | মডেল তালিকা ফেরত এলেই প্রোভাইডার হিসেবে গ্রহণ (এখন এটিই একমাত্র প্রোব) |");
+  out.push("| ২ | `POST {url}/chat/completions` | এখনো চালানো হয় না — `NOT_TESTED`; ভবিষ্যতের chat probe |");
+  out.push("| ৩ | forced tool call | এখনো চালানো হয় না — `capabilities.tools` অনুমান করা হয় না |");
+  out.push("");
+  out.push("> **Native tool call শর্ত:** gateway/model OpenAI-র `tool_calls` না দিলে OpenCode text-embedded JSON tool call execute করে না। Installer `capabilities.tools` true অনুমান করে, তাই tool execution আলাদা probe না হওয়া পর্যন্ত `NOT_TESTED`।");
   out.push("");
   out.push("### MCP (JSON-RPC 2.0)");
   out.push("");
@@ -56,7 +64,7 @@ export function renderRuntime(): string {
   out.push("| ৩ | `tools/list` |");
   out.push("| ৪ | `tools/call` |");
   out.push("");
-  out.push("modern (`2025-03-26`) ও legacy (`2024-11-05`) — দুই protocol era-তেই `initialize` probe হয়। `tools/list` পর্যন্ত read-only; `tools/call` শুধু ব্যবহারকারী/এজেন্ট নির্দিষ্ট tool দিলে, কারণ tool-এর side effect থাকতে পারে। ফলাফল গ্লোবাল `~/.config/opencode/zombiecoder/mcp.json`-এ; প্রকল্পে আলাদা mcp ফাইল তৈরি হয় না। ব্যর্থ হলে `NOT_CONFIGURED`/`NOT_TESTED`, কখনো \"সফল\" নয়।");
+  out.push("modern (`2025-03-26`) ও legacy (`2024-11-05`) — দুই protocol era-তেই `initialize` probe হয়। `tools/list` পর্যন্ত read-only; `tools/call` শুধু ব্যবহারকারী/এজেন্ট নির্দিষ্ট tool দিলে, কারণ tool-এর side effect থাকতে পারে। ফলাফল install root-এর `zombiecoder/mcp.json`-এ (default `~/.config/opencode`, `--config-dir` হলে সেই root); প্রকল্পে আলাদা mcp ফাইল তৈরি হয় না। ব্যর্থ হলে `NOT_CONFIGURED`/`NOT_TESTED`, কখনো \"সফল\" নয়।");
   out.push("");
   out.push("## ২. ছয়টি লুপ");
   out.push("");
@@ -72,16 +80,19 @@ export function renderRuntime(): string {
   out.push("## ৩. Model Fallback Resolver");
   out.push("");
   out.push(F + "text");
-  out.push("১) hardcode:  opencode/big-pickle            (cost 0/0, active — verified)");
-  out.push("২) কাস্টম প্রোভাইডার নিজের baseURL live probe-এ সাড়া দিলে: missionbarisal/llama3-groq-tool-use:8b");
-  out.push("৩) না হলে:  /api/model → cost[0].input == 0 && output == 0  (বর্তমানে ১০টি)");
+  out.push(`১) baseline (শেষ অবলম্বন): ${BASELINE_MODEL} — \`ZOMBIECODER_BASELINE_MODEL\` দিয়ে বদলানো যায়`);
+  out.push(`২) কাস্টম প্রোভাইডার নিজের baseURL live probe-এ সাড়া দিলে: <${DEFAULT_CUSTOM_PROVIDER_ID}>/<model-id>`);
+  out.push(`   (ডিফল্ট URL: ${DEFAULT_CUSTOM_PROVIDER_URL}; \`ZOMBIECODER_PROVIDER_URL\`/\`ZOMBIECODER_PROVIDER_ID\` দিয়ে বদলানো যায়)`);
+  out.push("৩) না হলে: OpenCode catalog → cost[0].input == 0 && output == 0");
   out.push("৪) ম্যাপিং:  agent id → stable hash → নির্দিষ্ট ফ্রি মডেল");
   out.push("৫) ব্যর্থ হলে: rotation → পরের ফ্রি মডেল; কখনো hard-fail নয়");
-  out.push("৬) ফলাফল cache: গ্লোবাল `~/.config/opencode/zombiecoder/models.json`; প্রকল্পে কোনো models/config ফাইল auto-create হয় না।");
+  out.push("৬) ফলাফল cache: install root-এর `zombiecoder/models.json` (default `~/.config/opencode`, `--config-dir` হলে সেই root); প্রকল্পে কোনো models/config ফাইল auto-create হয় না।");
   out.push(F);
   out.push("");
   out.push("ডিফল্ট deterministic — random হলে একই agent প্রতিবার ভিন্ন মডেলে চলে এবং \"কেন এই উত্তর এল\" ফেরানো যায় না।");
   out.push("তবে মালিক চাইলে config-এ `\"modelStrategy\": \"random\"` দিয়ে random mapping চালু করতে পারেন।");
+  out.push("");
+  out.push("> Global install-এ runtime plan live provider বা configured-provider outage-এর নতুন প্রমাণ হিসেবে global agent assignment update করে। project শুধু নিজের config-এ provider disable করলে (`customProviderUrl: \"\"`) global assignment downgrade হয় না।");
   out.push("");
   out.push("## ৪. প্লাগইন surface — যা নতুন সার্ভার বানানো ঠেকায়");
   out.push("");
@@ -99,8 +110,10 @@ export function renderRuntime(): string {
   out.push("## ৫. Install / Bootstrap");
   out.push("");
   out.push("- প্লাগইন ফোল্ডার **যেকোনো লোকেশনে** থাকতে পারে — কোনো absolute path বা symlink নির্ভরতা নেই।");
-  out.push("- চালু হলে generator OS-এর স্ট্যান্ডার্ড রুটে `.opencode` তৈরি করে নেয়, তারপর ভিতরের ফাইলগুলো।");
-  out.push("- `.opencode` না থাকলে: নিজে তৈরি → package manifest → dependency install → config → provider/MCP merge → agent md → `.zombiecoder`।");
+  out.push("- `--config-dir <path>` দিলে সেই path-ই সম্পূর্ণ install root: `opencode.json`, `agents/`, `plugins/`, `zombiecoder/`, `node_modules/` একসাথে থাকে।");
+  out.push("- OpenCode 2.1.1-এর global loader `~/.config/opencode` পড়ে; `--config-dir ~/.opencode` ব্যবহার করলে canonical ফাইল duplicate না করে ওই global path-এ symlink/pointer দিন।");
+  out.push("- চালু হলে generator install root-এ `.opencode` তৈরি করে নেয়, তারপর ভিতরের ফাইলগুলো।");
+  out.push("- install root না থাকলে: নিজে তৈরি → package manifest → dependency install → config → provider/MCP merge → agent md → `.zombiecoder`।");
   out.push("- বিদ্যমান ফাইল **কখনো নীরব overwrite নয়**: merge করে রাখা হয়, লেখা atomic (temp → rename), কোনো `.bak`/archive নয়।");
   out.push("- provider/mcp URL না মিললে কিছুই ভাঙে না — শুধু `NOT_CONFIGURED` লেখা থাকে, আর OpenCode-এর ডিফল্ট মডেল আমাদের agent/persona/meta নিয়ে কাজ চালিয়ে যায়।");
   out.push("");

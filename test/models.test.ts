@@ -5,6 +5,7 @@ import {
   assignModels,
   extractBaseUrl,
   freeModels,
+  modelRef,
   modelsUrl,
   probeOpenAiCompatible,
   readCatalog,
@@ -69,6 +70,13 @@ test("modelsUrl handles base and /v1 URLs", () => {
   assert.equal(modelsUrl("https://x.test/v1/"), "https://x.test/v1/models");
 });
 
+test("modelRef never builds provider/undefined", () => {
+  assert.equal(modelRef("missionbarisal", "m1"), "missionbarisal/m1");
+  assert.equal(modelRef("missionbarisal", undefined), null);
+  assert.equal(modelRef("missionbarisal", ""), null);
+  assert.equal(modelRef("", "m1"), null);
+});
+
 test("readCatalog reads provider.list and model.list", async () => {
   const catalog = await readCatalog({
     provider: { list: async () => ({ data: [{ id: "custom", name: "Custom", settings: { baseURL: "https://api.test/v1" } }] }) },
@@ -97,6 +105,23 @@ test("probeOpenAiCompatible accepts a data[] list without object:list", async ()
       assert.deepEqual(result.models, ["live-model"]);
     },
   );
+});
+
+test("probeOpenAiCompatible sends the configured bearer key", async () => {
+  let authorization = "";
+  await withServer(
+    (req, res) => {
+      authorization = String(req.headers.authorization ?? "");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ data: [{ id: "secured-model" }] }));
+    },
+    async (base) => {
+      const result = await probeOpenAiCompatible(base, 2000, "secret-key");
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.models, ["secured-model"]);
+    },
+  );
+  assert.equal(authorization, "Bearer secret-key");
 });
 
 test("probeOpenAiCompatible reports HTTP failures", async () => {
@@ -151,4 +176,114 @@ test("resolveModels falls back to free models when no custom provider is configu
   );
   assert.equal(plan.strategy, "free-fallback");
   assert.deepEqual(plan.candidates, ["opencode/big-pickle"]);
+});
+
+test("resolveModels respects modelStrategy: free without probing the custom provider", async () => {
+  let requests = 0;
+  await withServer(
+    (_req, res) => {
+      requests += 1;
+      res.end(JSON.stringify({ data: [{ id: "should-not-be-used" }] }));
+    },
+    async (base) => {
+      const plan = await resolveModels(
+        {
+          provider: { list: async () => ({ data: [] }) },
+          model: {
+            list: async () => ({
+              data: [
+                { providerID: "opencode", modelID: "free-one", cost: [{ input: 0, output: 0 }], status: "active", enabled: true },
+              ],
+            }),
+          },
+        },
+        ROSTER,
+        { customProviderUrl: base, strategy: "free" },
+      );
+      assert.equal(plan.strategy, "free-fallback");
+      assert.deepEqual(plan.candidates, ["opencode/free-one"]);
+    },
+  );
+  assert.equal(requests, 0, "strategy=free must not call the custom provider");
+});
+
+test("resolveModels respects modelStrategy: baseline without probing", async () => {
+  const plan = await resolveModels(
+    { provider: { list: async () => ({ data: [] }) }, model: { list: async () => ({ data: [] }) } },
+    ROSTER,
+    { customProviderUrl: "http://127.0.0.1:9/v1", strategy: "baseline" },
+  );
+  assert.equal(plan.strategy, "baseline");
+  assert.deepEqual(plan.candidates, ["opencode/big-pickle"]);
+  assert.equal(plan.probe.ok, false);
+});
+
+test("resolveModels treats an empty /models list as unusable and prefers free models", async () => {
+  await withServer(
+    (_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ data: [] }));
+    },
+    async (base) => {
+      const plan = await resolveModels(
+        {
+          provider: { list: async () => ({ data: [] }) },
+          model: {
+            list: async () => ({
+              data: [
+                { providerID: "opencode", modelID: "free-empty-fallback", cost: [{ input: 0, output: 0 }], status: "active", enabled: true },
+              ],
+            }),
+          },
+        },
+        ROSTER,
+        { customProviderUrl: base, providerConfigured: true, strategy: "auto" },
+      );
+      assert.equal(plan.strategy, "free-fallback");
+      assert.deepEqual(plan.candidates, ["opencode/free-empty-fallback"]);
+    },
+  );
+});
+
+test("resolveModels sends the provider key while probing", async () => {
+  let authorization = "";
+  await withServer(
+    (req, res) => {
+      authorization = String(req.headers.authorization ?? "");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ data: [{ id: "keyed-model" }] }));
+    },
+    async (base) => {
+      const plan = await resolveModels(
+        { provider: { list: async () => ({ data: [] }) }, model: { list: async () => ({ data: [] }) } },
+        ROSTER,
+        {
+          customProviderUrl: base,
+          customProviderID: "gateway",
+          providerConfigured: true,
+          customProviderApiKey: "gateway-key",
+        },
+      );
+      assert.equal(plan.strategy, "custom-provider");
+      assert.deepEqual(plan.candidates, ["gateway/keyed-model"]);
+    },
+  );
+  assert.equal(authorization, "Bearer gateway-key");
+});
+
+test("resolveModels with strategy custom never assigns a dead provider", async () => {
+  await withServer(
+    (_req, res) => {
+      res.writeHead(503).end("down");
+    },
+    async (base) => {
+      const plan = await resolveModels(
+        { provider: { list: async () => ({ data: [] }) }, model: { list: async () => ({ data: [] }) } },
+        ROSTER,
+        { customProviderUrl: base, providerConfigured: true, strategy: "custom" },
+      );
+      assert.equal(plan.strategy, "baseline");
+      assert.deepEqual(plan.candidates, ["opencode/big-pickle"]);
+    },
+  );
 });

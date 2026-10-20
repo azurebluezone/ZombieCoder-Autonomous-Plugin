@@ -9,7 +9,7 @@
 // append-only by construction.
 
 import { auditFile, memoryDir, ssotFile, syllabusFile } from "./paths.ts";
-import { appendJsonl, readJsonl, readText } from "./io.ts";
+import { appendJsonl, readJsonl, readText, redactValue, PLUGIN_VERSION } from "./io.ts";
 import { readArchive, readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
 import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { scanProject } from "./scan.ts";
@@ -112,7 +112,7 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
       working_directory: async () => ({ root: deps.projectRoot() }),
 
       status: async () => ({
-        version: "0.1.0",
+        version: PLUGIN_VERSION,
         root: deps.projectRoot(),
         agents: ROSTER.length,
         ssotFile: ssotFile(deps.projectRoot()),
@@ -326,5 +326,6 @@ export function registerTools(tool: ToolLike | undefined, deps: SurfaceDeps): To
 // Audit append is the one thing every surface shares. It lives under .state so
 // the project root stays focused on SSOT, syllabus and memory.
 export function audit(projectRoot: string, agentID: string, record: Record<string, unknown>): void {
-  appendJsonl(auditFile(projectRoot), { ts: new Date().toISOString(), agent: agentID, ...record });
+  const entry = { ts: new Date().toISOString(), agent: agentID, ...record };
+  appendJsonl(auditFile(projectRoot), redactValue(entry));
 }

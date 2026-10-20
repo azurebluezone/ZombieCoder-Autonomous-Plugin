@@ -30,7 +30,21 @@ const SCRIPTS_DIR = path.dirname(SCRIPT_FILE);
 const REPO_ROOT = path.dirname(SCRIPTS_DIR);
 const TS_FLAG = "--experimental-strip-types";
 const MIN_NODE = [22, 6];
-const FACT_MIN = 9; // the roster has 9 agents
+const PKG = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"));
+const VERSION = PKG.version;
+
+// Read the expected agent IDs from the runtime roster. setup.mjs deliberately
+// runs without the type-stripping flag, so a narrow read of the source of truth
+// is used instead of a second hardcoded list.
+function expectedAgentIds() {
+  try {
+    const source = fs.readFileSync(path.join(REPO_ROOT, "src", "roster.ts"), "utf8");
+    return [...source.matchAll(/^\s{4}id:\s*"([^"]+)"/gm)].map((match) => match[1]);
+  } catch {
+    return [];
+  }
+}
+const EXPECTED_AGENT_IDS = expectedAgentIds();
 
 function parseArgs(argv) {
   const out = {
@@ -105,10 +119,13 @@ function globalSummary(configDir) {
   const cfg = readJsonFile(file);
   const agents = cfg && cfg.agents && typeof cfg.agents === "object" ? cfg.agents : {};
   const ids = Object.keys(agents);
-  const allPrimary = ids.length > 0 && ids.every((id) => agents[id]?.mode === "all");
+  const expected = EXPECTED_AGENT_IDS;
+  const missing = expected.filter((id) => !agents[id]);
+  const checked = expected.length > 0 ? expected : ids;
+  const allPrimary = checked.length > 0 && checked.every((id) => agents[id]?.mode === "primary");
   const canDelegate =
-    ids.length > 0 &&
-    ids.every(
+    checked.length > 0 &&
+    checked.every(
       (id) =>
         Array.isArray(agents[id]?.permissions) &&
         agents[id].permissions.some((r) => r?.action === "subagent" && r?.effect === "allow"),
@@ -117,9 +134,11 @@ function globalSummary(configDir) {
     file,
     exists: fs.existsSync(file),
     agents: ids.length,
+    expected: expected.length,
+    missing,
     allPrimary,
     canDelegate,
-    ok: ids.length >= FACT_MIN && allPrimary && canDelegate,
+    ok: missing.length === 0 && allPrimary && canDelegate,
   };
 }
 
@@ -175,7 +194,7 @@ function printStatusHuman(report) {
   console.log(`  node     : ${report.node}`);
   console.log(`  target   : ${report.target}`);
   console.log(
-    `  global   : agents=${report.global.agents} mode:all=${report.global.allPrimary ? "yes" : "no"} delegate=${report.global.canDelegate ? "yes" : "no"}`,
+    `  global   : agents=${report.global.agents} mode:primary=${report.global.allPrimary ? "yes" : "no"} delegate=${report.global.canDelegate ? "yes" : "no"}`,
   );
   console.log(`  SSOT.md              : ${fmtFile(p.ssot)}`);
   console.log(`  syllabus.md          : ${fmtFile(p.syllabus)}`);
@@ -195,7 +214,7 @@ function printSetupHuman(report) {
   for (const step of report.steps) console.log(`  [${step.ok ? "ok" : "!!"}] ${step.step}`);
   const p = report.project;
   console.log(`  project  : SSOT=${p.ssot.exists ? p.ssot.bytes + "B" : "missing"} syllabus=${p.syllabus.exists ? p.syllabus.bytes + "B" : "missing"} map=${p.hasProjectMap ? "yes" : "no"} team=${p.hasAgentTeam ? "yes" : "no"}`);
-  console.log(`  global   : agents=${report.global.agents} mode:all=${report.global.allPrimary ? "yes" : "no"} delegate=${report.global.canDelegate ? "yes" : "no"}`);
+  console.log(`  global   : agents=${report.global.agents} mode:primary=${report.global.allPrimary ? "yes" : "no"} delegate=${report.global.canDelegate ? "yes" : "no"}`);
 }
 
 function printHelp() {
@@ -209,7 +228,7 @@ Usage:
 
 Options:
   --dir <path>       target project (default: current working directory)
-  --url <url>        OpenCode API base (default: global config, then http://127.0.0.1:49374)
+  --url <url>        OpenCode API base (default: global config, then OPENCODE_API_URL)
   --no-install       never run the global installer
   --no-reload        skip the OpenCode location reload in configure
   --force            always regenerate SSOT/syllabus in configure
@@ -220,7 +239,7 @@ Options:
 
 Steps:
   1. check Node >= 22.6
-  2. install the global pack (9 agents, mode:all, subagent allow)
+  2. install the global pack (${EXPECTED_AGENT_IDS.length} roster agents, mode:primary, subagent allow)
   3. configure the target project (SSOT.md + syllabus.md, via reload or direct)
   4. verify and report
 
@@ -250,7 +269,7 @@ async function main() {
     const report = {
       tool: "zombiecoder-setup",
       mode: "status",
-      version: "0.1.0",
+      version: VERSION,
       platform: process.platform,
       arch: process.arch,
       node: process.version,
@@ -320,7 +339,7 @@ async function main() {
   const report = {
     tool: "zombiecoder-setup",
     mode: "setup",
-    version: "0.1.0",
+    version: VERSION,
     platform: process.platform,
     arch: process.arch,
     node: process.version,

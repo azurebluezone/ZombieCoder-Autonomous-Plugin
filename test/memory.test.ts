@@ -63,3 +63,11 @@ test("touchIndex merges patches without dropping previous fields", () => {
   assert.equal(entry.archivedTotal, 7);
   assert.match(entry.archiveFile, /ses_a\.jsonl$/);
 });
+
+test("an empty touchIndex patch refreshes the index without resetting kept", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-touch-"));
+  touchIndex(root, "ses_prompt", { kept: 4, archivedTotal: 11 });
+  const entry = touchIndex(root, "ses_prompt", {});
+  assert.equal(entry.kept, 4);
+  assert.equal(entry.archivedTotal, 11);
+});

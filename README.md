@@ -152,7 +152,8 @@ npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
 
 ### ৪.৩ Standard global install (বিকল্প)
 
-`~/.config/opencode`-এ ইনস্টল করতে চাইলে:
+Linux/macOS-এ `~/.config/opencode` এবং Windows-এ `%USERPROFILE%\.config\opencode`-এ
+ইনস্টল করতে চাইলে:
 
 ```bash
 npm run install-pack -- --yes
@@ -252,6 +253,9 @@ opencode models
 - `debug agents`-এ ৯টি roster agent থাকবে, প্রত্যেকের `mode: primary`।
 - `plugin list`-এ `zombiecoder` local plugin দেখাবে।
 - `models`-এ provider model এবং প্রয়োজন হলে `opencode/big-pickle` থাকবে।
+
+> Windows-এ OpenCode CLI PATH-এ না থাকলে OpenCode Desktop ব্যবহার করুন।
+> CLI command চালাতে হলে OpenCode-এর full executable path ব্যবহার করুন।
 
 ### ৫.৩ প্রথম inference test
 

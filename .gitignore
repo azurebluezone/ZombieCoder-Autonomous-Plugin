@@ -5,6 +5,9 @@ node_modules/
 coverage/
 *.log
 .DS_Store
+__pycache__/
+*.pyc
+origin/origin-profile.json
 
 # Installer output for this repo; the plugin source is not a consumer project.
 opencode.json

@@ -92,6 +92,20 @@ plugin নিজে তৈরি করে।
 7. প্রজেক্ট নিজে provider disable করলে (`customProviderUrl: ""`) global
    assignment downgrade হয় না।
 
+### ২.৩ 100C runtime template
+
+Runtime template-এর scanner, model mapper, TLS verifier ও evidence gate এখন
+রিপোজিটরিতে আছে:
+
+- `model.mjs` — runtime model probe, deterministic agent mapping ও free fallback
+- `tools/hulia_100c.py` — read-only file/client/network scan
+- `tools/tls_verify.py` — OpenSSL TLS verification ও optional `nginx -t`
+- `tools/evidence_gate.py` — প্রমাণ ছাড়া response `PASS` করে না
+- `tools/render_nginx.py` + `tls/nginx.conf.template` — reusable Nginx TLS template
+- `doc/*.js` — runtime-readable identity, ethics ও runtime operations
+
+বিস্তারিত: [`docs/100c-runtime-template.md`](docs/100c-runtime-template.md)
+
 ---
 
 ## ৩. প্রয়োজনীয়তা
@@ -813,9 +827,19 @@ icacls "$env:USERPROFILE\.opencode\zombiecoder\config.json" /inheritance:r /gran
 ZombieCoder-Autonomous-Plugin/
 ├── bin/
 │   └── install.mjs
+├── docs/
+│   └── 100c-runtime-template.md
 ├── scripts/
 │   ├── configure.mjs
 │   └── setup.mjs
+├── tools/
+│   ├── evidence_gate.py
+│   ├── hulia_100c.py
+│   ├── origin_profile.py
+│   ├── render_nginx.py
+│   └── tls_verify.py
+├── tls/
+│   └── nginx.conf.template
 ├── src/
 │   ├── agents.ts
 │   ├── ethics.ts
@@ -840,12 +864,19 @@ ZombieCoder-Autonomous-Plugin/
 │       └── transform.ts
 ├── test/
 ├── doc/
+│   ├── identity.js
+│   ├── ethics.js
+│   ├── runtime-operations.js
+│   ├── index.js
+│   └── *.md (legacy generated artifacts)
+├── model.mjs
 ├── package.json
 └── README.md
 ```
 
-`doc/*.md` build artifact; edit `src/agents.ts`, `src/runtime.ts` অথবা
-`src/ethics.ts` এবং `npm run generate` চালান।
+`doc/*.js` runtime-readable documentation; legacy `doc/*.md` build artifacts
+`npm run generate` দিয়ে তৈরি হয়। Runtime template-এর নতুন scanner/model/TLS
+tools `tools/` ও `tls/`-এ আছে।
 
 ---
 

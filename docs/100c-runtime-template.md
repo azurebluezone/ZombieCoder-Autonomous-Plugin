@@ -215,8 +215,8 @@ Local site:
 /etc/nginx/sites-enabled/zombiecoder-local.conf -> ../sites-available/zombiecoder-local.conf
 ```
 
-It listens on `443` with TLS 1.2/1.3 and proxies to
-`http://127.0.0.1:8000`.
+It listens on `443` with TLS 1.2/1.3, serves a static `GET /health` response,
+and proxies everything else to `http://127.0.0.1:8000`.
 
 Validation and tests:
 
@@ -230,6 +230,10 @@ protocol=TLSv1.3
 verification=OK
 peer certificate CN=localhost
 
+curl --cacert /etc/ssl/zombiecoder/localhost.crt https://localhost/health
+ok
+HTTP 200
+
 curl --cacert /etc/ssl/zombiecoder/localhost.crt https://localhost/v1/models
 HTTP 200
 {"object":"list","data":[{"id":"mock-small"},{"id":"mock-large"}]}
@@ -238,10 +242,11 @@ python3 tools/evidence_gate.py --kind models --file local-nginx-models.json
 PASS
 ```
 
-The same payload was returned through `https://zombiecoder.local` using
-`--resolve zombiecoder.local:443:127.0.0.1`. The full template rendered to
-`/tmp/opencode/nginx-full.conf` also passed `nginx -t` and OpenSSL verification
-as root.
+The `/health` endpoint returned `200` through both `https://localhost` and
+`https://zombiecoder.local` (using `--resolve zombiecoder.local:443:127.0.0.1`).
+The model payload was returned through both names as well. The full template
+rendered to `/tmp/opencode/nginx-full.conf` also passed `nginx -t` and OpenSSL
+verification as root.
 
 After the mock upstream was stopped, `/v1/models` returned `502`; that is the
 expected state until a real local gateway listens on `127.0.0.1:8000`.

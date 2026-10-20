@@ -200,8 +200,55 @@ peer certificate CN=zombiecoder.my.id
 A wrong SNI produced `FAIL`; the evidence gate correctly refused it.
 
 At the time of the initial scan, `nginx` was missing, so `nginx -t` was `SKIP`.
-Nginx 1.18 was installed afterward; local configuration and validation are
-tracked below.
+Nginx 1.18 was installed afterward.
+
+### ৫.১ Local Nginx TLS test
+
+A local self-signed certificate was created at
+`/etc/ssl/zombiecoder/localhost.crt` with SANs `localhost`,
+`zombiecoder.local` and `127.0.0.1`. The key is mode `600`.
+
+Local site:
+
+```text
+/etc/nginx/sites-available/zombiecoder-local.conf
+/etc/nginx/sites-enabled/zombiecoder-local.conf -> ../sites-available/zombiecoder-local.conf
+```
+
+It listens on `443` with TLS 1.2/1.3 and proxies to
+`http://127.0.0.1:8000`.
+
+Validation and tests:
+
+```text
+sudo nginx -t
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+
+openssl s_client ... -servername localhost -CAfile /etc/ssl/zombiecoder/localhost.crt
+status=PASS
+protocol=TLSv1.3
+verification=OK
+peer certificate CN=localhost
+
+curl --cacert /etc/ssl/zombiecoder/localhost.crt https://localhost/v1/models
+HTTP 200
+{"object":"list","data":[{"id":"mock-small"},{"id":"mock-large"}]}
+
+python3 tools/evidence_gate.py --kind models --file local-nginx-models.json
+PASS
+```
+
+The same payload was returned through `https://zombiecoder.local` using
+`--resolve zombiecoder.local:443:127.0.0.1`. The full template rendered to
+`/tmp/opencode/nginx-full.conf` also passed `nginx -t` and OpenSSL verification
+as root.
+
+After the mock upstream was stopped, `/v1/models` returned `502`; that is the
+expected state until a real local gateway listens on `127.0.0.1:8000`.
+
+> The public DNS names resolve to Cloudflare, not to this machine. The local
+> certificate is a test certificate, not a public Let's Encrypt certificate.
+> `certbot --nginx` needs a domain whose DNS/origin reaches this Nginx.
 
 ---
 
@@ -249,8 +296,8 @@ Current status:
 - `SOURCE_VERIFIED`: 100C scan, origin profile, fallback catalog
 - `LIVE_PROBE_PASSED`: live models, live TLS, MCP mock probe
 - `END_TO_END_TESTED`: live chat + evidence gate
-- `NOT_TESTED`: live `--apply`, real MCP server, public Nginx certificate
-- `CONFIG_VALIDATED`: pending local Nginx validation
+- `CONFIG_VALIDATED`: local Nginx `nginx -t` and rendered template `nginx -t`
+- `NOT_TESTED`: live `--apply`, real MCP server, public Let's Encrypt certificate
 
 ---
 
@@ -269,9 +316,12 @@ Current status:
 - Public DNS for `zombiecoder.my.id` and `gpu.zombiecoder.my.id` resolves to
   Cloudflare addresses. `certbot --nginx` cannot issue a public certificate for
   this machine unless DNS/origin routing points here.
-- No local `:8000` upstream is running.
-- The local Nginx TLS server is not configured yet.
+- No real local `:8000` upstream is running. The local Nginx config is ready, but
+  it returns `502` until a gateway starts there.
 - Live `--apply` has not been run against the global `opencode.json`.
+- The local TLS certificate is self-signed and valid for 30 days; it is not a
+  public certificate.
 
-The safe test path is a local Nginx TLS listener with a self-signed certificate
-and a local upstream, followed by `curl` and `tls_verify.py`.
+Local Nginx TLS is configured and tested. The next production step is a real
+domain/origin certificate, either through a Cloudflare-aware DNS challenge or by
+pointing an origin hostname at this machine.

@@ -26,6 +26,8 @@ runtime state তৈরি করে; প্রজেক্টের ভিত�
 - প্রতিটি প্রজেক্টের জন্য `.zombiecoder/SSOT.md`, `syllabus.md`, memory ও
   audit state তৈরি হয়।
 - MCP server শুধু probe সফল হলে register হয়।
+- Origin handshake (URL-only): trusted origin থেকে শুধু base URL sync করা যায়;
+  API key, cookie বা browser session transfer হয় না।
 - API key, provider URL, provider ID, model strategy ও baseline model
   configuration/environment/flags দিয়ে পরিবর্তন করা যায়।
 
@@ -398,6 +400,58 @@ Tool ব্যবহার করতে হলে gateway/model-এ native tool 
 llama.cpp-ভিত্তিক gateway-এ প্রযোজ্য হলে chat template/`--jinja` এবং
 tool-capable model ব্যবহার করুন।
 
+### ৬.৫ Origin URL handshake (URL-only)
+
+Cloud runtime-এ provider-এর public URL মাঝে মাঝে বদলাতে পারে, কিন্তু API key
+একই থাকতে হবে। এই ক্ষেত্রে একটি trusted **origin URL** সেট করা যায়; plugin সেখান
+থেকে শুধু base URL পড়ে এবং দরকার হলে provider URL update করে।
+
+Origin URL সেট করার দুটি উপায়:
+
+Linux/macOS:
+
+```bash
+export ZOMBIECODER_ORIGIN_URL="https://gpu.zombiecoder.my.id"
+npm run install-pack -- --config-dir "$HOME/.opencode" --yes
+```
+
+Windows PowerShell:
+
+```powershell
+$env:ZOMBIECODER_ORIGIN_URL = "https://gpu.zombiecoder.my.id"
+npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
+```
+
+অথবা `~/.opencode/zombiecoder/config.json`-এ একটি field যোগ করুন:
+
+```json
+{
+  "originUrl": "https://gpu.zombiecoder.my.id"
+}
+```
+
+Origin-কে `GET /gateway_url.json` public endpoint দিতে হবে। প্রত্যাশিত response:
+
+```json
+{
+  "base_url": "https://gpu.zombiecoder.my.id/v1",
+  "hostname": "gpu.zombiecoder.my.id",
+  "auth_required": true
+}
+```
+
+নিরাপত্তা ও আচরণ:
+
+- Handshake request শুধু `GET`; কোনো `Authorization` header, cookie বা browser
+  session path এতে যুক্ত হয় না।
+- API key কখনো origin-এ পাঠানো হয় না এবং origin থেকে পড়া হয় না।
+- শুধু `settings.baseURL` (এবং `customProviderUrl`) update হয়; model, permission
+  বা API key অপরিবর্তিত থাকে।
+- Origin unreachable হলে handshake step fail হিসেবে report হয়; plugin আগের
+  configured URL দিয়েই কাজ চালিয়ে যায়।
+- `originUrl` খালি থাকলে handshake সম্পূর্ণ বন্ধ থাকে। Global config-এ originUrl
+  থাকলেও সাময়িকভাবে বন্ধ করতে `ZOMBIECODER_ORIGIN_URL=off` ব্যবহার করুন।
+
 ---
 
 ## ৭. MCP configuration
@@ -601,6 +655,7 @@ zombiecoder.get_working_directory
 | `--provider-id <id>` | Provider ID |
 | `--provider-key <key>` | API key; log-এ print হয় না |
 | `--mcp-url <url>` | MCP URL; `none`/বাদ দিলে skip |
+| `--origin-url <url>` | URL-only origin handshake; `none` দিলে বন্ধ |
 | `--yes` | কোনো prompt ছাড়া install |
 | `--no-install` | `npm install` skip |
 | `--no-provider-config` | `opencode.json` provider merge skip |
@@ -615,6 +670,7 @@ ZOMBIECODER_API_KEY
 ZOMBIECODER_BASELINE_MODEL
 ZOMBIECODER_MODEL_STRATEGY
 ZOMBIECODER_MCP_URL
+ZOMBIECODER_ORIGIN_URL
 OPENCODE_API_URL
 OPENCODE_BASE
 ```
@@ -688,6 +744,7 @@ Backup-এ API key থাকতে পারে; permission restrict করু�
 | `/v1/models` empty | Provider-এ model load হয়নি; free fallback active থাকবে |
 | Agent dropdown-এ নেই | `opencode debug agents`; `mode: primary` এবং install root যাচাই করুন |
 | Agent tool execute করছে না | Native `tool_calls` নেই; tool-capable model বা gateway template ঠিক করুন |
+| `origin-handshake` step fail | `originUrl`/public `/gateway_url.json` reachable কি দেখুন; fail হলেও configured URL কাজ করবে |
 | `.opencode` অন্য directory-তে পাওয়া যাচ্ছে না | `~/.config/opencode`-এ symlink/pointer দিন |
 | Windows symlink তৈরি হচ্ছে না | Developer Mode চালু করুন অথবা Administrator PowerShell ব্যবহার করুন |
 | MCP register হয়নি | `~/.opencode/zombiecoder/mcp.json`-এর error দেখুন |
@@ -710,7 +767,8 @@ opencode models
 ## ১৫. নিরাপত্তা
 
 - API key `opencode.json` এবং `zombiecoder/config.json`-এ থাকে।
-- দুই ফাইলের permission `600` রাখুন:
+- Installer এই দুই ফাইলের POSIX permission নিজেই `600` করে; ম্যানুয়ালি বদলালে
+  আবার ঠিক করে নিন:
 
 ```bash
 chmod 600 "$HOME/.opencode/opencode.json" "$HOME/.opencode/zombiecoder/config.json"
@@ -753,6 +811,7 @@ ZombieCoder-Autonomous-Plugin/
 │       ├── mcp.ts
 │       ├── memory.ts
 │       ├── models.ts
+│       ├── origin.ts
 │       ├── paths.ts
 │       ├── scan.ts
 │       ├── server.ts

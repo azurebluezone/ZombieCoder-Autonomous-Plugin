@@ -31,6 +31,7 @@
 //   node --experimental-strip-types bin/install.mjs --no-provider-config
 //   node --experimental-strip-types bin/install.mjs --provider-url https://host/v1
 //   node --experimental-strip-types bin/install.mjs --provider-id my-gateway
+//   node --experimental-strip-types bin/install.mjs --origin-url https://origin.example
 //   ZOMBIECODER_PROVIDER_KEY=... node --experimental-strip-types bin/install.mjs
 //   node --experimental-strip-types bin/install.mjs --provider-key <key>
 //   node --experimental-strip-types bin/install.mjs --config-dir ~/.opencode
@@ -129,6 +130,7 @@ const providerFlag = value("--provider-url", null);
 const providerIdFlag = value("--provider-id", null);
 const providerKeyFlag = value("--provider-key", null);
 const mcpFlag = value("--mcp-url", null);
+const originFlag = value("--origin-url", null);
 
 // Environment wins over a previous install, matching the runtime's loadConfig().
 const envText = (name) => {
@@ -139,6 +141,7 @@ const envText = (name) => {
 const envProviderId = envText("ZOMBIECODER_PROVIDER_ID");
 const envProviderUrl = envText("ZOMBIECODER_PROVIDER_URL");
 const envMcpUrl = envText("ZOMBIECODER_MCP_URL");
+const envOriginUrl = envText("ZOMBIECODER_ORIGIN_URL");
 
 // Re-install should remember the owner's previous answer instead of silently
 // resetting it to the shipped default.
@@ -162,6 +165,12 @@ const initialMcp =
     ? cleanUrl(mcpFlag, DEFAULT_MCP_URL)
     : envMcpUrl ??
       (typeof previous.mcpUrl === "string" ? previous.mcpUrl : DEFAULT_MCP_URL);
+const originProvided = originFlag !== null || envOriginUrl !== null;
+const ORIGIN_URL = originProvided
+  ? cleanUrl(originFlag ?? envOriginUrl, "")
+  : typeof previous.originUrl === "string"
+    ? previous.originUrl
+    : "";
 
 let PROVIDER_URL = initialProvider;
 let MCP_URL = initialMcp;
@@ -241,10 +250,27 @@ function writeIfChanged(file, content) {
   ensureDir(path.dirname(file));
   const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
   if (current === content) return false;
+  // Preserve an existing mode: opencode.json and zombiecoder/config.json carry
+  // the provider key and must not become world-readable after an install.
+  let mode = 0o644;
+  try {
+    if (fs.existsSync(file)) mode = fs.statSync(file).mode & 0o777;
+  } catch {
+    /* keep the default */
+  }
   const tmp = file + "." + process.pid + ".tmp";
-  fs.writeFileSync(tmp, content, { encoding: "utf8", mode: 0o644 });
+  fs.writeFileSync(tmp, content, { encoding: "utf8", mode });
   fs.renameSync(tmp, file);
   return true;
+}
+
+function secureSecretFile(file) {
+  // POSIX mode 600; on Windows chmod is best-effort and may be a no-op.
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch {
+    /* best effort */
+  }
 }
 
 function mergeJson(file, patch) {
@@ -404,12 +430,14 @@ await step("seed zombiecoder config", () => {
     customProviderID: PROVIDER_ID,
     customProviderApiKey: PROVIDER_KEY,
     mcpUrl: MCP_URL,
+    originUrl: ORIGIN_URL,
     opencodeApiUrl: existing.opencodeApiUrl ?? DEFAULT_OPENCODE_API_URL,
     ssotRefreshMs: existing.ssotRefreshMs ?? defaults.DEFAULT_SSOT_REFRESH_MS,
     modelStrategy: existing.modelStrategy ?? "auto",
     createdAt: existing.createdAt ?? new Date().toISOString(),
   };
   writeIfChanged(ZOMBIE_CONFIG, JSON.stringify(next, null, 2) + "\n");
+  secureSecretFile(ZOMBIE_CONFIG);
   return path.relative(TARGET, ZOMBIE_CONFIG);
 });
 
@@ -589,6 +617,7 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
   }
 
   writeIfChanged(OPENCODE_JSON, JSON.stringify(next, null, 2) + "\n");
+  secureSecretFile(OPENCODE_JSON);
   const providerSummary = !PROVIDER_URL
     ? "custom provider disabled (OpenCode free models)"
     : providerReachable

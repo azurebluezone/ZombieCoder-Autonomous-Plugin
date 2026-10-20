@@ -111,6 +111,7 @@ export function renderRuntime(): string {
   out.push("");
   out.push("- প্লাগইন ফোল্ডার **যেকোনো লোকেশনে** থাকতে পারে — কোনো absolute path বা symlink নির্ভরতা নেই।");
   out.push("- `--config-dir <path>` দিলে সেই path-ই সম্পূর্ণ install root: `opencode.json`, `agents/`, `plugins/`, `zombiecoder/`, `node_modules/` একসাথে থাকে।");
+  out.push("- `originUrl` (এনভায়রনমেন্ট `ZOMBIECODER_ORIGIN_URL`) সেট থাকলে runtime শুধু public `/gateway_url.json` পড়ে provider-এর base URL মেলায়। এই handshake কোনো API key, cookie বা browser session পাঠায় বা পড়ে না।");
   out.push("- OpenCode 2.1.1-এর global loader `~/.config/opencode` পড়ে; `--config-dir ~/.opencode` ব্যবহার করলে canonical ফাইল duplicate না করে ওই global path-এ symlink/pointer দিন।");
   out.push("- চালু হলে generator install root-এ `.opencode` তৈরি করে নেয়, তারপর ভিতরের ফাইলগুলো।");
   out.push("- install root না থাকলে: নিজে তৈরি → package manifest → dependency install → config → provider/MCP merge → agent md → `.zombiecoder`।");

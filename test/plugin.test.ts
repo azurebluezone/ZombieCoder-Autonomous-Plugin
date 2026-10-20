@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { setup, detectInstallLayout, providerConfiguredOnDisk } from "../src/plugin.ts";
+import {
+  setup,
+  detectInstallLayout,
+  providerConfiguredOnDisk,
+  persistProviderUrl,
+  syncProviderBaseUrl,
+} from "../src/plugin.ts";
+
+// Tests must not inherit the developer's installed originUrl. The setup tests
+// exercise local model plans, not a live origin handshake.
+process.env.ZOMBIECODER_ORIGIN_URL = "off";
 
 type Fake = ReturnType<typeof makeContext>;
 
@@ -419,4 +429,60 @@ test("detectInstallLayout treats a .opencode root with its own config as self-co
     delete process.env.ZOMBIECODER_INSTALL_PARENT;
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("origin handshake persistence changes only the URL and keeps the key + mode", () => {
+  const root = tempProject();
+  const file = path.join(root, "zombiecoder", "config.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      customProviderUrl: "https://old.example/v1",
+      customProviderApiKey: "zc-test-key",
+      originUrl: "https://origin.example",
+    }),
+    { mode: 0o600 },
+  );
+
+  const result = persistProviderUrl("https://new.example/v1", [file]);
+  assert.equal(result.updated, true);
+  const after = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(after.customProviderUrl, "https://new.example/v1");
+  assert.equal(after.customProviderApiKey, "zc-test-key");
+  assert.equal(after.originUrl, "https://origin.example");
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600, "secret config mode must be preserved");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("syncProviderBaseUrl touches only settings.baseURL", () => {
+  const root = tempProject();
+  const file = path.join(root, "opencode.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify(
+      {
+        providers: {
+          missionbarisal: {
+            settings: { baseURL: "https://old.example/v1", apiKey: "zc-test-key" },
+            models: { m1: { name: "m1" } },
+          },
+        },
+        agents: { manu: { mode: "primary" } },
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
+
+  const result = syncProviderBaseUrl(file, "missionbarisal", "https://new.example/v1");
+  assert.equal(result.updated, true);
+  const after = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(after.providers.missionbarisal.settings.baseURL, "https://new.example/v1");
+  assert.equal(after.providers.missionbarisal.settings.apiKey, "zc-test-key");
+  assert.deepEqual(after.providers.missionbarisal.models, { m1: { name: "m1" } });
+  assert.equal(after.agents.manu.mode, "primary");
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600, "provider config mode must be preserved");
+  fs.rmSync(root, { recursive: true, force: true });
 });

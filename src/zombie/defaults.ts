@@ -53,5 +53,9 @@ export const DEFAULT_PROVIDER_NAME =
   env("ZOMBIECODER_PROVIDER_NAME") ?? "ZombieCoder Gateway";
 export const DEFAULT_OPENCODE_API_URL =
   env("OPENCODE_API_URL") ?? env("OPENCODE_BASE") ?? "http://127.0.0.1:49374";
+// URL-only origin handshake. Empty means "do not handshake"; the provider URL
+// from config is used as-is. Set ZOMBIECODER_ORIGIN_URL or config.originUrl to a
+// trusted origin that publishes /gateway_url.json.
+export const DEFAULT_ORIGIN_URL = env("ZOMBIECODER_ORIGIN_URL") ?? "";
 export const DEFAULT_MCP_URL = env("ZOMBIECODER_MCP_URL") ?? "";
 export const DEFAULT_SSOT_REFRESH_MS = 5 * 60 * 1000;

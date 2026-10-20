@@ -42,7 +42,15 @@ export function ensureDir(dir: string): void {
 export function writeAtomic(file: string, content: string): void {
   ensureDir(path.dirname(file));
   const tmp = file + "." + process.pid + ".tmp";
-  fs.writeFileSync(tmp, content, { encoding: "utf8", mode: 0o644 });
+  // Preserve an existing mode so a secret-bearing config never becomes
+  // world-readable just because the plugin rewrote it.
+  let mode = 0o644;
+  try {
+    if (fs.existsSync(file)) mode = fs.statSync(file).mode & 0o777;
+  } catch {
+    /* keep the default */
+  }
+  fs.writeFileSync(tmp, content, { encoding: "utf8", mode });
   fs.renameSync(tmp, file);
 }
 

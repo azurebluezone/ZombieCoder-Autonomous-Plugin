@@ -110,6 +110,8 @@ test("installer --config-dir creates a complete self-contained config root", asy
         "--no-install",
         "--provider-url",
         base,
+        "--origin-url",
+        "https://origin.example",
       ]);
       try {
         assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
@@ -125,6 +127,14 @@ test("installer --config-dir creates a complete self-contained config root", asy
           fs.readFileSync(path.join(configDir, "zombiecoder", "config.json"), "utf8"),
         );
         assert.equal(state.installMode, "global");
+        assert.equal(state.originUrl, "https://origin.example");
+        if (process.platform !== "win32") {
+          assert.equal(fs.statSync(path.join(configDir, "opencode.json")).mode & 0o777, 0o600);
+          assert.equal(
+            fs.statSync(path.join(configDir, "zombiecoder", "config.json")).mode & 0o777,
+            0o600,
+          );
+        }
       } finally {
         fs.rmSync(parent, { recursive: true, force: true });
       }
@@ -193,6 +203,13 @@ test("installer passes the provider key to the probe and to opencode.json", asyn
         );
         assert.equal(zombiecoder.customProviderApiKey, "gateway-key");
         assert.ok(!result.stdout.includes("gateway-key"), "installer printed the key");
+        if (process.platform !== "win32") {
+          assert.equal(fs.statSync(path.join(root, "opencode.json")).mode & 0o777, 0o600);
+          assert.equal(
+            fs.statSync(path.join(root, ".zombiecoder", "config.json")).mode & 0o777,
+            0o600,
+          );
+        }
       } finally {
         fs.rmSync(root, { recursive: true, force: true });
       }

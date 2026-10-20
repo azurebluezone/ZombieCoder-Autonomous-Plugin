@@ -38,8 +38,10 @@ import {
   DEFAULT_CUSTOM_PROVIDER_URL,
   DEFAULT_MCP_URL,
   DEFAULT_OPENCODE_API_URL,
+  DEFAULT_ORIGIN_URL,
   DEFAULT_SSOT_REFRESH_MS,
 } from "./zombie/defaults.ts";
+import { fetchOriginHandshake } from "./zombie/origin.ts";
 import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
 import { registerRpc, registerTools, audit } from "./zombie/server.ts";
@@ -58,6 +60,7 @@ export type ZombieConfig = {
   baselineModel: string;
   mcpUrl: string;
   opencodeApiUrl: string;
+  originUrl: string;
   ssotRefreshMs: number;
   modelStrategy: ModelStrategy;
 };
@@ -69,6 +72,7 @@ export const DEFAULT_CONFIG: ZombieConfig = {
   baselineModel: BASELINE_MODEL,
   mcpUrl: DEFAULT_MCP_URL,
   opencodeApiUrl: DEFAULT_OPENCODE_API_URL,
+  originUrl: DEFAULT_ORIGIN_URL,
   ssotRefreshMs: DEFAULT_SSOT_REFRESH_MS,
   modelStrategy: "auto",
 };
@@ -160,10 +164,11 @@ type Ctx = {
   catalog?: CatalogDoors;
   // OpenCode 2.x exposes provider/model as sibling domains. Older betas exposed
   // a single `catalog`; both are read below so the pack survives either surface.
-  provider?: { list?: (input?: any) => Promise<any> };
+  provider?: { list?: (input?: any) => Promise<any>; reload?: () => Promise<void> };
   model?: {
     list?: (input?: any) => Promise<any>;
     default?: (input?: any) => Promise<any>;
+    reload?: () => Promise<void>;
   };
   rpc?: { register: (definition: any, handlers: any) => Promise<any> };
   storage: { get: (key: string) => Promise<unknown>; set: (key: string, value: any) => Promise<void> };
@@ -235,6 +240,15 @@ function envOverride(name: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function originEnvOverride(): string | undefined {
+  const value = envOverride("ZOMBIECODER_ORIGIN_URL");
+  if (value === undefined) return undefined;
+  // `off`/`none` lets a caller disable an originUrl that came from a global
+  // config file, without editing that file.
+  if (/^(off|none|false|no|0)$/i.test(value)) return "";
+  return value;
+}
+
 function loadConfig(projectRoot: string): ZombieConfig {
   // Merge order mirrors OpenCode: shipped default < global ZombieCoder config
   // < optional manual .zombiecoder/config.json. We never auto-create the project
@@ -254,6 +268,7 @@ function loadConfig(projectRoot: string): ZombieConfig {
       envOverride("ZOMBIECODER_PROVIDER_KEY") ?? envOverride("ZOMBIECODER_API_KEY"),
     baselineModel: envOverride("ZOMBIECODER_BASELINE_MODEL"),
     mcpUrl: envOverride("ZOMBIECODER_MCP_URL"),
+    originUrl: originEnvOverride(),
     opencodeApiUrl: envOverride("OPENCODE_API_URL") ?? envOverride("OPENCODE_BASE"),
     modelStrategy: envOverride("ZOMBIECODER_MODEL_STRATEGY") as ModelStrategy | undefined,
   };
@@ -404,6 +419,45 @@ export function verifyAgentConfig(
   return missing;
 }
 
+// URL-only origin handshake writes exactly one value: the provider base URL.
+// The API key stays wherever the owner put it and is never read or sent here.
+export function persistProviderUrl(
+  url: string,
+  candidates: string[] = [INSTALL_ZOMBIE_CONFIG, GLOBAL_ZOMBIE_CONFIG],
+): { file: string; updated: boolean; skipped?: string } {
+  for (const file of candidates) {
+    const current = readJson<Record<string, any>>(file);
+    if (current === undefined) continue;
+    if (current.customProviderUrl === url) return { file, updated: false };
+    current.customProviderUrl = url;
+    writeAtomic(file, JSON.stringify(current, null, 2) + "\n");
+    return { file, updated: true };
+  }
+  return { file: "", updated: false, skipped: "no zombie config file found" };
+}
+
+// Keep OpenCode's own provider entry in step with the origin URL. Models and
+// permissions are preserved; only settings.baseURL is touched.
+export function syncProviderBaseUrl(
+  file: string,
+  providerID: string,
+  baseURL: string,
+): { file: string; updated: boolean; skipped?: string } {
+  const jsonc = file.replace(/\.json$/, ".jsonc");
+  if (!fs.existsSync(file) && fs.existsSync(jsonc)) {
+    return { file: jsonc, updated: false, skipped: "opencode.jsonc is present; provider URL not written" };
+  }
+  const config = readJson<Record<string, any>>(file);
+  if (!config) return { file, updated: false, skipped: "opencode.json is missing or not strict JSON" };
+  const provider = config.providers?.[providerID];
+  if (!provider) return { file, updated: false, skipped: `provider ${providerID} not present` };
+  provider.settings = provider.settings ?? {};
+  if (provider.settings.baseURL === baseURL) return { file, updated: false };
+  provider.settings.baseURL = baseURL;
+  writeAtomic(file, JSON.stringify(config, null, 2) + "\n");
+  return { file, updated: true };
+}
+
 export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   const ctx = rawCtx as Ctx;
   const startedAt = new Date().toISOString();
@@ -499,6 +553,32 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.outputs.createdDirs = created ?? [];
 
   const config = step("load-config", () => loadConfig(root!)) ?? DEFAULT_CONFIG;
+
+  // ---- §0 URL-only origin handshake ----------------------------------------
+  // Optional. When config.originUrl / ZOMBIECODER_ORIGIN_URL is set, read the
+  // public /gateway_url.json document and, only if it advertises a different
+  // base URL, update that URL here. No key, cookie or browser session is read
+  // or sent. Failure is recorded and the configured URL continues to be used.
+  const origin = await stepAsync("origin-handshake", async () => {
+    if (!config.originUrl) return "skipped (no origin URL)";
+    const handshake = await fetchOriginHandshake(config.originUrl);
+    if (!handshake.ok || !handshake.baseUrl) throw new Error(handshake.error ?? "origin handshake failed");
+    const changed = handshake.baseUrl !== config.customProviderUrl;
+    if (changed) {
+      config.customProviderUrl = handshake.baseUrl;
+      report.outputs.originPersisted = persistProviderUrl(handshake.baseUrl);
+      report.outputs.originProviderConfig = syncProviderBaseUrl(
+        layout.configFile,
+        config.customProviderID,
+        handshake.baseUrl,
+      );
+      await ctx.provider?.reload?.();
+      await ctx.model?.reload?.();
+    }
+    return `${handshake.baseUrl}${handshake.authRequired ? " (auth required)" : ""}${changed ? " (updated)" : ""}`;
+  });
+  report.outputs.originUrl = config.originUrl || null;
+  report.outputs.originHandshake = origin;
 
   // ---- §2 model plan --------------------------------------------------------
   const plan = await stepAsync("resolve-models", async () => {

@@ -197,7 +197,13 @@ test("applyResponseGate rewrites an unproven JSON answer and passes a proven one
   assert.equal(blocked.verdict.passed, false);
   const blockedBody = await blocked.response.text();
   assert.match(blockedBody, /UNVERIFIED/);
-  assert.equal(JSON.parse(blockedBody).choices[0].message.content.includes("UNVERIFIED"), true);
+  assert.match(blockedBody, /এজেন্টকে থামানো হয়েছে/);
+  assert.match(blockedBody, /কাজ তো এই সমস্যা হয়েছে/);
+  assert.match(blockedBody, /এখন কী করব/);
+  assert.match(blockedBody, /path:line/);
+  const blockedJson = JSON.parse(blockedBody);
+  assert.equal(blockedJson.choices[0].message.content.includes("UNVERIFIED"), true);
+  assert.equal(blockedJson.choices[0].finish_reason, "stop");
 
   const provenResponse = new Response(
     JSON.stringify({
@@ -233,5 +239,9 @@ test("applyResponseGate rewrites an unproven SSE stream into a truthful stream",
   assert.equal(result.verdict.passed, false);
   const body = await result.response.text();
   assert.match(body, /UNVERIFIED/);
+  assert.match(body, /এজেন্টকে থামানো হয়েছে/);
+  assert.match(body, /কাজ তো এই সমস্যা হয়েছে/);
+  assert.match(body, /এখন কী করব/);
+  assert.match(body, /"finish_reason":"stop"/);
   assert.match(body, /^data: /m);
 });

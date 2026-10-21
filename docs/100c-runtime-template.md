@@ -175,10 +175,15 @@ Two plugin-side layers sit around the model call:
 - **Hard response gate** (`src/zombie/responseGate.ts`) — the `http.response`
   hook inspects primary answers. A completed or successful claim with no
   `path:line`, test output or exit code is replaced by an explicit `UNVERIFIED`
-  message in the same provider protocol (OpenAI JSON and SSE are rebuilt). Paths
-  outside the allowed root are rejected. Unsupported protocols are passed through
-  and audited as `NOT_TESTED`; the gate never claims to prove factual truth.
-  Set `"responseGate": false` in the plugin config to disable it for diagnosis.
+  message in the same provider protocol (OpenAI JSON and SSE are rebuilt). The
+  message states what failed, that the agent has been stopped, and what the user
+  can do next (supply evidence, ask for an explicitly unverified explanation, or
+  start a new instruction). The replacement is terminal (`finish_reason: stop`
+  for OpenAI Chat, `stop_reason: end_turn` for Anthropic) so the client does not
+  continue the stopped turn. It must not end in a silent dead-end. Paths outside
+  the allowed root are rejected. Unsupported protocols are passed through and
+  audited as `NOT_TESTED`; the gate never claims to prove factual truth. Set
+  `"responseGate": false` in the plugin config to disable it for diagnosis.
 
 The 15–20 first-principles skill map per agent lives in `docs/skill-map.md`.
 
@@ -455,8 +460,8 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  2094ffd4d955191096aa788c0abe82f0c00f805c55acc9d122cd80d3303810c9  ║
-║  files 52 · bytes 447454 · base 7712228 · clean                          ║
+║  root  08fd997ed76e8180fbf98e882700d2d4c08f19989a51c2bef808cd89ea392fc6  ║
+║  files 52 · bytes 450795 · base c9293b4 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -464,7 +469,7 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-21T03:03:37.205Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-21T03:25:30.587Z
 
 </div>
 <!-- INTEGRITY:END -->

@@ -149,9 +149,12 @@ evidence presence যাচাই করে, বাস্তব সত্য ন
 - **Hard response gate** — `http.response` hook primary answer যাচাই করে।
   `path:line`, test output বা exit code ছাড়া completed/successful claim পেলে
   উত্তর `UNVERIFIED` message দিয়ে replace করা হয় (`src/zombie/responseGate.ts`)।
-  Gate structural; সে factual truth প্রমাণ করে না, আর unsupported provider
-  protocol `NOT_TESTED` হিসেবে audit-এ থাকে। Disable করতে config-এ
-  `"responseGate": false` দিন।
+  message-এ কী সমস্যা, এজেন্ট থামানো হয়েছে, আর user এখন কী করতে পারেন
+  (প্রমাণ দিন / ব্যাখ্যা চান / নতুন নির্দেশ) স্পষ্ট থাকে। replacement terminal
+  (`finish_reason: stop`), তাই agent আর tool call চালায় না। এজেন্ট নিজে থেকে
+  প্রমাণ ছাড়া এগোয় না। Gate structural; সে factual truth প্রমাণ করে না, আর
+  unsupported provider protocol `NOT_TESTED` হিসেবে audit-এ থাকে। Disable করতে
+  config-এ `"responseGate": false` দিন।
 - **File path permission** — allowed root (working directory) চিহ্নিত। `../` বা
   বাইরের absolute path evidence হিসেবে ব্যবহৃত হলে দাবি fail করে।
 - **Skill map** — প্রতিটি agent-এর 15–20 first-principles skill:
@@ -1102,8 +1105,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  2094ffd4d955191096aa788c0abe82f0c00f805c55acc9d122cd80d3303810c9  ║
-║  files 52 · bytes 447454 · base 7712228 · clean                          ║
+║  root  08fd997ed76e8180fbf98e882700d2d4c08f19989a51c2bef808cd89ea392fc6  ║
+║  files 52 · bytes 450795 · base c9293b4 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1111,7 +1114,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-21T03:03:37.205Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-21T03:25:30.587Z
 
 </div>
 <!-- INTEGRITY:END -->

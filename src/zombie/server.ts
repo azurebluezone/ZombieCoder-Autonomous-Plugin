@@ -324,7 +324,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "evidence_gate",
       description:
-        "Validate a response or factual claim before calling it PASS. Reuses the installed Python evidence gate; FAIL/SKIP means the claim must be reported as UNVERIFIED.",
+        "Validate a response or factual claim before calling it PASS. Reuses the installed Python evidence gate; FAIL/SKIP means the claim must be reported as UNVERIFIED, the agent must stop, and the user must get a clear next-step message instead of a silent dead-end.",
       input: {
         type: "object" as const,
         properties: {

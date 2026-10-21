@@ -3,7 +3,8 @@
 // Structural evidence only: a claim must carry a file path, test result, exit
 // code or equivalent artifact inside the allowed project root. The gate cannot
 // prove real-world truth, so it must never pretend to. Its guarantee is narrower
-// and honest: an unproven claim is replaced by an explicit UNVERIFIED message.
+// and honest: an unproven claim is replaced by an explicit UNVERIFIED message
+// that stops the agent and gives the user a clear next step.
 //
 // The hook uses the provider protocol only to extract the assistant text and to
 // rebuild a valid response. Unsupported protocols are passed through and marked
@@ -233,10 +234,20 @@ export function truthMessage(originalLength: number): string {
   return [
     "**প্রমাণ ছাড়া উত্তর আটকে দেওয়া হয়েছে (response without proof)**",
     "",
-    `Model ${originalLength} characters produced করেছে, কিন্তু verifiable evidence নেই —`,
-    "কোনো `path:line`, test output, command exit code বা allowed-root file reference পাওয়া যায়নি।",
+    "এআই মডেলটি উত্তর প্রস্তুত করলেও প্রজেক্টের নিয়ম অনুযায়ী কোনো যাচাইযোগ্য প্রমাণ (Verifiable Evidence) প্রদান করতে ব্যর্থ হয়েছে। এতে কোনো নির্দিষ্ট ফাইল রেফারেন্স (`path:line`), লাইন নম্বর, টেস্ট কমান্ড এক্সিকিউশন আউটপুট বা কোড কোটেশন যুক্ত ছিল না। ZombieCoder গাইডলাইন অনুযায়ী, যাচাইহীন দাবি সরাসরি ব্যবহারকারীকে প্রদর্শন করা নিষিদ্ধ। তাই উক্ত উত্তরের স্ট্যাটাস চিহ্নিত করা হয়েছে `UNVERIFIED` হিসেবে।",
     "",
-    "এই দাবিটির status: `UNVERIFIED`। প্রমাণ চাইলে বলুন: `path:line দেখাও`, `test output দাও`, বা `কোন command চালিয়েছো?`",
+    `Model ${originalLength} characters produced করেছে, কিন্তু verifiable evidence নেই।`,
+    "",
+    "**এই turn-এ এজেন্টকে থামানো হয়েছে।** প্রমাণ ছাড়া সে নিজে থেকে আর এগোবে না; অনুমান দিয়ে উত্তর পূরণ করা হবে না।",
+    "",
+    "**ভাইয়া, কাজ তো এই সমস্যা হয়েছে — এখন কী করব?**",
+    "",
+    "আপনি একটি পথ বেছে নিন:",
+    "1. **প্রমাণ দিন** — `path:line`, test output, exit code বা কোড কোটেশন। আমি সেটা যাচাই করে আবার উত্তর দেব।",
+    "2. **শুধু ব্যাখ্যা চান** — লিখুন: `evidence ছাড়া ব্যাখ্যা করো`। উত্তর `UNVERIFIED` লেবেল নিয়ে আসবে, success/PASS দাবি ছাড়া।",
+    "3. **নতুন নির্দেশ দিন** — নতুন session বা সংশ্লিষ্ট agent দিয়ে শুরু করুন; আগের অনুমানকে সত্য ধরে নেওয়া হবে না।",
+    "",
+    "সংক্ষেপে: প্রমাণ আছে তো? থাকলে দিন, নাহলে `UNVERIFIED` লেবেলেই থাকব।",
   ].join("\n");
 }
 
@@ -270,10 +281,17 @@ function rewriteJson(raw: string, truth: string): string | null {
     if (choice.message && typeof choice.message === "object") choice.message.content = truth;
     else if (choice.delta && typeof choice.delta === "object") choice.delta.content = truth;
     else choice.text = truth;
+    // A replaced answer is terminal: never leave finish_reason as tool_calls or
+    // length, or the client may keep the stopped turn alive.
+    choice.finish_reason = "stop";
   } else if (Array.isArray(body?.content)) {
     body.content = [{ type: "text", text: truth }];
+    body.stop_reason = "end_turn";
+    body.stop_sequence = null;
   } else if (Array.isArray(body?.output)) {
     body.output = [{ type: "message", content: [{ type: "output_text", text: truth }] }];
+    body.status = "completed";
+    delete body.incomplete_details;
   } else {
     return null;
   }

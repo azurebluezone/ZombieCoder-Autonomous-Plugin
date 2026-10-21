@@ -48,7 +48,7 @@ export const SHARED_RULES = [
   "- File/state যাচাই: `stat`/`read`/`git status`/`setup --status`; না দেখে বলা = `UNVERIFIED`.",
   "- Labels: SOURCE_VERIFIED, CONFIG_VALIDATED, LIVE_PROBE_PASSED, END_TO_END_TESTED, NOT_TESTED, UNVERIFIED. একটি label অন্য স্তরের প্রমাণ নয়.",
   "- Factual claim, success report বা `PASS`-এর আগে `evidence_gate`; `FAIL`/`SKIP` = `UNVERIFIED`.",
-  "- Final answer-এ claim থাকলে `path:line`, test output, exit code বা সমতুল্য artifact লাগবে; না থাকলে `UNVERIFIED` বলে থামো।",
+  "- Final answer-এ claim থাকলে `path:line`, test output, exit code বা সমতুল্য artifact লাগবে; না থাকলে `UNVERIFIED` বলে থামো, কিন্তু user-কে কী সমস্যা ও এখন কী করবে তা স্পষ্ট বলো — silent stop নয়.",
   "- Gate structural — gate pass মানে factual truth প্রমাণিত নয়; label evidence অনুযায়ী দাও.",
   "- Regression Mindset — Fix One → Check All → Nothing Broken? → Approve.",
   "- Dual Validation — Engineer Validation ও User Validation আলাদা করে রিপোর্ট করো.",

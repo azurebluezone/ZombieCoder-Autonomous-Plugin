@@ -370,3 +370,32 @@ Current status:
 Local Nginx TLS is configured and tested. The next production step is a real
 domain/origin certificate, either through a Cloudflare-aware DNS challenge or by
 pointing an origin hostname at this machine.
+
+---
+
+## ১০. গল্প, দায় ও ব্যবহারের সীমা
+
+### ছোট্ট গল্প — চায়ের দোকানের শিক্ষানবিশ
+
+একটি চায়ের দোকানে নতুন শিক্ষানবিশ এসেছে। দোকানদার তাকে সব কাজ একসাথে দেয় না;
+দেয় একটি খাতা (SSOT), একটি ডায়েরি (syllabus), আর আজকের কাজের একটি ট্রে
+(compact context pack)। শিক্ষানবিশ কিছু বলার আগে খাতা দেখে, ট্রে থেকে দরকারি
+কাগজ পড়ে, একটি কাজ করে, শেষে ডায়েরিতে শেখাটা লেখে। দোকানদার প্রমাণ ছাড়া
+"হয়ে গেছে" বলতে দেয় না — সেই কঠিন লোকটাই `response_gate`।
+
+দোকানে বড় আর ছোট দুই কর্মী। ছোটজন সব জানে না, তাই তার পাশে রেসিপি কার্ড
+(`docs/skills`: Laravel, Node, Next, Python, FastAPI, cPanel, server,
+resource optimization, first-principles, evidence-before-confidence)। ছোটজন
+কার্ড দেখে ধাপে ধাপে কাজ করে; বড়জন দ্রুত কাজ করে। কেউ অবহেলিত নয়, কারণ শেষ
+প্রশ্ন সবার জন্য এক: "প্রমাণ কোথায়?"
+
+### License ও নীতিশাস্ত্র
+
+- **localhost/ব্যক্তিগত ব্যবহার:** হ্যাঁ।
+- **ব্যবসায়িক ব্যবহার:** না। এই repo থেকে ডাউনলোড করা কোড দিয়ে ব্যবসা, paid
+  service, SaaS, client work বা commercial product বানানো যাবে না।
+- **শেখা/গবেষণা/non-profit:** হ্যাঁ, attribution রাখলে।
+- কোনো doubt থাকলে commercial ধরে নিন এবং owner-এর লিখিত অনুমতি নিন।
+
+আমরা কষ্ট করি মানুষের উপকারের জন্য; মানুষকে নিয়ে ব্যবসা করা এই প্রকল্পের
+নীতির বিরুদ্ধে। বিস্তারিত শর্ত `LICENSE` ফাইলে; এটি legal advice নয়।

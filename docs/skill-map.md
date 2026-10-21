@@ -13,6 +13,29 @@ engineering, adr.github.io, Google SRE Book ch. 15.
 
 ---
 
+## Runtime skill catalog (`docs/skills`)
+
+The 10 files below are installed per project by `src/zombie/skillCatalog.ts`.
+Core skills go to every project; stack skills are copied only when a marker is
+present. The installer seeds the cache at
+`<install>/zombiecoder/skills-catalog`; a missing skill can be fetched from git
+by the `skill_catalog` tool.
+
+| Skill id | Marker / use | Primary agents |
+|---|---|---|
+| `first-principles` | Always; ambiguous cause or new design | Manu, Jarin, Majnu |
+| `evidence-before-confidence` | Always; every PASS/success claim | All agents |
+| `resource-optimization` | Always; slow/expensive path | Manu, Nila, Tuhin |
+| `server` | Always; Linux/Nginx/systemd/TLS | Rashed, Tuhin |
+| `laravel` | `composer.json`, `artisan` | Rashed, Manu |
+| `node` | `package.json` | Manu, Nila, Tuhin |
+| `next` | `package.json` dependency `next` | Nila, Manu |
+| `python` | `requirements.txt`, `pyproject.toml`, `setup.py`, root `*.py` | Majnu, Halim |
+| `fastapi` | `fastapi` in requirements/pyproject | Majnu, Halim |
+| `cpanel` | `public_html` or cPanel deployment | Rashed, Tuhin |
+
+---
+
 ## Manu — Chief Systems Architect
 
 | Skill | First-principles question | Workspace use |

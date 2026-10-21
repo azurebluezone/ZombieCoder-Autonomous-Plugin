@@ -16,8 +16,9 @@
 //
 // Per working directory the runtime creates only .zombiecoder (SSOT, syllabus,
 // memory, .state). Project config/models/fingerprint/footprint/mcp are not
-// created. Skills are lazy: .zombiecoder/skills appears only
-// when a skill is actually added. No .opencode in arbitrary working directories.
+// created. On first setup the plugin installs the core + project-detected
+// skills into .zombiecoder/skills; a missing skill can be fetched from git by
+// the `skill_catalog` tool. No .opencode in arbitrary working directories.
 //
 // NO backups, NO .bak files, NO archives: the owner keeps their own. Writes are atomic
 // (temp + rename) and existing files are only replaced when the content actually differs.
@@ -76,6 +77,9 @@ const {
   BASELINE_MODEL,
 } = defaults;
 const { modelRef } = modelsModule;
+const { DEFAULT_SKILL_REPO } = await import(
+  pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "skillCatalog.ts")).href
+);
 
 const argv = process.argv.slice(2);
 function flag(name) {
@@ -105,6 +109,10 @@ Options:
   --provider-url <url>   OpenAI-compatible gateway URL; "none" disables it
   --provider-id <id>     provider ID used in opencode.json
   --provider-key <key>   provider key; prefer ZOMBIECODER_PROVIDER_KEY
+  --model-strategy <s>   auto | custom | free | baseline | random (default: auto)
+  --fast                 free/baseline model; disables the custom provider
+  --allow-slow           keep a provider even when prompt throughput is below 20 tok/s
+  --no-probe-tools       skip the tool-call capability probe
   --mcp-url <url>        optional MCP server URL
   --origin-url <url>     optional public origin handshake URL
   --no-install           skip npm install
@@ -150,6 +158,17 @@ const ZOMBIE_CONFIG = path.join(ZOMBIE_DIR, "config.json");
 
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
+const FAST_MODE = flag("--fast");
+const ALLOW_SLOW = flag("--allow-slow");
+const PROBE_TOOLS = !flag("--no-probe-tools");
+const MODEL_STRATEGY_FLAG = value("--model-strategy", null);
+const ALLOWED_STRATEGIES = new Set(["auto", "custom", "free", "baseline", "random"]);
+if (MODEL_STRATEGY_FLAG !== null && !ALLOWED_STRATEGIES.has(String(MODEL_STRATEGY_FLAG))) {
+  console.error(
+    `invalid --model-strategy: ${MODEL_STRATEGY_FLAG} (use auto, custom, free, baseline or random)`,
+  );
+  process.exit(2);
+}
 const OPENAI_COMPATIBLE_PACKAGE = "@opencode/ai/providers/openai-compatible";
 const DEFAULT_PROVIDER_URL = DEFAULT_CUSTOM_PROVIDER_URL;
 const DEFAULT_MCP_URL = DEFAULT_MCP_URL_FROM_DEFAULTS;
@@ -209,6 +228,7 @@ const ORIGIN_URL = originProvided
 
 let PROVIDER_URL = initialProvider;
 let MCP_URL = initialMcp;
+if (FAST_MODE) PROVIDER_URL = "";
 
 // Provider identity and credential, resolved once. A flag wins, then the
 // environment, then the previous install, then the shipped default. The key is
@@ -260,6 +280,9 @@ const report = {
 };
 let mcpProbe = null;
 let providerProbe = null;
+let chatProbe = null;
+let toolProbe = null;
+let providerSlow = false;
 let providerReachable = false;
 let candidates = [];
 let installAssignment = {};
@@ -391,12 +414,148 @@ async function probeProviderModels(url, timeoutMs = 5000, apiKey = "") {
   }
 }
 
-function providerEntry(baseURL, modelIDs, apiKey = "") {
+function chatEndpoint(url) {
+  const base = String(url).replace(/\/+$/, "");
+  return base.endsWith("/v1") ? `${base}/chat/completions` : `${base}/v1/chat/completions`;
+}
+
+// /v1/models only proves that a gateway is alive. It does not prove that the
+// model can answer, that tools work, or that prompt processing is fast enough
+// for an agent. The installer probes all three and records the evidence.
+async function probeChatCompletion(url, model, apiKey = "", timeoutMs = 30000) {
+  const target = chatEndpoint(url);
+  const headers = { "content-type": "application/json" };
+  if (String(apiKey).trim()) headers.authorization = `Bearer ${String(apiKey).trim()}`;
+  const started = Date.now();
+  try {
+    const response = await fetch(target, {
+      method: "POST",
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "Reply with exactly: pong" }],
+        max_tokens: 8,
+        temperature: 0,
+      }),
+    });
+    const text = await response.text();
+    const ms = Date.now() - started;
+    if (!response.ok) {
+      return { ok: false, status: response.status, ms, model, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+    }
+    let body = {};
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return { ok: false, status: response.status, ms, model, error: "response is not JSON" };
+    }
+    const message = body?.choices?.[0]?.message;
+    const content = typeof message?.content === "string" ? message.content.trim() : "";
+    const usage = body?.usage ?? {};
+    const timings = body?.timings ?? {};
+    // Prefer the server's prompt-processing counters. `usage.prompt_tokens` can
+    // include cached tokens, which makes a slow CPU model look fast on a warm
+    // cache. `timings.prompt_n` is the work that actually happened this call.
+    const promptTokens = Number(timings.prompt_n ?? usage.prompt_tokens ?? 0) || 0;
+    const promptMs = Number(timings.prompt_ms ?? 0) || 0;
+    const tokensPerSecond =
+      promptTokens > 0 && promptMs > 0
+        ? promptTokens / (promptMs / 1000)
+        : promptTokens > 0 && ms > 0
+          ? promptTokens / (ms / 1000)
+          : null;
+    return {
+      ok: content.length > 0,
+      status: response.status,
+      ms,
+      model,
+      contentBytes: content.length,
+      promptTokens,
+      promptMs,
+      tokensPerSecond: tokensPerSecond === null ? null : Math.round(tokensPerSecond * 10) / 10,
+      error: content.length > 0 ? undefined : "empty assistant content",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: null,
+      ms: Date.now() - started,
+      model,
+      error: String(error?.message ?? error),
+    };
+  }
+}
+
+async function probeToolCall(url, model, apiKey = "", timeoutMs = 45000) {
+  const target = chatEndpoint(url);
+  const headers = { "content-type": "application/json" };
+  if (String(apiKey).trim()) headers.authorization = `Bearer ${String(apiKey).trim()}`;
+  const started = Date.now();
+  try {
+    const response = await fetch(target, {
+      method: "POST",
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "Use get_time. Do not explain." }],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "get_time",
+              description: "Get the current time",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          },
+        ],
+        tool_choice: "auto",
+        max_tokens: 32,
+        temperature: 0,
+      }),
+    });
+    const text = await response.text();
+    const ms = Date.now() - started;
+    if (!response.ok) {
+      return { ok: false, status: response.status, ms, model, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+    }
+    let body = {};
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return { ok: false, status: response.status, ms, model, error: "response is not JSON" };
+    }
+    const message = body?.choices?.[0]?.message;
+    const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+    const names = calls
+      .map((call) => call?.function?.name)
+      .filter((name) => typeof name === "string");
+    return {
+      ok: names.length > 0,
+      status: response.status,
+      ms,
+      model,
+      tools: names,
+      error: names.length > 0 ? undefined : "model did not return a tool call",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: null,
+      ms: Date.now() - started,
+      model,
+      error: String(error?.message ?? error),
+    };
+  }
+}
+
+function providerEntry(baseURL, modelIDs, apiKey = "", tools = true) {
   const models = {};
   for (const id of modelIDs) {
     models[id] = {
       name: id,
-      capabilities: { tools: true, input: ["text"], output: ["text"] },
+      capabilities: { tools: Boolean(tools), input: ["text"], output: ["text"] },
       cost: { input: 0, output: 0 },
     };
   }
@@ -427,7 +586,8 @@ console.log("=".repeat(72));
 
 // ---- 1. scaffold ---------------------------------------------------------------
 await step("scaffold install root", () => {
-  // Skills are intentionally absent: the folder appears only when a skill is added.
+  // Project skills are created by the plugin's first setup, not by the global
+  // installer. The global install only seeds the runtime catalog.
   for (const d of [TARGET, CONFIG_DIR, PLUGINS_DIR, AGENTS_DIR, ZOMBIE_DIR]) ensureDir(d);
   return [
     path.relative(TARGET, CONFIG_DIR) || ".",
@@ -480,7 +640,22 @@ await step("copy runtime assets", () => {
     fs.copyFileSync(from, to);
     fs.chmodSync(to, mode);
   }
-  return `${assets.length} files -> ${path.relative(TARGET, RUNTIME_ASSETS_DIR)}/{docs,tools,tls,model.mjs}`;
+
+  // Seed the runtime skill catalog. The plugin copies only the skills a project
+  // needs; keeping the full catalog here means setup is offline and fast.
+  const skillSource = path.join(PACKAGE_ROOT, "docs", "skills");
+  const skillTarget = path.join(RUNTIME_ASSETS_DIR, "skills-catalog");
+  let skillFiles = 0;
+  if (fs.existsSync(skillSource)) {
+    ensureDir(skillTarget);
+    for (const entry of fs.readdirSync(skillSource, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+      fs.copyFileSync(path.join(skillSource, entry.name), path.join(skillTarget, entry.name));
+      fs.chmodSync(path.join(skillTarget, entry.name), 0o644);
+      skillFiles += 1;
+    }
+  }
+  return `${assets.length + skillFiles} files -> ${path.relative(TARGET, RUNTIME_ASSETS_DIR)}/{docs,tools,tls,model.mjs,skills-catalog}`;
 });
 
 // ---- 3. declare the dependency ------------------------------------------------
@@ -542,6 +717,8 @@ await step("seed zombiecoder config", () => {
     ssotRefreshMs: existing.ssotRefreshMs ?? defaults.DEFAULT_SSOT_REFRESH_MS,
     modelStrategy: existing.modelStrategy ?? "auto",
     responseGate: existing.responseGate ?? true,
+    autoSkills: existing.autoSkills ?? true,
+    skillRepo: existing.skillRepo ?? DEFAULT_SKILL_REPO,
     createdAt: existing.createdAt ?? new Date().toISOString(),
   };
   writeIfChanged(ZOMBIE_CONFIG, JSON.stringify(next, null, 2) + "\n");
@@ -580,7 +757,32 @@ await step("probe provider + assign models", async () => {
     // `ok` with an empty list is not a usable provider. Treating it as one was
     // what produced the `provider/undefined` default model.
     providerReachable = Boolean(providerProbe?.ok && providerProbe.models.length > 0);
+
+    if (providerReachable) {
+      const primaryModel = providerProbe.models[0];
+      chatProbe = await probeChatCompletion(PROVIDER_URL, primaryModel, PROVIDER_KEY, 30000);
+      if (PROBE_TOOLS && chatProbe?.ok) {
+        toolProbe = await probeToolCall(PROVIDER_URL, primaryModel, PROVIDER_KEY, 45000);
+      }
+      const tps = chatProbe?.tokensPerSecond;
+      providerSlow =
+        Boolean(chatProbe?.ok) &&
+        typeof tps === "number" &&
+        tps > 0 &&
+        tps < 20;
+      // A live /v1/models list is not enough. The model must answer, and (when
+      // probed) it must return a tool call. A slow CPU model is not usable for
+      // OpenCode's multi-thousand-token agent prompts; fall back unless the
+      // owner explicitly asks to keep it.
+      if (!chatProbe?.ok) providerReachable = false;
+      else if (providerSlow && !ALLOW_SLOW) providerReachable = false;
+      else if (toolProbe && !toolProbe.ok) providerReachable = false;
+    }
   }
+
+  // A dead/slow provider must not inherit the previous install's model refs.
+  if (!providerReachable) installAssignment = {};
+
   candidates = providerReachable
     ? providerProbe.models
         .map((id) => modelRef(PROVIDER_ID, id))
@@ -599,22 +801,50 @@ await step("probe provider + assign models", async () => {
     installAssignment = assignModels(roster.ROSTER, candidates, false, BASELINE_MODEL);
   }
 
+  const strategy = providerReachable ? "custom-provider" : "baseline";
   const plan = {
     generatedAt: new Date().toISOString(),
-    strategy: providerReachable ? "custom-provider" : "baseline",
+    strategy,
     customProviderUrl: PROVIDER_URL,
     customProviderID: PROVIDER_ID,
     probe: providerProbe,
+    chatProbe,
+    toolProbe,
+    providerSlow,
+    providerUsable: providerReachable,
     candidates,
     assignment: installAssignment,
   };
   writeIfChanged(path.join(ZOMBIE_DIR, "models.json"), JSON.stringify(plan, null, 2) + "\n");
 
+  // Persist the decision so the runtime resolver does not re-adopt a model the
+  // installer just proved unusable. `--model-strategy` always wins.
+  const configStrategy =
+    MODEL_STRATEGY_FLAG ?? (providerReachable ? "auto" : "baseline");
+  try {
+    const seeded = JSON.parse(fs.readFileSync(ZOMBIE_CONFIG, "utf8"));
+    if (seeded.modelStrategy !== configStrategy) {
+      seeded.modelStrategy = configStrategy;
+      writeIfChanged(ZOMBIE_CONFIG, JSON.stringify(seeded, null, 2) + "\n");
+      secureSecretFile(ZOMBIE_CONFIG);
+    }
+  } catch {
+    /* step 5 already reported a malformed config; do not mask it here */
+  }
+
   const summary = !PROVIDER_URL
-    ? "custom provider disabled (OpenCode free models)"
+    ? "custom provider disabled (free/baseline models)"
     : providerReachable
-      ? `${providerProbe.models.length} model(s) from ${providerProbe.url}`
-      : `probe failed: ${providerProbe?.error ?? "not probed"}`;
+      ? `${providerProbe.models.length} model(s) from ${providerProbe.url}; chat ok${
+          chatProbe?.tokensPerSecond ? ` (${chatProbe.tokensPerSecond} tok/s prompt)` : ""
+        }; tools ${toolProbe ? (toolProbe.ok ? "ok" : "failed") : "not probed"}`
+      : providerSlow
+        ? `provider not usable (slow prompt processing${
+            chatProbe?.tokensPerSecond ? `: ${chatProbe.tokensPerSecond} tok/s < 20` : ""
+          }); using ${BASELINE_MODEL}`
+        : `provider not usable: ${
+            chatProbe?.error ?? toolProbe?.error ?? providerProbe?.error ?? "not probed"
+          }; using ${BASELINE_MODEL}`;
   return `${summary}; ${new Set(Object.values(installAssignment)).size} model(s) assigned`;
 });
 
@@ -642,11 +872,20 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
   if (PROVIDER_URL) {
     next.providers = { ...(existing.providers ?? {}) };
     const previousProvider = next.providers[providerID] ?? {};
-    const models = { ...(previousProvider.models ?? {}) };
-    if (providerProbe?.ok) {
-      for (const id of providerProbe.models) {
-        models[id] = { ...(providerEntry(PROVIDER_URL, [id]).models[id]), ...(models[id] ?? {}) };
+    const liveModels =
+      providerProbe?.ok && providerProbe.models.length > 0 ? providerProbe.models : null;
+    const models = {};
+    if (liveModels) {
+      // The live /v1/models answer is the authority. A previous install may
+      // still contain a model that the gateway has retired; keeping it is how
+      // the config ended up with a stale Qwen entry next to the real Llama.
+      const toolsCapability = toolProbe ? Boolean(toolProbe.ok) : true;
+      const fresh = providerEntry(PROVIDER_URL, liveModels, PROVIDER_KEY, toolsCapability);
+      for (const id of liveModels) {
+        models[id] = { ...(previousProvider.models?.[id] ?? {}), ...fresh.models[id] };
       }
+    } else {
+      Object.assign(models, previousProvider.models ?? {});
     }
     const settings = {
       ...(previousProvider.settings ?? {}),
@@ -686,31 +925,19 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
     ...existingPermissions.filter((rule) => !knownPermissions.has(JSON.stringify(rule))),
   ];
 
-  // Default agent + default model. The model is provider/model in V2.
+  // Default agent + default model. The model is provider/model in V2. A model is
+  // only selected from the gateway when the installer proved it usable; a slow
+  // or tool-less provider falls back to the baseline free model.
   next.default_agent = "zombiecoder";
   const firstCandidate = providerReachable
     ? modelRef(providerID, providerProbe.models[0])
     : null;
   const existingModel = typeof existing.model === "string" ? existing.model : null;
-  const existingIsUsable =
-    existingModel !== null &&
-    !/\/undefined$/.test(existingModel) &&
-    (!providerReachable ||
-      !existingModel.startsWith(providerID + "/") ||
-      candidates.includes(existingModel));
-  const existingIsProviderModel =
-    existingModel !== null &&
-    existingModel.startsWith(providerID + "/") &&
-    candidates.includes(existingModel);
-  // When the gateway is live, the default model must be a gateway model. A
-  // previous free fallback is kept only while the provider is unreachable.
   next.model = providerReachable
-    ? existingIsProviderModel
+    ? existingModel && candidates.includes(existingModel)
       ? existingModel
       : firstCandidate ?? BASELINE_MODEL
-    : existingIsUsable
-      ? existingModel
-      : BASELINE_MODEL;
+    : BASELINE_MODEL;
 
   // Only register an MCP server we actually reached. A dead default URL in
   // opencode.json slows every boot and teaches the user to ignore errors.
@@ -727,10 +954,18 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
   writeIfChanged(OPENCODE_JSON, JSON.stringify(next, null, 2) + "\n");
   secureSecretFile(OPENCODE_JSON);
   const providerSummary = !PROVIDER_URL
-    ? "custom provider disabled (OpenCode free models)"
+    ? "custom provider disabled (free/baseline models)"
     : providerReachable
-      ? `provider ${providerID} with ${providerProbe.models.length} model(s)`
-      : `provider ${providerID} saved (probe failed: ${providerProbe?.error ?? "not probed"})`;
+      ? `provider ${providerID} with ${providerProbe.models.length} live model(s); chat ok; tools ${
+          toolProbe ? (toolProbe.ok ? "ok" : "failed") : "not probed"
+        }`
+      : providerSlow
+        ? `provider ${providerID} saved but not selected (slow${
+            chatProbe?.tokensPerSecond ? `: ${chatProbe.tokensPerSecond} tok/s < 20` : ""
+          })`
+        : `provider ${providerID} saved but not selected: ${
+            chatProbe?.error ?? toolProbe?.error ?? providerProbe?.error ?? "not probed"
+          }`;
   const mcpSummary = mcpProbe?.ok ? `MCP zombiecoder (${mcpProbe.tools.length} tools)` : "MCP not registered";
   return `${providerSummary}; ${roster.ROSTER.length} agents + ${next.permissions.length} permission rules; ${mcpSummary}`;
 });
@@ -814,7 +1049,8 @@ if (SELF_MODE || GLOBAL_MODE) {
   console.log("per-directory: each working directory gets only .zombiecoder");
   console.log("  (SSOT, syllabus, memory, .state); no .opencode is created there.");
   console.log("  no per-project config.json/models.json/fingerprint.json/footprint.jsonl/mcp.json.");
-  console.log("skills: .zombiecoder/skills is created only when a skill is added.");
+  console.log("skills: core + project-detected skills are installed on first setup;");
+  console.log("        `skill_catalog` can fetch a missing skill from git at runtime.");
 } else {
   console.log(`project: ${TARGET}/.opencode/{agents,plugins} + ${TARGET}/.zombiecoder`);
   console.log("per-directory: nested working directories still get their own .zombiecoder.");

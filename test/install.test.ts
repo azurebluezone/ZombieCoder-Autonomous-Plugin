@@ -159,12 +159,57 @@ test("installer --config-dir creates a complete self-contained config root", asy
   );
 });
 
+function providerHandler(req: http.IncomingMessage, res: http.ServerResponse): void {
+  if (req.method === "POST" && String(req.url ?? "").endsWith("/chat/completions")) {
+    let raw = "";
+    req.on("data", (chunk) => (raw += String(chunk)));
+    req.on("end", () => {
+      let body: any = {};
+      try {
+        body = JSON.parse(raw || "{}");
+      } catch {
+        /* fall through to a plain chat answer */
+      }
+      res.setHeader("content-type", "application/json");
+      if (Array.isArray(body.tools)) {
+        res.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "call_1",
+                      type: "function",
+                      function: { name: "get_time", arguments: "{}" },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "pong" } }],
+          usage: { prompt_tokens: 10 },
+          timings: { prompt_n: 10, prompt_ms: 1 },
+        }),
+      );
+    });
+    return;
+  }
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify({ data: [{ id: "live-model" }] }));
+}
+
 test("installer replaces a previous free baseline when the provider becomes live", async () => {
   await withServer(
-    (_req, res) => {
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ data: [{ id: "live-model" }] }));
-    },
+    providerHandler,
     async (base) => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-upgrade-"));
       fs.writeFileSync(
@@ -191,6 +236,111 @@ test("installer replaces a previous free baseline when the provider becomes live
   );
 });
 
+function slowProviderHandler(req: http.IncomingMessage, res: http.ServerResponse): void {
+  if (req.method === "POST" && String(req.url ?? "").endsWith("/chat/completions")) {
+    let raw = "";
+    req.on("data", (chunk) => (raw += String(chunk)));
+    req.on("end", () => {
+      let body: any = {};
+      try {
+        body = JSON.parse(raw || "{}");
+      } catch {
+        /* ignore */
+      }
+      res.setHeader("content-type", "application/json");
+      if (Array.isArray(body.tools)) {
+        res.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "call_1",
+                      type: "function",
+                      function: { name: "get_time", arguments: "{}" },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "pong" } }],
+          usage: { prompt_tokens: 10 },
+          timings: { prompt_n: 10, prompt_ms: 2500 },
+        }),
+      );
+    });
+    return;
+  }
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify({ data: [{ id: "live-model" }] }));
+}
+
+test("a slow provider is saved but not selected, and stale models are removed", async () => {
+  await withServer(
+    slowProviderHandler,
+    async (base) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-slow-"));
+      fs.writeFileSync(
+        path.join(root, "opencode.json"),
+        JSON.stringify(
+          {
+            model: "missionbarisal/old-model",
+            providers: {
+              missionbarisal: {
+                settings: { baseURL: "http://old.test/v1", apiKey: "old-key" },
+                models: { "old-model": { name: "old-model" } },
+              },
+            },
+            agents: { manu: { model: "missionbarisal/old-model" } },
+          },
+          null,
+          2,
+        ),
+      );
+      const result = await runInstaller([
+        "--dir",
+        root,
+        "--yes",
+        "--no-install",
+        "--provider-url",
+        base,
+        "--provider-key",
+        "test-key",
+      ]);
+      try {
+        assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
+        assert.match(result.stdout, /slow prompt processing/);
+        const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+        assert.equal(config.model, BASELINE);
+        assert.equal(config.agents.manu.model, BASELINE);
+        assert.deepEqual(Object.keys(config.providers.missionbarisal.models), ["live-model"]);
+        assert.ok(!("old-model" in config.providers.missionbarisal.models));
+        const zombiecoder = JSON.parse(
+          fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"),
+        );
+        assert.equal(zombiecoder.modelStrategy, "baseline");
+        const plan = JSON.parse(
+          fs.readFileSync(path.join(root, ".zombiecoder", "models.json"), "utf8"),
+        );
+        assert.equal(plan.providerUsable, false);
+        assert.equal(plan.providerSlow, true);
+        assert.equal(plan.assignment.manu, BASELINE);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
 test("installer passes the provider key to the probe and to opencode.json", async () => {
   let authorization = "";
   await withServer(
@@ -202,8 +352,7 @@ test("installer passes the provider key to the probe and to opencode.json", asyn
         );
         return;
       }
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ data: [{ id: "live-model" }] }));
+      providerHandler(req, res);
     },
     async (base) => {
       const result = await installProject(base, ["--provider-key", "gateway-key"]);

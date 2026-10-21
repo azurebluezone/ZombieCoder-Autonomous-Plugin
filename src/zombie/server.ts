@@ -18,6 +18,12 @@ import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { scanProject } from "./scan.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
 import { buildContextPack } from "./context.ts";
+import { syntaxCheck } from "./lsp.ts";
+import {
+  autoInstallProjectSkills,
+  installProjectSkill,
+  listSkillCatalog,
+} from "./skillCatalog.ts";
 import { ROSTER } from "../roster.ts";
 
 export const RPC_ID = "zombiecoder";
@@ -37,6 +43,8 @@ export type SurfaceDeps = {
   storage: StorageLike;
   refreshSsot: () => { sha256: string; file: string; bytes: number };
   modelPlan: () => unknown;
+  /** Reload the skill registry after a project skill is added. */
+  reloadSkills?: () => Promise<void>;
 };
 
 const obj = (properties: Record<string, unknown>) => ({
@@ -377,6 +385,59 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         sessionID: input?.sessionID,
         entries: readArchive(deps.projectRoot(), String(input?.sessionID ?? ""), input?.limit ?? 50),
       }),
+    },
+    {
+      name: "syntax_check",
+      description:
+        "LSP-shaped syntax helper: return line/column diagnostics for a snippet before claiming it is valid. Uses JSON.parse, node --check, tsc, python3 compile, bash -n, php -l, then bracket balance.",
+      input: {
+        type: "object" as const,
+        properties: {
+          code: { type: "string", description: "Code snippet to check." },
+          language: {
+            type: "string",
+            description: "Language or extension: javascript, typescript, python, bash, php, json, text.",
+          },
+        },
+        required: ["code"],
+        additionalProperties: false,
+      },
+      run: async (input: any) => {
+        const code = String(input?.code ?? "");
+        if (!code.trim()) throw new Error("code is required");
+        return syntaxCheck(code, String(input?.language ?? "text"));
+      },
+    },
+    {
+      name: "skill_catalog",
+      description:
+        "List or install runtime skills. The catalog covers Laravel, Node, Next, Python, FastAPI, cPanel, resource optimization, server operations, first-principles and evidence-before-confidence. Use action=auto to install the core + project-detected skills into .zombiecoder/skills.",
+      input: {
+        type: "object" as const,
+        properties: {
+          action: { type: "string", enum: ["list", "install", "auto"] },
+          id: { type: "string", description: "Skill id for action=install." },
+          ids: { type: "array", items: { type: "string" }, description: "Optional skill ids for action=auto." },
+        },
+        additionalProperties: false,
+      },
+      run: async (input: any) => {
+        const action = String(input?.action ?? "list");
+        if (action === "list") return listSkillCatalog(deps.projectRoot());
+        if (action === "auto") {
+          const ids = Array.isArray(input?.ids)
+            ? input.ids.map((value: any) => String(value)).filter(Boolean)
+            : undefined;
+          const result = await autoInstallProjectSkills(deps.projectRoot(), { ids });
+          await deps.reloadSkills?.();
+          return result;
+        }
+        const id = String(input?.id ?? "").trim();
+        if (!id) throw new Error("id is required for action=install");
+        const result = await installProjectSkill(deps.projectRoot(), id);
+        await deps.reloadSkills?.();
+        return result;
+      },
     },
   ];
 }

@@ -44,6 +44,7 @@ import {
 import { fetchOriginHandshake } from "./zombie/origin.ts";
 import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
+import { autoInstallProjectSkills, DEFAULT_SKILL_REPO } from "./zombie/skillCatalog.ts";
 import { buildContextPack } from "./zombie/context.ts";
 import { applyResponseGate } from "./zombie/responseGate.ts";
 import { registerRpc, registerTools, audit } from "./zombie/server.ts";
@@ -68,6 +69,10 @@ export type ZombieConfig = {
   // Hard response gate: an unproven claim is replaced by an explicit UNVERIFIED
   // message before the user sees it. Set false only for diagnosis.
   responseGate: boolean;
+  // Install the core + project-detected skills into .zombiecoder/skills.
+  autoSkills: boolean;
+  // Git source for the runtime skill catalog.
+  skillRepo: string;
 };
 
 export const DEFAULT_CONFIG: ZombieConfig = {
@@ -81,6 +86,8 @@ export const DEFAULT_CONFIG: ZombieConfig = {
   ssotRefreshMs: DEFAULT_SSOT_REFRESH_MS,
   modelStrategy: "auto",
   responseGate: true,
+  autoSkills: true,
+  skillRepo: DEFAULT_SKILL_REPO,
 };
 
 // Where the plugin itself lives decides where OpenCode-owned files belong.
@@ -701,6 +708,21 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.outputs.bound = bound;
 
   // ---- §6 skills ------------------------------------------------------------
+  // The installer seeds <install>/zombiecoder/skills-catalog. Setup installs the
+  // core + project-detected skills from that local cache; an explicit
+  // skill_catalog tool call can fetch a missing skill from git at runtime.
+  const skillCatalog = await stepAsync("prepare-skills", async () => {
+    if (!config.autoSkills) return "skipped (autoSkills=false)";
+    const result = await autoInstallProjectSkills(root!, {
+      repoUrl: config.skillRepo,
+      download: false,
+    });
+    const copied = result.results.filter((item) => item.copied).length;
+    const failed = result.results.filter((item) => item.error).length;
+    return `${copied} new, ${result.ids.length} selected${failed ? `, ${failed} unavailable` : ""}`;
+  });
+  report.outputs.skillCatalog = skillCatalog;
+
   const skills = step("register-skills", () => {
     const registration = registerSkills(ctx.skill, root!);
     cleanups.push(registration.release);
@@ -732,6 +754,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     storage: ctx.storage,
     refreshSsot: writeSsotNow,
     modelPlan: () => plan,
+    reloadSkills: async () => {
+      await ctx.skill?.reload?.();
+    },
   };
 
   const rpc = await stepAsync("register-rpc", () => registerRpc(ctx.rpc, deps));

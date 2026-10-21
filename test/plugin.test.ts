@@ -177,10 +177,12 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(ssot, /^## .*Model plan/m);
   assert.doesNotMatch(ssot, /^## .*MCP/m);
 
-  assert.equal(fake.tools.length, 8);
+  assert.equal(fake.tools.length, 10);
   assert.ok(fake.tools.every((tool) => tool.output), "every tool must declare an output schema");
   assert.ok(fake.tools.some((tool) => tool.name === "memory_archive"));
   assert.ok(fake.tools.some((tool) => tool.name === "evidence_gate"), "evidence_gate tool missing");
+  assert.ok(fake.tools.some((tool) => tool.name === "syntax_check"), "syntax_check tool missing");
+  assert.ok(fake.tools.some((tool) => tool.name === "skill_catalog"), "skill_catalog tool missing");
   const contextTool = fake.tools.find((tool) => tool.name === "context_status");
   assert.ok(contextTool, "context_status tool missing");
   const contextOutput = (await contextTool.execute({ agent: "manu" })).output;
@@ -208,13 +210,18 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(claimResult.usable, false);
   assert.ok(claimResult.missing.includes("evidence_is_nonempty_array"));
 
-  assert.equal(fake.skills.length, 1);
-  assert.equal(fake.skills[0].path, path.join(root, ".zombiecoder", "skills", "sample.md"));
+  assert.equal(fake.skills.length, 5);
+  assert.ok(
+    fake.skills.some(
+      (skill: any) => skill.path === path.join(root, ".zombiecoder", "skills", "sample.md"),
+    ),
+    "the project's own sample skill must be registered",
+  );
 
   const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
   const toolStep = report.steps.find((step: any) => step.step === "register-tools");
   assert.equal(toolStep.ok, true);
-  assert.equal(toolStep.detail, "8 registered");
+  assert.equal(toolStep.detail, "10 registered");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
 
   await cleanup();
@@ -246,7 +253,15 @@ test("global install writes agents/config at the global root and leaves the work
 
     assert.ok(!fs.existsSync(path.join(root, ".opencode")), "global install must not create .opencode in the working directory");
     assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "SSOT.md")));
-    assert.ok(!fs.existsSync(path.join(root, ".zombiecoder", "skills")), "skills dir must stay lazy");
+    assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "skills")), "core skills should be installed");
+    assert.ok(
+      fs.existsSync(path.join(root, ".zombiecoder", "skills", "first-principles.md")),
+      "first-principles skill missing",
+    );
+    assert.ok(
+      fs.existsSync(path.join(root, ".zombiecoder", "skills", "evidence-before-confidence.md")),
+      "evidence skill missing",
+    );
 
     assert.ok(fs.existsSync(path.join(globalDir, "agents", "zombiecoder.md")));
     assert.ok(fs.existsSync(path.join(globalDir, "opencode.json")));

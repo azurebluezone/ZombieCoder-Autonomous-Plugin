@@ -16,7 +16,8 @@
     "configure": "node --experimental-strip-types scripts/configure.mjs",
     "generate": "node --experimental-strip-types src/generate.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test test/*.test.ts"
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "quick-install": "node bin/quick-install.mjs"
   },
   "engines": {
     "node": ">=22.6.0"

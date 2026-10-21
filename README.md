@@ -3,7 +3,7 @@
 **OpenCode-এর জন্য local-first এজেন্ট প্যাক**
 
 **Owner:** Sahon Srabon (Developer Zone), Dhaka, Bangladesh<br>
-**License:** Proprietary — Local Freedom Protocol
+**License:** Local Freedom, Non-Commercial (see §18)
 
 [![OpenCode](https://img.shields.io/badge/OpenCode-2.0.32%2B-111111)](https://opencode.ai)
 [![Node](https://img.shields.io/badge/Node-22.6%2B-339933)](https://nodejs.org)
@@ -34,6 +34,30 @@ runtime state তৈরি করে; প্রজেক্টের ভিত�
 > এই ডকুমেন্ট GitHub Markdown-এর জন্য লেখা। বাংলা অংশে standard Unicode
 > Bengali ব্যবহৃত হয়েছে; code, command, path, API নাম ও identifier ইংরেজিতে
 > রাখা হয়েছে।
+
+### ১.১ একটি ছোট্ট গল্প — বরিশালের চায়ের দোকান
+
+বরিশালের এক চায়ের দোকানে একজন নতুন শিক্ষানবিশ এসেছে। দোকানদার তাকে প্রথম দিনই
+সব কাজ একসাথে দেয়নি। দিয়েছে তিনটি জিনিস: একটি **খাতা** যেখানে দোকানের সব
+সত্যি লেখা (কোন চায়ে কী, দাম কত, কোনটা শেষ), একটি **ডায়েরি** যেখানে প্রতিদিনের
+শেখা জমা হয়, আর একটি **ট্রে** যেখানে শুধু আজকের কাজের কাগজপত্র থাকে।
+
+শিক্ষানবিশ যখনই কিছু বলতে চায়, দোকানদার জিজ্ঞেস করে: "কাগজে দেখেছ? না দেখে
+বললে ওটা অনুমান।" তাই সে আগে খাতা খোলে, তারপর ট্রে-র দরকারি কাগজ পড়ে, তারপর
+একটা কাজ করে, শেষে ডায়েরিতে শেখাটা লিখে রাখে। ভুল হলে দোকানদার রাগ করে না;
+বলে, "ভুলটা দেখাও, তারপর ঠিক করো।"
+
+দোকানে দুজন কর্মী: একজন বড়, একজন ছোট। ছোটজন সবকিছু জানে না, তাই তার হাতের
+পাশে **রেসিপি কার্ড** রাখা হয় — Laravel, Node, Next, Python, FastAPI, cPanel,
+server, resource optimization, first-principles আর evidence-before-confidence।
+ছোটজন কার্ড দেখে ধাপে ধাপে কাজ করে; বড়জন দ্রুত কাজ করে। কেউ অবহেলিত নয়, কারণ
+প্রত্যেকের কাজের শেষে একই প্রশ্ন: "প্রমাণ কোথায়?"
+
+ZombieCoder ঠিক এই দোকানের মতো। `SSOT.md` হলো খাতা, `syllabus.md` হলো ডায়েরি,
+compact context pack হলো ট্রে, `response_gate` হলো সেই দোকানদার যে প্রমাণ ছাড়া
+"হয়ে গেছে" বলতে দেয় না, আর `docs/skills` হলো রেসিপি কার্ড। ছোট মডেল ধীরে
+চলতে পারে, কিন্তু স্কিল আর টুল তাকে ছোট ছোট ধাপে কাজ করতে সাহায্য করে। বড়
+মডেল দ্রুত চলতে পারে, কিন্তু প্রমাণ ছাড়া সে-ও "পাস" বলতে পারে না।
 
 ---
 
@@ -66,7 +90,7 @@ runtime state তৈরি করে; প্রজেক্টের ভিত�
   ├── syllabus.md          ├── syllabus.md          ├── syllabus.md
   ├── memory/              ├── memory/              ├── memory/
   ├── .state/              ├── .state/              ├── .state/
-  └── skills/ (lazy)       └── skills/ (lazy)       └── skills/ (lazy)
+  └── skills/ (core+detected) └── skills/ (core+detected) └── skills/ (core+detected)
 ```
 
 ### ২.১ দুই স্তরের state
@@ -81,12 +105,17 @@ plugin নিজে তৈরি করে।
 
 ### ২.২ Model routing
 
-1. Provider-এর নিজের base URL-এ `GET /models` probe করা হয়।
-2. Probe সফল হলে `/v1/models`-এর model IDs দিয়ে agent assignment তৈরি হয়।
-3. Provider reachable কিন্তু `/v1/models` খালি হলে সেটি unusable ধরা হয়;
-   OpenCode-এর cost `0/0` free model-এ fallback হয়।
-4. Provider configured কিন্তু unreachable হলেও একই free-model fallback হয়।
-5. Free model পাওয়া না গেলে `opencode/big-pickle` baseline ব্যবহৃত হয়।
+1. Provider-এর নিজের base URL-এ `GET /v1/models` probe করা হয়।
+2. Probe সফল হলে `/v1/models`-এর **live** model IDs দিয়েই provider config
+   তৈরি হয়; আগের install-এর stale model (যেমন retired `Qwen` entry) বাদ পড়ে।
+3. শুধু model list থাকলেই provider ব্যবহারযোগ্য ধরা হয় না। installer
+   `/v1/chat/completions`-এ একটি ছোট chat probe এবং (ডিফল্ট) একটি tool-call
+   probe চালায়।
+4. Chat fail, tool fail, অথবা prompt processing খুব ধীর (<20 tok/s) হলে
+   provider config-এ থাকলেও agent-রা baseline free model
+   (`opencode/big-pickle`) পায়। `--allow-slow` দিয়ে slow model জোর করে রাখা যায়।
+5. Provider একেবারে unreachable হলে OpenCode-এর free model fallback হয়;
+   `modelStrategy: "baseline"` এই fallback-কে স্থায়ী করে।
 6. Global install-এ provider live হলে বা configured provider outage হলে runtime
    plan global agent assignment update করতে পারে।
 7. প্রজেক্ট নিজে provider disable করলে (`customProviderUrl: ""`) global
@@ -152,6 +181,35 @@ npm --version
 ---
 
 ## ৪. সরাসরি ক্লোন ও ইনস্টল
+
+### ৪.০ নতুনদের জন্য এক-কমান্ড ইনস্টল (recommended)
+
+কোডিং না জানলেও চলবে। শুধু terminal-এ তিনটি লাইন:
+
+```bash
+git clone https://github.com/azurebluezone/ZombieCoder-Autonomous-Plugin.git
+cd ZombieCoder-Autonomous-Plugin
+node bin/quick-install.mjs
+```
+
+তারপর স্ক্রিনে যে menu আসবে, সেখানে একটি সংখ্যা চাপুন:
+
+```text
+1) এই computer-এ একবার install/update (recommended)
+2) Fast start — free baseline model (local GPU লাগবে না)
+3) শুধু এই folder-এর project-এ install
+4) শুধু verify (কিছু বদলাবে না)
+5) বন্ধ
+```
+
+- **1** — `~/.opencode`-এ একবার install; সব project-এ কাজ করবে।
+- **2** — local provider probe না করে `opencode/big-pickle` baseline দিয়ে
+  দ্রুত শুরু; ছোট/ধীর CPU model-এ আটকে থাকবে না।
+- **3** — `cd` করা folder-এর `.opencode`-এ project-local install।
+- **4** — শুধু SSOT/syllabus/agent/config state যাচাই করে; কিছু লেখে না।
+
+Automation-এর জন্য: `node bin/quick-install.mjs --yes` (option 1) অথবা
+`node bin/quick-install.mjs --choice=2`।
 
 ### ৪.১ Linux / macOS
 
@@ -667,6 +725,8 @@ Installer নতুন agent-এর markdown ও `opencode.json` entry তৈর
 | `zombiecoder.evidence_gate` | Claim/response evidence যাচাই; `FAIL`/`SKIP` = `UNVERIFIED` |
 | `zombiecoder.memory_archive` | Archive করা conversation পড়া |
 | `zombiecoder.append_syllabus` | নতুন lesson append করা |
+| `zombiecoder.syntax_check` | LSP-shaped syntax diagnostics: JSON, JS, TS, Python, Bash, PHP |
+| `zombiecoder.skill_catalog` | Runtime skill list/install/auto; git থেকে missing skill নামায় |
 
 Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
 
@@ -680,7 +740,17 @@ Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
 <project>/.zombiecoder/skills/*.md
 ```
 
-Skill directory lazy; skill থাকলে তবেই register হয়।
+Project setup-এ core + project-detected skill install হয়:
+
+- core: `first-principles`, `evidence-before-confidence`,
+  `resource-optimization`, `server`
+- detected: `laravel`, `node`, `next`, `python`, `fastapi`, `cpanel`
+
+Skill source repo-তে `docs/skills/`; installer এগুলো
+`<install>/zombiecoder/skills-catalog`-এ seed করে। কোনো skill cache-এ না থাকলে
+`skill_catalog` tool git clone (fallback: raw GitHub) দিয়ে নামায়। Skill একটি
+ছোট markdown + frontmatter; `registerSkills` সেটি OpenCode-এর skill door-এ
+register করে।
 
 ### Memory
 
@@ -939,6 +1009,38 @@ Test labels:
 
 ---
 
-## ১৮. License
+## ১৮. License — Local Freedom, Non-Commercial
 
-**Proprietary — Local Freedom Protocol**
+**সংক্ষেপে:** নিজের কম্পিউটারে, localhost-এ, শেখার ও ব্যক্তিগত কাজে ব্যবহার
+করার স্বাধীনতা আছে। কিন্তু এই repo থেকে ডাউনলোড করা কোড দিয়ে **ব্যবসা করা যাবে
+না**, ব্যবসায়িক পণ্য বা paid service বানানো যাবে না।
+
+### করা যাবে
+
+- নিজের machine-এ install ও ব্যবহার, localhost/offline সহ।
+- ব্যক্তিগত, শিক্ষামূলক, research ও non-profit কাজে ব্যবহার।
+- শেখার জন্য পড়া, modify করা, নিজের প্রয়োজনে ছোট পরিবর্তন করা।
+- Attribution রাখলে non-commercial ভাবে share করা।
+
+### করা যাবে না
+
+- এই repo বা এর download করা copy দিয়ে কোনো business, startup, agency,
+  client work, paid service, SaaS, hosted product বা commercial training চালানো।
+- কোডটি sell, sublicense, paid bundle বা commercial product-এ embed করা।
+- License/credit notice মুছে ফেলা বা commercial use-এর অনুমতি আছে বলে দাবি করা।
+
+"Commercial use" মানে টাকা, barter বা business benefit-এর জন্য ব্যবহার — সরাসরি
+বা কোনো paid product/service-এর ভিতরে। কোনো doubt থাকলে commercial ধরে নিন এবং
+আগে owner-এর লিখিত অনুমতি নিন।
+
+### কেন এই শর্ত
+
+আমরা কষ্ট করি মানুষের উপকারের জন্য। কেউ যদি এই কাজকে মানুষের উপর ব্যবসার হাতিয়ার
+বানায়, সেটা আমাদের নীতির বিরুদ্ধে। ব্যক্তিগত স্বাধীনতা আর commercial শোষণ এক
+জিনিস নয়।
+
+### সীমা
+
+এই লেখা legal advice নয়। License-এর শর্ত দেশভেদে ভিন্নভাবে প্রয়োগ হতে পারে;
+commercial অনুমতি বা আইনি পরামর্শের জন্য owner-এর সাথে যোগাযোগ করুন। Software
+"as is" — কোনো warranty নেই।

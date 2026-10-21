@@ -10,8 +10,9 @@
 // optional manual override, never auto-created. No fingerprint.json, footprint.jsonl,
 // models.json or mcp.json is created in the project.
 //
-// Skills are lazy: .zombiecoder/skills is not created until someone actually puts
-// a skill there.
+// Skills: setup installs core + project-detected skills into .zombiecoder/skills.
+// The directory is not part of bootstrapDirs because a global install must not
+// create per-project files until a working directory is actually opened.
 
 import path from "node:path";
 

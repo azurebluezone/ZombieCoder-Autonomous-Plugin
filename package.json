@@ -17,7 +17,11 @@
     "generate": "node --experimental-strip-types src/generate.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "quick-install": "node bin/quick-install.mjs"
+    "quick-install": "node bin/quick-install.mjs",
+    "integrity": "node scripts/integrity.mjs",
+    "integrity:check": "node scripts/integrity.mjs --check",
+    "lsp:probe": "node scripts/lsp-probe.mjs",
+    "check": "npm run typecheck && npm test && npm run integrity:check"
   },
   "engines": {
     "node": ">=22.6.0"

@@ -1,0 +1,283 @@
+{
+  "schema": "zombiecoder-integrity/v1",
+  "generated_at": "2026-10-21T02:54:19.297Z",
+  "scope": [
+    "src",
+    "bin",
+    "scripts",
+    "test",
+    "docs/skills",
+    "package.json",
+    "LICENSE"
+  ],
+  "root_sha256": "2094ffd4d955191096aa788c0abe82f0c00f805c55acc9d122cd80d3303810c9",
+  "file_count": 52,
+  "total_bytes": 447454,
+  "git": {
+    "commit": "89114d5",
+    "branch": "main",
+    "dirty": true
+  },
+  "files": [
+    {
+      "path": "bin/install.mjs",
+      "bytes": 44036,
+      "sha256": "4dd556cce53ad1b7e7c6c479dd3e5d00e76e331b7997cbb63fbc87d9721541c5"
+    },
+    {
+      "path": "bin/quick-install.mjs",
+      "bytes": 5685,
+      "sha256": "fa97c3318d7630421e4f596044aa61da60c0f0d8b7533035f1013f462cedc078"
+    },
+    {
+      "path": "docs/skills/cpanel.md",
+      "bytes": 1867,
+      "sha256": "f056fa581f9a0fa268556d8769fc2c5389a864fbd552e90b1692efde0c003537"
+    },
+    {
+      "path": "docs/skills/evidence-before-confidence.md",
+      "bytes": 1825,
+      "sha256": "087195382d983591c2d2d5619ac0b36ee695ba3a0d9ef25bb5c7777911b034c3"
+    },
+    {
+      "path": "docs/skills/fastapi.md",
+      "bytes": 1655,
+      "sha256": "336760d1a90ba33630224332e9da615b214d3ec627095be9ced772a4fbfb3d34"
+    },
+    {
+      "path": "docs/skills/first-principles.md",
+      "bytes": 1700,
+      "sha256": "4e63d8eeb8ae30b39427fc6335c38891cffded74fc866246faf2224127fd5bef"
+    },
+    {
+      "path": "docs/skills/laravel.md",
+      "bytes": 1630,
+      "sha256": "f35dc9c1bdf4d6217993761bbc1db7beee164dba54e17e4e03ade68b3361c33a"
+    },
+    {
+      "path": "docs/skills/next.md",
+      "bytes": 1669,
+      "sha256": "afdf6e2a125f8f9db4357c2d11375dd76f2d3b6d75fe3cf21550c105d6b6d254"
+    },
+    {
+      "path": "docs/skills/node.md",
+      "bytes": 1392,
+      "sha256": "44a57ebd465774ec2dba3a736e27c24b4e0dd8370ee5a3ada1a642d5a3301f27"
+    },
+    {
+      "path": "docs/skills/python.md",
+      "bytes": 1435,
+      "sha256": "1fbd7bf69b3ee47b25c0ce08222989be4f2c74ce008f3702b7f913e584cf3b86"
+    },
+    {
+      "path": "docs/skills/resource-optimization.md",
+      "bytes": 1624,
+      "sha256": "4180017cb251d46c33afae2b19b44d83ce7f52f6b315b3d0d5e0bd2bb182500e"
+    },
+    {
+      "path": "docs/skills/server.md",
+      "bytes": 1685,
+      "sha256": "0149a648a6e8b4d8104097986e6796ceb224433707f5e73c281de5e7577eb4e3"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1961,
+      "sha256": "d06b8b22307bf25fa4e3dba778ad2ccc1350c2e5cd1b5e6ed40c2de25b6cd95a"
+    },
+    {
+      "path": "package.json",
+      "bytes": 1303,
+      "sha256": "b54d5b1854c40cb0ab7b325a912d5906334b7da7b6fb8dc3ff4ec552e23ba848"
+    },
+    {
+      "path": "scripts/configure.mjs",
+      "bytes": 14582,
+      "sha256": "ca232bbe03449daa0a465d6ea9acf9b47d2b4559442e1f60432e296edb6f9c70"
+    },
+    {
+      "path": "scripts/integrity.mjs",
+      "bytes": 10134,
+      "sha256": "2a3485b44f9e85be5493252f07c815386c8e9c96013ff3f434f368fd44f1b867"
+    },
+    {
+      "path": "scripts/lsp-probe.mjs",
+      "bytes": 6203,
+      "sha256": "84584f12a0fb62235314474ecee3efdda1e5e921f88f16dc323c09ee840433ab"
+    },
+    {
+      "path": "scripts/setup.mjs",
+      "bytes": 12779,
+      "sha256": "76e35cf8c0cabbaf20fdae48ff051c8c01086def378f3c867fd2de2e2c0ae777"
+    },
+    {
+      "path": "src/agents.ts",
+      "bytes": 13483,
+      "sha256": "f54b4e41b6934c0d5e6dcf8fff4af718ba919bfddb65f3329456a4746d10dd8b"
+    },
+    {
+      "path": "src/ethics.ts",
+      "bytes": 10670,
+      "sha256": "db6c18984a5357106de459cd701c613c293971be372785594d57e83eeea7c921"
+    },
+    {
+      "path": "src/generate.ts",
+      "bytes": 5739,
+      "sha256": "e7f4ac46cf1eaa29920a3431f4be39e231d3103b162d36dd1fb9d3384fb87ad8"
+    },
+    {
+      "path": "src/identity.ts",
+      "bytes": 8055,
+      "sha256": "b22066b981cbb755e896eb7a717eb3e7d3162102205bb3e3166ecd939f195ba4"
+    },
+    {
+      "path": "src/plugin.ts",
+      "bytes": 41393,
+      "sha256": "631fe154deb1e591541a6a7990e6b0fc907eab63cf16a4ddf87f4d7e4753e574"
+    },
+    {
+      "path": "src/roster.ts",
+      "bytes": 25905,
+      "sha256": "21abdef9056b9cb304cc471073a3e452de9d63d87d2a40e75eb2c027fd2ea1bc"
+    },
+    {
+      "path": "src/runtime.ts",
+      "bytes": 13347,
+      "sha256": "5c6bd9288f65e9a13c016e3732b402a67b72b36b8fd991d2e4cec7789aba4654"
+    },
+    {
+      "path": "src/zombie/context.ts",
+      "bytes": 6882,
+      "sha256": "56234660c14970c4b77d1ead0726355bcc0f8fb3ad3a71802ba201923b993fb8"
+    },
+    {
+      "path": "src/zombie/defaults.ts",
+      "bytes": 2668,
+      "sha256": "bdd1da278ec370626c5b0f45622f1989ace2d5c27efde5f040fbac766e142a87"
+    },
+    {
+      "path": "src/zombie/io.ts",
+      "bytes": 4067,
+      "sha256": "fe00c59bd59aa98b5a33ff56d19faf6a4847fb49cfb557b1d93bd93285a51c76"
+    },
+    {
+      "path": "src/zombie/lsp.ts",
+      "bytes": 13112,
+      "sha256": "4ad4e476d20812de3f93bb8182d535cd3e1ed2764a8e117083daa9511cb25604"
+    },
+    {
+      "path": "src/zombie/mcp.ts",
+      "bytes": 5564,
+      "sha256": "2222d1adb6307c9767ac7392457acd25cf991c9130559825cc5ab383d6503b8a"
+    },
+    {
+      "path": "src/zombie/memory.ts",
+      "bytes": 8901,
+      "sha256": "26cd115dfec0eec8a5569a6dfa91e89897a171b9032d92d936c4963a48d43d56"
+    },
+    {
+      "path": "src/zombie/models.ts",
+      "bytes": 15856,
+      "sha256": "ab330f7d0a3532931c6cc6bdc746a46cce2f7a3db27db3a5bacaf90a065f3d42"
+    },
+    {
+      "path": "src/zombie/origin.ts",
+      "bytes": 5116,
+      "sha256": "6b37139ebcf59a436a05e3fb3eb28be4ad4aa195a099fe388faab9030d73567c"
+    },
+    {
+      "path": "src/zombie/paths.ts",
+      "bytes": 3380,
+      "sha256": "e505c8ac33c49b1028b887d5396157bf75457a342af37290da2caa0b8fc14875"
+    },
+    {
+      "path": "src/zombie/responseGate.ts",
+      "bytes": 12199,
+      "sha256": "f334902b7008adb792fd0b84fed7f780e09de6e4167475761e534d5cd2140ddb"
+    },
+    {
+      "path": "src/zombie/scan.ts",
+      "bytes": 7494,
+      "sha256": "c8b6169192da8a4dc96fb623a432e8719a9c4eeaabc24b096cc542554e57fa3b"
+    },
+    {
+      "path": "src/zombie/server.ts",
+      "bytes": 19548,
+      "sha256": "2bbb41fa43a592c1c7113d2d045869c9aedf97a829d667e38a22b07fd03fdc01"
+    },
+    {
+      "path": "src/zombie/skillCatalog.ts",
+      "bytes": 15410,
+      "sha256": "50033eb25880091f7084116ccbd70d5beb6ba1f2875d35a0e5fb9b62d06b81be"
+    },
+    {
+      "path": "src/zombie/skills.ts",
+      "bytes": 4964,
+      "sha256": "c0a1fafd9aa8b0ad0d2c473ceb63df98afb9630826706da676fa22d37cc155d0"
+    },
+    {
+      "path": "src/zombie/ssot.ts",
+      "bytes": 6982,
+      "sha256": "a59b27089fcf6148337f6c4d84461c6d30c6034d75b39c7173f5ec23526b65cc"
+    },
+    {
+      "path": "src/zombie/syllabus.ts",
+      "bytes": 7542,
+      "sha256": "b564b2cb1e02c1e45f222b40cd39f2bf4d2b52a5fe01b7ff4b543d518a0f29ac"
+    },
+    {
+      "path": "src/zombie/transform.ts",
+      "bytes": 3964,
+      "sha256": "1c25f3eb1f6ecc9c8ed68b9894f2dfcffb75e233540be06b81f8bda78cc11ba2"
+    },
+    {
+      "path": "test/context.test.ts",
+      "bytes": 8668,
+      "sha256": "4db8049a8b0d5ef364fbf07b26cbb848db18940001cb3a87db5feb0d918b7a15"
+    },
+    {
+      "path": "test/install.test.ts",
+      "bytes": 13575,
+      "sha256": "5eb13653e8ab5d494ae625b3e29becd6a1eb3486cd3c9b9e9363046c793bc8d6"
+    },
+    {
+      "path": "test/lsp.test.ts",
+      "bytes": 2276,
+      "sha256": "e6808cbdb5df0d78dd645b1b5a0e73ce64029eb2aa0e09516e585e523b673a6a"
+    },
+    {
+      "path": "test/mcp.test.ts",
+      "bytes": 2352,
+      "sha256": "b4ccdef6695d1b05082cd6ea7a1003f692daf606913e9456be1eca2c61e98fb7"
+    },
+    {
+      "path": "test/memory.test.ts",
+      "bytes": 3086,
+      "sha256": "36beb46ef6c048a8b1ccae4e7aa3e59be854109cc83139b7985e418fdb9d8b8f"
+    },
+    {
+      "path": "test/models.test.ts",
+      "bytes": 10179,
+      "sha256": "bde6fad325b859bf8522602813a849e0ab9f3ad8e59f8e41aa5e6fc120835c98"
+    },
+    {
+      "path": "test/origin.test.ts",
+      "bytes": 4002,
+      "sha256": "d75f26822785389c2c9a3b1213c74555ced930c374797d2e702c80fad6788b9f"
+    },
+    {
+      "path": "test/plugin.test.ts",
+      "bytes": 21526,
+      "sha256": "e49bc70ec50d5bf377538a1259658015c0c7a6a10feea22a186b8197d4417480"
+    },
+    {
+      "path": "test/repo.test.ts",
+      "bytes": 2891,
+      "sha256": "dfe11cfde7963d84f580a12d49c6acbf81494a9087e4dbe1c04ebca4e9c0427e"
+    },
+    {
+      "path": "test/skillCatalog.test.ts",
+      "bytes": 3493,
+      "sha256": "dbc1788cdd977905130663ad555f147edd3c63cbd65688ceeea0449c117f639c"
+    }
+  ]
+}

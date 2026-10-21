@@ -393,6 +393,30 @@ that trade-off; the default is a working free baseline.
 `NOT_TESTED`: the new `syntax_check` code path through the already-running
 OpenCode process; a restart is required to load the updated plugin module.
 
+### ৯.২ LSP, token ও Cloudflare probe (2026-10-21)
+
+| Check | Observed | Label |
+|---|---|---|
+| OpenCode version | `opencode v2.1.1` | `LIVE_PROBE_PASSED` |
+| LSP runtime | `Config.LSP.Server` and LSP protocol methods (`initialize`, `publishDiagnostics`) present in installed V2.1.1 app bundle | `SOURCE_VERIFIED` |
+| LSP config | 4 servers (`typescript`, `python`, `bash`, `json`); `config.updated` at `02:43:31` | `CONFIG_VALIDATED` |
+| LSP binaries | `typescript-language-server 6.0.2`, `typescript 5.9.3`, `pyright 1.1.414`, `bash-language-server 5.8.1`, `vscode-langservers-extracted 4.10.0` | `SOURCE_VERIFIED` |
+| LSP initialize | direct probe 4/4 ok, exit `0` | `LIVE_PROBE_PASSED` |
+| Editor LSP | config reloaded; no LSP child process yet; restart/open file required | `NOT_TESTED` |
+| Provider token | `/v1/models` without token `401`; with token `200`; chat `200`, content `TOKEN_OK` | `LIVE_PROBE_PASSED` |
+| Cloudflare | `server: cloudflare`, `cf-cache-status: DYNAMIC`, `cf-ray` unique per request | `LIVE_PROBE_PASSED` |
+| Request mixing | 4 concurrent non-stream + 2 concurrent SSE, all markers matched their own response | `LIVE_PROBE_PASSED` (limited) |
+
+The earlier "V2 has no LSP runtime" claim was wrong. V2.1.1 supports LSP through
+the `lsp` config; the missing pieces were the config and the server binaries. The
+direct probe passes 4/4, but the desktop editor still needs a restart and a file
+open, so editor diagnostics remain `NOT_TESTED`. `syntax_check` is a fallback,
+not LSP. Use `npm run lsp:probe` and `docs/LSP.md` for evidence.
+
+Token note: the bearer token in the attached probe file is valid, but it was
+shared in chat; rotate it. It is not used by LSP, and it must never be committed
+or printed.
+
 ---
 
 ## ১০. গল্প, দায় ও ব্যবহারের সীমা
@@ -421,3 +445,26 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 আমরা কষ্ট করি মানুষের উপকারের জন্য; মানুষকে নিয়ে ব্যবসা করা এই প্রকল্পের
 নীতির বিরুদ্ধে। বিস্তারিত শর্ত `LICENSE` ফাইলে; এটি legal advice নয়।
+
+---
+
+<!-- INTEGRITY:START -->
+<div align="center">
+
+### 🔐 ZombieCoder Integrity Seal
+
+```text
+╔══════════════════════════════════════════════════════════════════════════╗
+║  root  2094ffd4d955191096aa788c0abe82f0c00f805c55acc9d122cd80d3303810c9  ║
+║  files 52 · bytes 447454 · base 89114d5 · dirty                          ║
+╚══════════════════════════════════════════════════════════════════════════╝
+```
+
+[Full manifest](INTEGRITY.md) · Verify: `npm run integrity:check`
+
+> SHA-256 over source, scripts, tests, skills, package metadata and license.
+> Detects accidental or unauthorized changes. Not a legal identity signature.
+> Base commit is the code tree before this seal commit. Generated: 2026-10-21T02:54:19.297Z
+
+</div>
+<!-- INTEGRITY:END -->

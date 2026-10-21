@@ -702,6 +702,20 @@ Installer নতুন agent-এর markdown ও `opencode.json` entry তৈর
 প্রয়োজনে installed `agents/<id>.md` এবং `opencode.json`-এর entry manually
 সরাতে হবে।
 
+### ৮.৬ Agent handoff — ব্যবহারকারীকে কী দেবে
+
+নতুন ব্যবহারকারী repo clone করলে শুধু code পায়; persona নিজে থেকে inject হয় না।
+তাই [`docs/AGENT-HANDOFF.md`](docs/AGENT-HANDOFF.md) তৈরি করা হয়েছে। এতে আছে:
+
+- `AGENTS.md`/system prompt-এ paste করার মূল নির্দেশ
+- জম্বি persona আর neutral persona — দুই mode
+- persona inject হয়েছে কি না, তার ৬টি চেক
+- টুল, secret, LSP, Cloudflare, license-এর সীমা
+- ব্যবহারকারীকে বলার ছোট disclaimer
+
+Persona inject না হলে model generic উত্তর দেবে — এটা model-এর দোষ নয়, handoff-এর
+ঘাটতি। তাই প্রথমে handoff, তারপর code।
+
 ---
 
 ## ৯. Agent roster
@@ -739,7 +753,7 @@ Installer নতুন agent-এর markdown ও `opencode.json` entry তৈর
 | `zombiecoder.evidence_gate` | Claim/response evidence যাচাই; `FAIL`/`SKIP` = `UNVERIFIED` |
 | `zombiecoder.memory_archive` | Archive করা conversation পড়া |
 | `zombiecoder.append_syllabus` | নতুন lesson append করা |
-| `zombiecoder.syntax_check` | LSP-shaped syntax diagnostics: JSON, JS, TS, Python, Bash, PHP |
+| `zombiecoder.syntax_check` | Syntax fallback (LSP নয়): JSON, JS, TS, Python, Bash, PHP |
 | `zombiecoder.skill_catalog` | Runtime skill list/install/auto; git থেকে missing skill নামায় |
 
 Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
@@ -908,6 +922,22 @@ Backup-এ API key থাকতে পারে; permission restrict করু�
 | কোনো setup step fail | `.zombiecoder/.state/setup-report.json` দেখুন |
 | SSOT stale | ৫ মিনিট অপেক্ষা করুন অথবা plugin tool দিয়ে refresh করুন |
 | পুরনো session ভিন্ন model ব্যবহার করছে | নতুন session নিন অথবা model picker থেকে বদলান |
+| `No LSP servers configured` | `~/.opencode/opencode.json`-এ `lsp` server নেই বা binary missing; install + config + restart; [`docs/LSP.md`](docs/LSP.md) দেখুন। |
+
+### ১৪.১ LSP — configure করা আছে, editor restart বাকি
+
+OpenCode V2.1.1-এ LSP runtime আছে। `No LSP servers configured`-এর মানে `lsp`
+config বা language-server binary নেই। এই setup-এ `typescript`, `python`, `bash`,
+`json` — ৪টি server configured; `npm run lsp:probe` exit `0` (4/4 initialize
+pass)। Config `config.updated` event-এ reload হয়েছে, কিন্তু desktop editor-এ
+LSP child process এখনো দেখা যায়নি। তাই editor diagnostics `NOT_TESTED`:
+OpenCode পুনরায় চালু করে একটি `.ts` file খুলুন, তারপর যাচাই করুন।
+
+- Config: `~/.opencode/opencode.json` → `lsp`
+- Binaries: `~/.opencode/lsp/node_modules/.bin/`
+- Probe: `npm run lsp:probe -- --root "$PWD"`
+- LSP না মিললে [`docs/LSP.md`](docs/LSP.md) §5 দেখুন।
+- `syntax_check` শুধু fallback; LSP নয়। CI-তে `npm run typecheck`, `npm test` চালান।
 
 Debug command:
 
@@ -1007,16 +1037,20 @@ tools `tools/` ও `tls/`-এ আছে।
 ## ১৭. Development
 
 ```bash
-npm run typecheck    # TypeScript check
-npm test             # node:test suite
-npm run generate     # doc/*.md ও doc/identity.json
+npm run typecheck        # TypeScript check
+npm test                # node:test suite
+npm run generate        # doc/*.md ও doc/identity.json
+npm run integrity       # SHA-256 seal + docs/INTEGRITY.md + footer
+npm run integrity:check # verify; mismatch = exit 1
+npm run lsp:probe       # configured LSP servers: initialize probe
+npm run check           # typecheck + test + integrity
 ```
 
 Test labels:
 
 - `SOURCE_VERIFIED` — source ও test pass
 - `CONFIG_VALIDATED` — OpenCode config load pass
-- `LIVE_PROBE_PASSED` — provider/models live probe pass
+- `LIVE_PROBE_PASSED` — live provider/models or LSP initialize probe pass
 - `END_TO_END_TESTED` — setup + inference path pass
 - `NOT_TESTED` — 해당 path এখনো probe করা হয়নি
 - `UNVERIFIED` — প্রমাণ নেই
@@ -1058,3 +1092,26 @@ Test labels:
 এই লেখা legal advice নয়। License-এর শর্ত দেশভেদে ভিন্নভাবে প্রয়োগ হতে পারে;
 commercial অনুমতি বা আইনি পরামর্শের জন্য owner-এর সাথে যোগাযোগ করুন। Software
 "as is" — কোনো warranty নেই।
+
+---
+
+<!-- INTEGRITY:START -->
+<div align="center">
+
+### 🔐 ZombieCoder Integrity Seal
+
+```text
+╔══════════════════════════════════════════════════════════════════════════╗
+║  root  2094ffd4d955191096aa788c0abe82f0c00f805c55acc9d122cd80d3303810c9  ║
+║  files 52 · bytes 447454 · base 89114d5 · dirty                          ║
+╚══════════════════════════════════════════════════════════════════════════╝
+```
+
+[Full manifest](docs/INTEGRITY.md) · Verify: `npm run integrity:check`
+
+> SHA-256 over source, scripts, tests, skills, package metadata and license.
+> Detects accidental or unauthorized changes. Not a legal identity signature.
+> Base commit is the code tree before this seal commit. Generated: 2026-10-21T02:54:19.297Z
+
+</div>
+<!-- INTEGRITY:END -->

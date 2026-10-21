@@ -20,7 +20,7 @@ are never copied into generated reports.
 | `tools/render_nginx.py` | Renders the generic Nginx template without a hardcoded host |
 | `tls/nginx.conf.template` | Reusable TLS reverse-proxy template |
 | `tools/origin_profile.py` | Builds an origin profile from a 100C report |
-| `tools/evidence_gate.py` | Rejects unproven models, chat, stream, Responses, Anthropic and TLS payloads |
+| `tools/evidence_gate.py` | Rejects unproven models, chat, stream, Responses, Anthropic, TLS and factual-claim payloads |
 | `doc/identity.js` | Machine-readable identity surface |
 | `doc/ethics.js` | Evidence-first ethics and labels |
 | `doc/runtime-operations.js` | Runtime protocols, surfaces, fallback and blockers |
@@ -135,6 +135,7 @@ selected: 9 free refs + opencode/big-pickle
 
 ```bash
 python3 tools/evidence_gate.py --kind auto --file response.json
+python3 tools/evidence_gate.py --kind claim --file claim.json
 python3 tools/evidence_gate.py --self-test
 ```
 
@@ -146,18 +147,30 @@ Supported kinds:
 - `responses`
 - `anthropic`
 - `tls`
+- `claim`
+
+A `claim` payload must contain a non-empty `claim` string and a non-empty
+`evidence[]` array. Every evidence item needs non-empty `source`, non-empty
+`observation` and `verified: true`. Missing evidence is `FAIL`, so an unsupported
+factual claim cannot be reported as `PASS` merely because the prose is fluent.
 
 `PASS` requires every structural check. `HTTP 200` or fluent prose alone is not
 evidence. A `401` error body, an empty assistant message, invalid tool-call JSON,
 an unfinished stream or a failed certificate check is `FAIL`.
 
+The plugin exposes the same verifier as the `evidence_gate` tool. The rule is
+enforced in the shared agent contract: call it before a factual claim, and report
+`UNVERIFIED` when it returns `FAIL` or `SKIP`. The gate checks structure and
+evidence presence, not real-world truth.
+
 Observed:
 
-- self-test: 8/8 fixtures pass
+- self-test: 10/10 fixtures pass
 - live `/v1/models`: `PASS`
 - live chat (`pong`): `PASS`
 - `401` model payload: `FAIL`
 - malformed model list: `FAIL`
+- evidence-less claim: `FAIL` (`evidence_is_nonempty_array`)
 
 ---
 
@@ -281,6 +294,9 @@ node model.mjs --non-interactive \
 
 # response gate
 python3 tools/evidence_gate.py --kind auto --file response.json
+
+# factual claim gate
+python3 tools/evidence_gate.py --kind claim --file claim.json
 ```
 
 ---

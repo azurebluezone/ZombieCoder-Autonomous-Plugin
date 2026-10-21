@@ -68,6 +68,19 @@ async function installProject(
   return { root, ...result };
 }
 
+test("installer --help exits without touching the target", async () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-help-"));
+  const configDir = path.join(parent, ".opencode");
+  const result = await runInstaller(["--help", "--config-dir", configDir]);
+  try {
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Usage:/);
+    assert.ok(!fs.existsSync(configDir), "--help created an install root");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("installer never writes provider/undefined when /models is empty", async () => {
   await withServer(
     (_req, res) => {
@@ -119,6 +132,10 @@ test("installer --config-dir creates a complete self-contained config root", asy
         assert.ok(fs.existsSync(path.join(configDir, "agents", "manu.md")));
         assert.ok(fs.existsSync(path.join(configDir, "plugins", "zombiecoder.ts")));
         assert.ok(fs.existsSync(path.join(configDir, "zombiecoder", "config.json")));
+        assert.ok(fs.existsSync(path.join(configDir, "zombiecoder", "tools", "evidence_gate.py")));
+        assert.ok(fs.existsSync(path.join(configDir, "zombiecoder", "tls", "nginx.conf.template")));
+        assert.ok(fs.existsSync(path.join(configDir, "zombiecoder", "docs", "100c-runtime-template.md")));
+        assert.ok(fs.existsSync(path.join(configDir, "zombiecoder", "model.mjs")));
         assert.ok(!fs.existsSync(path.join(parent, "opencode.json")));
         const config = JSON.parse(fs.readFileSync(path.join(configDir, "opencode.json"), "utf8"));
         assert.equal(config.model, BASELINE);

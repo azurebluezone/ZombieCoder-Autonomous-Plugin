@@ -177,22 +177,36 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(ssot, /^## .*Model plan/m);
   assert.doesNotMatch(ssot, /^## .*MCP/m);
 
-  assert.equal(fake.tools.length, 6);
+  assert.equal(fake.tools.length, 7);
   assert.ok(fake.tools.every((tool) => tool.output), "every tool must declare an output schema");
   assert.ok(fake.tools.some((tool) => tool.name === "memory_archive"));
+  assert.ok(fake.tools.some((tool) => tool.name === "evidence_gate"), "evidence_gate tool missing");
   const fingerprintTool = fake.tools.find((tool) => tool.name === "project_fingerprint");
   assert.ok(fingerprintTool, "project_fingerprint tool missing");
   const fingerprintOutput = (await fingerprintTool.execute({})).output;
   assert.equal(fingerprintOutput.root, root);
   assert.ok(Array.isArray(fingerprintOutput.files));
   assert.ok(!fs.existsSync(path.join(root, ".zombiecoder", "fingerprint.json")));
+
+  const gateTool = fake.tools.find((tool) => tool.name === "evidence_gate");
+  assert.ok(gateTool, "evidence_gate tool missing");
+  const claimFile = path.join(root, "claim.json");
+  fs.writeFileSync(
+    claimFile,
+    JSON.stringify({ claim: "The file exists.", evidence: [] }),
+  );
+  const claimResult = (await gateTool.execute({ file: claimFile, kind: "claim" })).output;
+  assert.equal(claimResult.status, "FAIL");
+  assert.equal(claimResult.usable, false);
+  assert.ok(claimResult.missing.includes("evidence_is_nonempty_array"));
+
   assert.equal(fake.skills.length, 1);
   assert.equal(fake.skills[0].path, path.join(root, ".zombiecoder", "skills", "sample.md"));
 
   const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
   const toolStep = report.steps.find((step: any) => step.step === "register-tools");
   assert.equal(toolStep.ok, true);
-  assert.equal(toolStep.detail, "6 registered");
+  assert.equal(toolStep.detail, "7 registered");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
 
   await cleanup();

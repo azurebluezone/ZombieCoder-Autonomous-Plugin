@@ -86,6 +86,40 @@ function value(name, fallback) {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 }
 
+// --help must be side-effect free. Before this guard, `install.mjs --help`
+// performed a full install and overwrote config.
+if (flag("--help") || flag("-h")) {
+  console.log(`ZombieCoder install — ${PKG.name} v${PKG.version}
+
+Usage:
+  node --experimental-strip-types bin/install.mjs [options]
+
+Modes:
+  (default)              standard global install in ~/.config/opencode
+  --global               explicit global install
+  --dir <path>           project-local install in <path>/.opencode
+  --home                 legacy OS-root install in ~/.opencode
+  --config-dir <path>    self-contained install root
+
+Options:
+  --provider-url <url>   OpenAI-compatible gateway URL; "none" disables it
+  --provider-id <id>     provider ID used in opencode.json
+  --provider-key <key>   provider key; prefer ZOMBIECODER_PROVIDER_KEY
+  --mcp-url <url>        optional MCP server URL
+  --origin-url <url>     optional public origin handshake URL
+  --no-install           skip npm install
+  --no-provider-config   skip opencode.json provider/agent merge
+  --yes, --defaults      non-interactive install
+  --help, -h             show this help and exit
+  --version, -v          show the package version and exit
+`);
+  process.exit(0);
+}
+if (flag("--version") || flag("-v")) {
+  console.log(PKG.version);
+  process.exit(0);
+}
+
 const GLOBAL_DIR = path.join(
   process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
   "opencode",
@@ -108,6 +142,7 @@ const ZOMBIE_DIR =
   SELF_MODE || GLOBAL_MODE ? path.join(TARGET, "zombiecoder") : path.join(TARGET, ".zombiecoder");
 const PLUGINS_DIR = path.join(CONFIG_DIR, "plugins");
 const AGENTS_DIR = path.join(CONFIG_DIR, "agents");
+const RUNTIME_ASSETS_DIR = path.join(CONFIG_DIR, "zombiecoder");
 const ENTRY = path.join(PLUGINS_DIR, "zombiecoder.ts");
 const OPENCODE_JSON = path.join(TARGET, "opencode.json");
 const OPENCODE_JSONC = path.join(TARGET, "opencode.jsonc");
@@ -292,6 +327,46 @@ function listFiles(dir, rel = "") {
   return out;
 }
 
+// A self-contained ~/.opencode install still needs the global loader at
+// ~/.config/opencode. Make that loader point at one copy instead of leaving
+// stale regular files behind. Only the documented default root is linked.
+function linkSelfContainedGlobal() {
+  if (!SELF_MODE) return "skipped (not --config-dir)";
+  const selfRoot = path.resolve(TARGET);
+  const defaultSelfRoot = path.resolve(path.join(os.homedir(), ".opencode"));
+  if (selfRoot !== defaultSelfRoot) return "skipped (not the default ~/.opencode root)";
+  const globalDir = path.resolve(GLOBAL_DIR);
+  if (globalDir === selfRoot) return "not needed (target is the global directory)";
+
+  ensureDir(globalDir);
+  const items = ["opencode.json", "agents", "plugins", "zombiecoder", "node_modules", "package.json"];
+  const linked = [];
+  const backups = path.join(globalDir, ".backups");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  for (const item of items) {
+    const source = path.join(selfRoot, item);
+    if (!fs.existsSync(source)) continue;
+    const link = path.join(globalDir, item);
+    let current = null;
+    try {
+      current = fs.readlinkSync(link);
+    } catch {
+      /* regular file/directory or absent */
+    }
+    if (current && path.resolve(path.dirname(link), current) === source) {
+      linked.push(item);
+      continue;
+    }
+    if (fs.existsSync(link) || current) {
+      ensureDir(backups);
+      fs.renameSync(link, path.join(backups, `${item}-${stamp}`));
+    }
+    fs.symlinkSync(source, link, fs.statSync(source).isDirectory() ? "dir" : "file");
+    linked.push(item);
+  }
+  return `${linked.length} linked: ${linked.sort().join(", ")}`;
+}
+
 // OpenAI-compatible gateways disagree about the envelope. A `data` array of ids is
 // the one thing every implementation returns, so that is what we accept.
 async function probeProviderModels(url, timeoutMs = 5000, apiKey = "") {
@@ -374,6 +449,37 @@ await step("copy plugin source graph", () => {
   }
   const files = listFiles(pluginFolder);
   return `${files.length} files: ${files.sort().join(", ")}`;
+});
+
+// ---- 2b. runtime assets ------------------------------------------------------
+// These are not imported by plugin.ts, but the evidence gate, model mapper,
+// scanner and TLS template must travel with the install instead of staying only
+// in the source checkout.
+await step("copy runtime assets", () => {
+  const assets = [
+    ["model.mjs", "model.mjs", 0o755],
+    ["tools/evidence_gate.py", "tools/evidence_gate.py", 0o755],
+    ["tools/hulia_100c.py", "tools/hulia_100c.py", 0o755],
+    ["tools/origin_profile.py", "tools/origin_profile.py", 0o755],
+    ["tools/render_nginx.py", "tools/render_nginx.py", 0o755],
+    ["tools/tls_verify.py", "tools/tls_verify.py", 0o755],
+    ["tls/nginx.conf.template", "tls/nginx.conf.template", 0o644],
+    ["docs/100c-runtime-template.md", "docs/100c-runtime-template.md", 0o644],
+    ["doc/identity.js", "docs/identity.js", 0o644],
+    ["doc/ethics.js", "docs/ethics.js", 0o644],
+    ["doc/runtime-operations.js", "docs/runtime-operations.js", 0o644],
+    ["doc/index.js", "docs/index.js", 0o644],
+  ];
+  ensureDir(RUNTIME_ASSETS_DIR);
+  for (const [fromRel, toRel, mode] of assets) {
+    const from = path.join(PACKAGE_ROOT, fromRel);
+    if (!fs.existsSync(from)) throw new Error(`missing runtime asset: ${fromRel}`);
+    const to = path.join(RUNTIME_ASSETS_DIR, toRel);
+    ensureDir(path.dirname(to));
+    fs.copyFileSync(from, to);
+    fs.chmodSync(to, mode);
+  }
+  return `${assets.length} files -> ${path.relative(TARGET, RUNTIME_ASSETS_DIR)}/{docs,tools,tls,model.mjs}`;
 });
 
 // ---- 3. declare the dependency ------------------------------------------------
@@ -685,6 +791,9 @@ await step("write entrypoint", () => {
   ].join("\n");
   return writeIfChanged(ENTRY, body) ? "written" : "unchanged";
 });
+
+// ---- 12. one self-contained root for the global loader -----------------------
+await step("link self-contained root to global loader", linkSelfContainedGlobal);
 
 // ---- report ------------------------------------------------------------------
 const failed = report.steps.filter((s) => !s.ok);

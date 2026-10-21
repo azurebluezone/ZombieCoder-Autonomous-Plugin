@@ -8,6 +8,9 @@
 // mutates OpenCode's own state. The single exception is `syllabus_append`, which is
 // append-only by construction.
 
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import { auditFile, memoryDir, ssotFile, syllabusFile } from "./paths.ts";
 import { appendJsonl, readJsonl, readText, redactValue, PLUGIN_VERSION } from "./io.ts";
 import { readArchive, readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
@@ -40,6 +43,26 @@ const obj = (properties: Record<string, unknown>) => ({
   properties,
   additionalProperties: false,
 });
+
+// The installer places the Python verifier at <install-root>/zombiecoder/tools.
+// Source checkouts keep it at <repo-root>/tools. Resolve both shapes instead of
+// hardcoding one machine's home directory.
+const INSTALL_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+const SOURCE_ROOT = path.resolve(import.meta.dirname, "..", "..");
+
+function evidenceGateScript(projectRoot: string): string | null {
+  const candidates = [
+    path.join(INSTALL_ROOT, "zombiecoder", "tools", "evidence_gate.py"),
+    path.join(INSTALL_ROOT, "tools", "evidence_gate.py"),
+    path.join(SOURCE_ROOT, "tools", "evidence_gate.py"),
+    path.join(projectRoot, ".opencode", "zombiecoder", "tools", "evidence_gate.py"),
+    path.join(projectRoot, ".zombiecoder", "tools", "evidence_gate.py"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 // `events` is required by Rpc.Definition, so it is declared empty rather than omitted.
 export function rpcDefinition() {
@@ -237,6 +260,53 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       description: "Scan the project live and return its machine-readable fingerprint. No fingerprint file is created.",
       input: empty,
       run: () => scanProject(deps.projectRoot()),
+    },
+    {
+      name: "evidence_gate",
+      description:
+        "Validate a response or factual claim before calling it PASS. Reuses the installed Python evidence gate; FAIL/SKIP means the claim must be reported as UNVERIFIED.",
+      input: {
+        type: "object" as const,
+        properties: {
+          file: { type: "string", description: "JSON payload path, relative to the working directory or absolute." },
+          kind: {
+            type: "string",
+            enum: ["auto", "models", "chat", "stream", "responses", "anthropic", "tls", "claim"],
+          },
+        },
+        required: ["file"],
+        additionalProperties: false,
+      },
+      run: (input: any) => {
+        const script = evidenceGateScript(deps.projectRoot());
+        if (!script) {
+          throw new Error(
+            "evidence_gate.py is not installed; run the ZombieCoder installer to copy runtime assets",
+          );
+        }
+        const requested = String(input?.file ?? "").trim();
+        if (!requested) throw new Error("file is required");
+        const file = path.isAbsolute(requested)
+          ? requested
+          : path.resolve(deps.projectRoot(), requested);
+        if (!fs.existsSync(file)) throw new Error(`evidence payload not found: ${file}`);
+        const kind = String(input?.kind ?? "auto");
+        const result = spawnSync("python3", [script, "--kind", kind, "--file", file], {
+          encoding: "utf8",
+          timeout: 30000,
+          maxBuffer: 4 * 1024 * 1024,
+        });
+        if (result.error) throw new Error(`evidence_gate failed: ${result.error.message}`);
+        const stdout = String(result.stdout ?? "").trim();
+        if (!stdout) {
+          throw new Error(`evidence_gate returned no output (exit ${result.status ?? "unknown"})`);
+        }
+        try {
+          return JSON.parse(stdout);
+        } catch {
+          throw new Error(`evidence_gate returned non-JSON output: ${stdout.slice(0, 200)}`);
+        }
+      },
     },
     {
       name: "memory_archive",

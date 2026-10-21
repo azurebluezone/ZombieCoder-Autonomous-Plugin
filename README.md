@@ -100,9 +100,14 @@ Runtime template-এর scanner, model mapper, TLS verifier ও evidence gate �
 - `model.mjs` — runtime model probe, deterministic agent mapping ও free fallback
 - `tools/hulia_100c.py` — read-only file/client/network scan
 - `tools/tls_verify.py` — OpenSSL TLS verification ও optional `nginx -t`
-- `tools/evidence_gate.py` — প্রমাণ ছাড়া response `PASS` করে না
+- `tools/evidence_gate.py` — প্রমাণ ছাড়া response `PASS` করে না; `--kind claim`
+  দিয়ে `claim` + verified `evidence[]` ছাড়া factual claim-ও `FAIL` করে
 - `tools/render_nginx.py` + `tls/nginx.conf.template` — reusable Nginx TLS template
 - `doc/*.js` — runtime-readable identity, ethics ও runtime operations
+
+Plugin-এ `evidence_gate` tool wired আছে। এটি installed Python gate-কে call করে;
+`FAIL`/`SKIP` হলে agent-কে দাবি `UNVERIFIED` বলে থামতে হবে। Gate structure ও
+evidence presence যাচাই করে, বাস্তব সত্য নিজে প্রমাণ করে না।
 
 বিস্তারিত: [`docs/100c-runtime-template.md`](docs/100c-runtime-template.md)
 
@@ -183,7 +188,9 @@ npm.cmd run install-pack -- --yes
 ```
 
 Self-contained `.opencode` install ব্যবহার করলে OpenCode-এর global loader-এর
-জন্য pointer প্রয়োজন। Linux:
+জন্য pointer প্রয়োজন। `--config-dir "$HOME/.opencode"` installer এখন এই ছয়টি
+entry নিজেই symlink করে; নিচের manual command শুধু fallback বা repair-এর জন্য।
+Linux:
 
 ```bash
 mkdir -p "$HOME/.config/opencode"
@@ -214,24 +221,32 @@ Installer নিচের কাজগুলো ধাপে ধাপে সম
 
 1. Install root তৈরি করে।
 2. Plugin runtime graph copy করে।
-3. `@opencode/plugin` dependency যোগ করে।
-4. `npm install` চালায় (অথবা `--no-install` দিলে skip করে)।
-5. `zombiecoder/config.json` seed বা update করে।
-6. MCP URL থাকলে probe করে।
-7. Provider-এর `/v1/models` probe করে model plan তৈরি করে।
-8. `opencode.json`-এ provider, models, agents, permissions ও MCP merge করে।
-9. ৯টি agent markdown লেখে এবং পুরনো legacy agent prune করে।
-10. Project-local legacy install-এ `.zombiecoder` seed করে।
+3. `zombiecoder/{docs,tools,tls,model.mjs}` runtime asset copy করে।
+4. `@opencode/plugin` dependency যোগ করে।
+5. `npm install` চালায় (অথবা `--no-install` দিলে skip করে)।
+6. `zombiecoder/config.json` seed বা update করে।
+7. MCP URL থাকলে probe করে।
+8. Provider-এর `/v1/models` probe করে model plan তৈরি করে।
+9. `opencode.json`-এ provider, models, agents, permissions ও MCP merge করে।
+10. ৯টি agent markdown লেখে এবং পুরনো legacy agent prune করে।
+11. Project-local legacy install-এ `.zombiecoder` seed করে।
+12. `--config-dir ~/.opencode` হলে `~/.config/opencode`-এর ছয়টি entry-কে
+    একটি self-contained root-এ symlink করে; পুরনো regular file/directory
+    `~/.config/opencode/.backups/`-এ সরিয়ে রাখে।
 
 Install শেষ হলে কোথায় কী থাকবে:
 
 | Path | বিষয়বস্তু |
 |---|---|
-| `~/.opencode/opencode.json` | Provider, model, agent ও permission config |
+| `~/.opencode/opencode.json` | Provider, model, agent ও permission config (mode `600`) |
 | `~/.opencode/agents/*.md` | ৯টি agent persona |
 | `~/.opencode/plugins/zombiecoder.ts` | Plugin entrypoint |
 | `~/.opencode/zombiecoder/config.json` | Runtime configuration |
 | `~/.opencode/zombiecoder/models.json` | Model plan ও probe result |
+| `~/.opencode/zombiecoder/tools/` | `evidence_gate.py`, TLS/origin/scanner tools |
+| `~/.opencode/zombiecoder/docs/` | Runtime template ও identity/ethics JS |
+| `~/.opencode/zombiecoder/tls/` | Nginx TLS template |
+| `~/.opencode/zombiecoder/model.mjs` | Model probe ও deterministic mapping |
 | `~/.opencode/node_modules/` | Runtime dependencies |
 | `<project>/.zombiecoder/SSOT.md` | Project scan ও agent team |
 | `<project>/.zombiecoder/syllabus.md` | Project footprint ও lessons |

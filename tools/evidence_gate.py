@@ -6,6 +6,7 @@ that make an answer usable. It never treats "HTTP 200" or prose as evidence.
 
 Examples:
     python3 tools/evidence_gate.py --kind auto --file /tmp/chat.json
+    python3 tools/evidence_gate.py --kind claim --file /tmp/claim.json
     cat /tmp/models.json | python3 tools/evidence_gate.py --kind models
     python3 tools/evidence_gate.py --self-test
 
@@ -152,6 +153,27 @@ def validate_chat(payload: Any, report: Report) -> None:
             report.check("usage_is_object", False)
     elif not any(isinstance(choice, dict) and isinstance(choice.get("message"), dict) and choice["message"].get("tool_calls") for choice in choices):
         report.warn("usage is missing; token accounting is not proven")
+
+
+def validate_claim(payload: Any, report: Report) -> None:
+    """A factual claim needs at least one explicit, verified evidence record."""
+    report.check("payload_is_object", isinstance(payload, dict))
+    if not isinstance(payload, dict):
+        return
+    report.check("claim_is_nonempty_string", nonempty_str(payload.get("claim")))
+    evidence = payload.get("evidence")
+    report.check("evidence_is_nonempty_array", isinstance(evidence, list) and len(evidence) > 0)
+    if not isinstance(evidence, list):
+        return
+    for index, item in enumerate(evidence):
+        prefix = f"evidence[{index}]"
+        report.check(f"{prefix}_is_object", isinstance(item, dict))
+        if not isinstance(item, dict):
+            continue
+        report.check(f"{prefix}.source_is_string", nonempty_str(item.get("source")))
+        report.check(f"{prefix}.observation_is_string", nonempty_str(item.get("observation")))
+        report.check(f"{prefix}.verified_is_true", item.get("verified") is True)
+    report.usable = not report.missing
 
 
 def validate_stream(payload: Any, report: Report) -> None:
@@ -329,6 +351,8 @@ def detect(payload: Any) -> str:
         return "responses"
     if "status" in payload and ("verification" in payload or "protocol" in payload):
         return "tls"
+    if nonempty_str(payload.get("claim")) and isinstance(payload.get("evidence"), list):
+        return "claim"
     return "unknown"
 
 
@@ -347,6 +371,8 @@ def validate(kind: str, payload: Any) -> Report:
         validate_anthropic(payload, report)
     elif actual == "tls":
         validate_tls(payload, report)
+    elif actual == "claim":
+        validate_claim(payload, report)
     else:
         report.check("known_payload_kind", False, actual)
     return report
@@ -392,6 +418,8 @@ def self_test() -> int:
         "anthropic_valid": {"type": "message", "role": "assistant", "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}},
         "stream_valid": "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n",
         "responses_valid": {"object": "response", "status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}]},
+        "claim_valid": {"claim": "The file exists.", "evidence": [{"source": "stat config.json", "observation": "mode 600", "verified": True}]},
+        "claim_invalid_no_evidence": {"claim": "The capital of France is Berlin.", "evidence": []},
     }
     expected = {
         "chat_valid": "PASS",
@@ -402,6 +430,8 @@ def self_test() -> int:
         "anthropic_valid": "PASS",
         "stream_valid": "PASS",
         "responses_valid": "PASS",
+        "claim_valid": "PASS",
+        "claim_invalid_no_evidence": "FAIL",
     }
     failures = []
     for name, payload in fixtures.items():
@@ -420,7 +450,7 @@ def self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate an API/TLS payload before calling it valid")
-    parser.add_argument("--kind", default="auto", choices=["auto", "models", "chat", "stream", "responses", "anthropic", "tls"])
+    parser.add_argument("--kind", default="auto", choices=["auto", "models", "chat", "stream", "responses", "anthropic", "tls", "claim"])
     parser.add_argument("--file", default="")
     parser.add_argument("--json-out", default="")
     parser.add_argument("--self-test", action="store_true")

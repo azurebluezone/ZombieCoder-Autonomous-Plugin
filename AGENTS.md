@@ -76,7 +76,7 @@ scope, so their footer can be regenerated without changing the code root. Regene
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  root  08fd997ed76e8180fbf98e882700d2d4c08f19989a51c2bef808cd89ea392fc6  ║
-║  files 52 · bytes 450795 · base c9293b4 · dirty                          ║
+║  files 52 · bytes 450795 · base cd69d81 · clean                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -84,7 +84,7 @@ scope, so their footer can be regenerated without changing the code root. Regene
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-21T03:25:30.587Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-21T03:26:46.730Z
 
 </div>
 <!-- INTEGRITY:END -->

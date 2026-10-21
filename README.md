@@ -207,9 +207,16 @@ node bin/quick-install.mjs
   দ্রুত শুরু; ছোট/ধীর CPU model-এ আটকে থাকবে না।
 - **3** — `cd` করা folder-এর `.opencode`-এ project-local install।
 - **4** — শুধু SSOT/syllabus/agent/config state যাচাই করে; কিছু লেখে না।
+  `--dir <project>` দিয়ে নির্দিষ্ট project বেছে নেওয়া যায়।
 
 Automation-এর জন্য: `node bin/quick-install.mjs --yes` (option 1) অথবা
 `node bin/quick-install.mjs --choice=2`।
+
+Install শেষে কোনো project folder-এ verify করতে:
+
+```bash
+node bin/quick-install.mjs --choice=4 --dir "/path/to/your-project"
+```
 
 ### ৪.১ Linux / macOS
 
@@ -248,6 +255,9 @@ npm.cmd run install-pack -- --config-dir "$env:USERPROFILE\.opencode" --yes
 ```
 
 > PowerShell-এ `npm.ps1` blocked হলে `npm.cmd` ব্যবহার করুন।
+>
+> Windows-এও `node bin\quick-install.mjs` চালালে একই numbered menu আসবে;
+> `1` চাপলে self-contained `%USERPROFILE%\.opencode` install হবে।
 
 ### ৪.৩ Standard global install (বিকল্প)
 
@@ -298,12 +308,14 @@ Installer নিচের কাজগুলো ধাপে ধাপে সম
 
 1. Install root তৈরি করে।
 2. Plugin runtime graph copy করে।
-3. `zombiecoder/{docs,tools,tls,model.mjs}` runtime asset copy করে।
+3. `zombiecoder/{docs,tools,tls,model.mjs,skills-catalog}` runtime asset copy করে।
 4. `@opencode/plugin` dependency যোগ করে।
 5. `npm install` চালায় (অথবা `--no-install` দিলে skip করে)।
 6. `zombiecoder/config.json` seed বা update করে।
 7. MCP URL থাকলে probe করে।
-8. Provider-এর `/v1/models` probe করে model plan তৈরি করে।
+8. Provider-এর `/v1/models` probe করে, তারপর `/v1/chat/completions`-এ chat ও
+   tool-call probe চালায়। Chat/tool fail বা prompt throughput `<20 tok/s` হলে
+   provider config-এ থাকলেও baseline free model নির্বাচন করে।
 9. `opencode.json`-এ provider, models, agents, permissions ও MCP merge করে।
 10. ৯টি agent markdown লেখে এবং পুরনো legacy agent prune করে।
 11. Project-local legacy install-এ `.zombiecoder` seed করে।
@@ -319,15 +331,17 @@ Install শেষ হলে কোথায় কী থাকবে:
 | `~/.opencode/agents/*.md` | ৯টি agent persona |
 | `~/.opencode/plugins/zombiecoder.ts` | Plugin entrypoint |
 | `~/.opencode/zombiecoder/config.json` | Runtime configuration |
-| `~/.opencode/zombiecoder/models.json` | Model plan ও probe result |
+| `~/.opencode/zombiecoder/models.json` | Model plan, chat/tool probe ও slow evidence |
 | `~/.opencode/zombiecoder/tools/` | `evidence_gate.py`, TLS/origin/scanner tools |
 | `~/.opencode/zombiecoder/docs/` | Runtime template ও identity/ethics JS |
+| `~/.opencode/zombiecoder/skills-catalog/` | ১০টি runtime skill-এর offline cache |
 | `~/.opencode/zombiecoder/tls/` | Nginx TLS template |
 | `~/.opencode/zombiecoder/model.mjs` | Model probe ও deterministic mapping |
 | `~/.opencode/node_modules/` | Runtime dependencies |
 | `<project>/.zombiecoder/SSOT.md` | Project scan ও agent team |
 | `<project>/.zombiecoder/syllabus.md` | Project footprint ও lessons |
 | `<project>/.zombiecoder/memory/` | Conversation context ও archive index |
+| `<project>/.zombiecoder/skills/` | Core + project-detected skills (frontmatter markdown) |
 | `<project>/.zombiecoder/.state/` | Setup report ও audit log |
 
 > Project-এ `config.json`, `models.json`, `fingerprint.json`, `footprint.jsonl`

@@ -371,6 +371,28 @@ Local Nginx TLS is configured and tested. The next production step is a real
 domain/origin certificate, either through a Cloudflare-aware DNS challenge or by
 pointing an origin hostname at this machine.
 
+### ৯.১ Install/model verification evidence (2026-10-21)
+
+| Check | Observed | Label |
+|---|---|---|
+| Provider model list | `/v1/models` returns only `Llama-3.2-3B-Instruct-Q4_K_M`; stale `Qwen2.5-Coder-7B-Instruct-Q4_K_M` removed from config | `LIVE_PROBE_PASSED` |
+| Chat | `POST /v1/chat/completions` → HTTP 200, content `pong` | `LIVE_PROBE_PASSED` |
+| Tool call | `get_time` tool call returned | `LIVE_PROBE_PASSED` |
+| Prompt throughput | 11.7 tok/s on the install probe; below the 20 tok/s gate | `LIVE_PROBE_PASSED` |
+| Fallback | Provider saved, not selected; all 9 agents → `opencode/big-pickle` | `CONFIG_VALIDATED` |
+| Baseline catalog | `opencode/big-pickle` active, cost 0/0 | `LIVE_PROBE_PASSED` |
+| Skills cache | 10 files in `~/.opencode/zombiecoder/skills-catalog` | `SOURCE_VERIFIED` |
+| Project skills | 4 core files in `.zombiecoder/skills` | `END_TO_END_TESTED` (function), `NOT_TESTED` (post-restart UI) |
+| Tests | `npm test` 61/61 pass; `npm run typecheck` pass | `SOURCE_VERIFIED` |
+
+Why the fallback: the local 3B model answers short prompts, but OpenCode sends
+multi-thousand-token agent prompts. At ~11 tok/s prompt processing a single turn
+can take minutes. `--allow-slow` keeps the provider if the owner explicitly wants
+that trade-off; the default is a working free baseline.
+
+`NOT_TESTED`: the new `syntax_check` code path through the already-running
+OpenCode process; a restart is required to load the updated plugin module.
+
 ---
 
 ## ১০. গল্প, দায় ও ব্যবহারের সীমা

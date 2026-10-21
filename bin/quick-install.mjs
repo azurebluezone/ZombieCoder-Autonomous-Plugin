@@ -39,12 +39,12 @@ if (argv.includes("--help") || argv.includes("-h")) {
 Usage:
   node bin/quick-install.mjs
   node bin/quick-install.mjs --yes
-  node bin/quick-install.mjs --choice=1|2|3|4|5
+  node bin/quick-install.mjs --choice=1|2|3|4|5 [--dir <project>]
 
 1) Install/update on this computer (recommended, ~/.opencode)
 2) Fast start with the free baseline model
 3) Install into the current folder only
-4) Verify only
+4) Verify only (current folder, or --dir)
 5) Exit
 
 No npm knowledge is needed. Node.js 22.6 or newer is required.`);
@@ -87,27 +87,34 @@ function install(args) {
   ]);
 }
 
-function verify() {
+function verify(target = process.cwd()) {
   run("ZombieCoder verify", process.execPath, [
     "--experimental-strip-types",
     SETUP,
     "--status",
     "--dir",
-    process.cwd(),
+    target,
   ]);
 }
 
-function finish() {
+function finish(projectDir = process.cwd()) {
+  const self = fileURLToPath(import.meta.url);
   console.log("");
   console.log("=".repeat(64));
   console.log("✅ কাজ শেষ।");
   console.log("   OpenCode বন্ধ করে আবার খুলুন — নতুন plugin/config load হবে।");
   console.log("   তারপর যেকোনো project folder খুলে agent বেছে নিন।");
-  console.log("   verify: node bin/quick-install.mjs --choice=4");
+  const verifyTarget = fs.existsSync(path.join(projectDir, ".zombiecoder"))
+    ? projectDir
+    : "<your-project>";
+  console.log(`   verify: node "${self}" --choice=4 --dir "${verifyTarget}"`);
   console.log("=".repeat(64));
 }
 
 const choiceArg = argv.find((arg) => arg.startsWith("--choice="));
+const dirArgIndex = argv.indexOf("--dir");
+const projectDir =
+  dirArgIndex >= 0 && argv[dirArgIndex + 1] ? path.resolve(argv[dirArgIndex + 1]) : process.cwd();
 const auto = argv.includes("--yes");
 let choice = choiceArg ? Number(choiceArg.split("=")[1]) : null;
 
@@ -151,15 +158,15 @@ if (choice === 1) {
     process.exit(1);
   }
   install(["--config-dir", globalRoot]);
-  finish();
+  finish(projectDir);
 } else if (choice === 2) {
   install(["--config-dir", globalRoot, "--fast"]);
-  finish();
+  finish(projectDir);
 } else if (choice === 3) {
-  install(["--dir", process.cwd()]);
-  finish();
+  install(["--dir", projectDir]);
+  finish(projectDir);
 } else if (choice === 4) {
-  verify();
+  verify(projectDir);
 } else {
   console.log("ঠিক আছে, কিছু বদলানো হলো না।");
 }

@@ -167,7 +167,7 @@ export function buildContextPack(
   const text = clip(lines.join("\n"), CONTEXT_LIMITS.total);
   const uiLine = `Context: SSOT ${ssot.exists ? "OK" : "MISSING"} | Syllabus ${
     syllabus.exists ? "OK" : "MISSING"
-  } | Memory ${memory.recent} recent / ${memory.archives} archives / ${memory.sessions} sessions | Pack ${Buffer.byteLength(
+  } | Memory ${memory.recent} recent / ${memory.archives} archives | Pack ${Buffer.byteLength(
     text,
     "utf8",
   )}B`;

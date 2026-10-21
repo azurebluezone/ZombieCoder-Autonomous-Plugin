@@ -168,6 +168,22 @@ test("parseResponseBody extracts OpenAI JSON and SSE assistant text", () => {
 
   const plain = parseResponseBody("not a provider payload", "text/plain");
   assert.equal(plain.supported, false);
+
+  const anthropic = parseResponseBody(
+    'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}',
+    "text/event-stream",
+  );
+  assert.equal(anthropic.protocol, "anthropic-sse");
+  assert.equal(anthropic.supported, false);
+  assert.equal(anthropic.text, "hello");
+
+  const responses = parseResponseBody(
+    'data: {"type":"response.output_text.delta","delta":"hi"}',
+    "text/event-stream",
+  );
+  assert.equal(responses.protocol, "responses-sse");
+  assert.equal(responses.supported, false);
+  assert.equal(responses.text, "hi");
 });
 
 test("applyResponseGate rewrites an unproven JSON answer and passes a proven one", async () => {

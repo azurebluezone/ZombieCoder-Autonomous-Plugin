@@ -24,7 +24,14 @@ export type ResponseVerdict = {
 };
 
 export type ParsedResponse = {
-  protocol: "openai-chat" | "openai-sse" | "anthropic" | "responses" | "unknown";
+  protocol:
+    | "openai-chat"
+    | "openai-sse"
+    | "anthropic"
+    | "anthropic-sse"
+    | "responses"
+    | "responses-sse"
+    | "unknown";
   supported: boolean;
   text: string;
 };
@@ -95,6 +102,7 @@ function collectText(value: unknown, out: string[], depth = 0): void {
     return;
   }
   if (record.tool_calls || record.function_call) return;
+  if (record.delta && typeof record.delta === "object") collectText(record.delta, out, depth + 1);
   for (const key of ["text", "content", "output_text", "message", "delta"]) {
     if (typeof record[key] === "string") out.push(record[key] as string);
   }
@@ -108,20 +116,27 @@ export function parseResponseBody(raw: string, contentType = ""): ParsedResponse
   if (looksSse) {
     const parts: string[] = [];
     let sawData = false;
+    let sawAnthropic = false;
+    let sawResponses = false;
     for (const line of trimmed.split(/\r?\n/)) {
       if (!/^data:\s*/.test(line)) continue;
       const data = line.replace(/^data:\s*/, "").trim();
       if (!data || data === "[DONE]") continue;
       sawData = true;
+      if (/"type"\s*:\s*"(?:message_start|message_delta|message_stop|content_block_start|content_block_delta|content_block_stop)"/.test(data)) {
+        sawAnthropic = true;
+      }
+      if (/"type"\s*:\s*"response\./.test(data)) sawResponses = true;
       try {
         collectText(JSON.parse(data), parts);
       } catch {
         parts.push(data);
       }
     }
+    const protocol = sawAnthropic ? "anthropic-sse" : sawResponses ? "responses-sse" : "openai-sse";
     return {
-      protocol: "openai-sse",
-      supported: sawData,
+      protocol,
+      supported: protocol === "openai-sse" && sawData,
       text: parts.join("").trim(),
     };
   }

@@ -162,6 +162,8 @@ export function renderSsot(fp: Fingerprint): string {
     lines.push(`- **Mode:** ${a.mode} (main agent)`);
     lines.push(`- **Mission:** ${a.mission}`);
     lines.push(`- **Core Persona:** "${a.persona}"`);
+    if (a.voice) lines.push(`- **Voice:** ${a.voice}`);
+    if (a.skillFocus?.length) lines.push(`- **Skill Focus:** ${a.skillFocus.join(", ")}`);
     lines.push(`- **Decision Rule:** ${a.rule}`);
     lines.push("");
   }

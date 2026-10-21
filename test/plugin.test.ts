@@ -177,10 +177,18 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(ssot, /^## .*Model plan/m);
   assert.doesNotMatch(ssot, /^## .*MCP/m);
 
-  assert.equal(fake.tools.length, 7);
+  assert.equal(fake.tools.length, 8);
   assert.ok(fake.tools.every((tool) => tool.output), "every tool must declare an output schema");
   assert.ok(fake.tools.some((tool) => tool.name === "memory_archive"));
   assert.ok(fake.tools.some((tool) => tool.name === "evidence_gate"), "evidence_gate tool missing");
+  const contextTool = fake.tools.find((tool) => tool.name === "context_status");
+  assert.ok(contextTool, "context_status tool missing");
+  const contextOutput = (await contextTool.execute({ agent: "manu" })).output;
+  assert.equal(contextOutput.allowedRoot, root);
+  assert.match(contextOutput.uiLine, /Context: SSOT OK \| Syllabus OK/);
+  assert.ok(contextOutput.packBytes > 0, "context pack must not be empty");
+  assert.ok(fake.hooks.includes("http.response"), "http.response gate hook missing");
+  assert.ok(fake.hooks.includes("context"), "context hook missing");
   const fingerprintTool = fake.tools.find((tool) => tool.name === "project_fingerprint");
   assert.ok(fingerprintTool, "project_fingerprint tool missing");
   const fingerprintOutput = (await fingerprintTool.execute({})).output;
@@ -206,7 +214,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
   const toolStep = report.steps.find((step: any) => step.step === "register-tools");
   assert.equal(toolStep.ok, true);
-  assert.equal(toolStep.detail, "7 registered");
+  assert.equal(toolStep.detail, "8 registered");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
 
   await cleanup();

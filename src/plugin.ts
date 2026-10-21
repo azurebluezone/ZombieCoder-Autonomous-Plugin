@@ -44,6 +44,8 @@ import {
 import { fetchOriginHandshake } from "./zombie/origin.ts";
 import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
+import { buildContextPack } from "./zombie/context.ts";
+import { applyResponseGate } from "./zombie/responseGate.ts";
 import { registerRpc, registerTools, audit } from "./zombie/server.ts";
 
 export const PLUGIN_ID = "zombiecoder";
@@ -63,6 +65,9 @@ export type ZombieConfig = {
   originUrl: string;
   ssotRefreshMs: number;
   modelStrategy: ModelStrategy;
+  // Hard response gate: an unproven claim is replaced by an explicit UNVERIFIED
+  // message before the user sees it. Set false only for diagnosis.
+  responseGate: boolean;
 };
 
 export const DEFAULT_CONFIG: ZombieConfig = {
@@ -75,6 +80,7 @@ export const DEFAULT_CONFIG: ZombieConfig = {
   originUrl: DEFAULT_ORIGIN_URL,
   ssotRefreshMs: DEFAULT_SSOT_REFRESH_MS,
   modelStrategy: "auto",
+  responseGate: true,
 };
 
 // Where the plugin itself lives decides where OpenCode-owned files belong.
@@ -769,22 +775,20 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             : undefined;
 
         const recent = await readRecent(ctx.storage, sessionID);
+        const pack = buildContextPack(projectRoot, agentID, recent);
         if (Array.isArray(event?.system) && typeof event.system.push === "function") {
           event.system.push({
             type: "text",
             text: [
-              `ZombieCoder — agent: ${agentID}${def ? ` (${def.role})` : ""}`,
-              `Working directory: ${projectRoot}`,
-              `SSOT: ${projectRoot}/.zombiecoder/SSOT.md`,
-              `Syllabus: ${projectRoot}/.zombiecoder/syllabus.md`,
+              pack.text,
+              "",
+              "### Agent contract",
               def ? `Decision rule: ${def.rule}` : "Decision rule: unknown agent",
-              recent.length
-                ? `Recent exchanges kept for this session:\n${recent.map((m) => `- ${m.text}`).join("\n")}`
-                : "No kept exchanges yet for this session.",
               'Start every response with "ভাইয়া". Chat in Bengali; code and shortcuts in English.',
               "Read SSOT and syllabus before acting. The footprint lives inside syllabus.md — never create a separate footprint file.",
               "All agents are main agents and may delegate to each other with only the necessary context.",
               "Evidence before confidence. No evidence means no verified answer.",
+              `Before substantive work, call \`context_status\` and show one line: \`${pack.uiLine}\`.`,
             ].join("\n"),
           });
         }
@@ -795,6 +799,11 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           model,
           kept: recent.length,
           messages: Array.isArray(event?.messages) ? event.messages.length : 0,
+          contextPackBytes: pack.bytes,
+          ssotBytes: pack.ssot.bytes,
+          syllabusBytes: pack.syllabus.bytes,
+          memoryArchives: pack.memory.archives,
+          uiLine: pack.uiLine,
         });
       }),
     );
@@ -843,6 +852,46 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       }),
     );
     if (sessionHook) cleanups.push(() => sessionHook.dispose());
+
+    // Hard response gate: only the primary assistant answer is gated. Title,
+    // compaction and generate calls are internal and must stay untouched.
+    if (config.responseGate !== false) {
+      const responseHook = await stepAsync("hook-response-gate", () =>
+        ctx.session!.hook!("http.response", async (event: any) => {
+          if (event?.kind !== "primary") return;
+          if (!(event?.response instanceof Response)) return;
+          if (event.response.status >= 400) return;
+          const modelID = event?.model?.modelID ?? event?.model?.id;
+          const model =
+            event?.model?.providerID && modelID
+              ? `${event.model.providerID}/${modelID}`
+              : undefined;
+          try {
+            const result = await applyResponseGate(event.response, { allowedRoot: root! });
+            audit(root!, String(event?.agent ?? "unknown"), {
+              kind: "response.gate",
+              sessionID: event?.sessionID,
+              model,
+              passed: result.verdict.passed,
+              supported: result.verdict.supported,
+              protocol: result.parsed.protocol,
+              reason: result.verdict.reason,
+              matched: result.verdict.matched,
+              violations: result.verdict.violations,
+            });
+            if (!result.verdict.passed) event.response = result.response;
+          } catch (error: any) {
+            audit(root!, String(event?.agent ?? "unknown"), {
+              kind: "response.gate.error",
+              sessionID: event?.sessionID,
+              model,
+              error: String(error?.message ?? error),
+            });
+          }
+        }),
+      );
+      if (responseHook) cleanups.push(() => responseHook.dispose());
+    }
   } else {
     report.steps.push({ step: "hook-context", ok: false, error: "ctx.session.hook not available" });
   }

@@ -109,6 +109,25 @@ Plugin-এ `evidence_gate` tool wired আছে। এটি installed Python ga
 `FAIL`/`SKIP` হলে agent-কে দাবি `UNVERIFIED` বলে থামতে হবে। Gate structure ও
 evidence presence যাচাই করে, বাস্তব সত্য নিজে প্রমাণ করে না।
 
+### Context pack, UI status ও hard response gate
+
+- **Compact context pack** — প্রতিটি model call-এ provider পুরো repo বা পুরো
+  history পায় না। Plugin `SSOT.md` + `syllabus.md` + recent memory মিলিয়ে একটি
+  bounded pack inject করে (`src/zombie/context.ts`)।
+- **`context_status` tool** — agent substantive কাজ শুরুর আগে এই tool call করে
+  UI-তে এক লাইন দেখায়: `Context: SSOT OK | Syllabus OK | Memory N recent / M archives | Pack NB`।
+  তাই SSOT, syllabus ও memory manage হচ্ছে কিনা user সরাসরি দেখতে পায়।
+- **Hard response gate** — `http.response` hook primary answer যাচাই করে।
+  `path:line`, test output বা exit code ছাড়া completed/successful claim পেলে
+  উত্তর `UNVERIFIED` message দিয়ে replace করা হয় (`src/zombie/responseGate.ts`)।
+  Gate structural; সে factual truth প্রমাণ করে না, আর unsupported provider
+  protocol `NOT_TESTED` হিসেবে audit-এ থাকে। Disable করতে config-এ
+  `"responseGate": false` দিন।
+- **File path permission** — allowed root (working directory) চিহ্নিত। `../` বা
+  বাইরের absolute path evidence হিসেবে ব্যবহৃত হলে দাবি fail করে।
+- **Skill map** — প্রতিটি agent-এর 15–20 first-principles skill:
+  [`docs/skill-map.md`](docs/skill-map.md)।
+
 বিস্তারিত: [`docs/100c-runtime-template.md`](docs/100c-runtime-template.md)
 
 ---
@@ -644,6 +663,8 @@ Installer নতুন agent-এর markdown ও `opencode.json` entry তৈর
 | `zombiecoder.read_syllabus` | Syllabus ও lessons পড়া |
 | `zombiecoder.get_working_directory` | Working directory ও `.zombiecoder` layout দেখা |
 | `zombiecoder.project_fingerprint` | Live project scan |
+| `zombiecoder.context_status` | SSOT/syllabus/memory context pack-এর ছোট status ও `uiLine` |
+| `zombiecoder.evidence_gate` | Claim/response evidence যাচাই; `FAIL`/`SKIP` = `UNVERIFIED` |
 | `zombiecoder.memory_archive` | Archive করা conversation পড়া |
 | `zombiecoder.append_syllabus` | নতুন lesson append করা |
 
@@ -666,6 +687,9 @@ Skill directory lazy; skill থাকলে তবেই register হয়।
 - শেষ ৫টি message context-এ রাখা হয়।
 - পুরনো message archive হয়।
 - Archive index: `.zombiecoder/memory/index.json`।
+- প্রতিটি model call-এ full history নয় — SSOT/syllabus/recent memory-র bounded
+  context pack inject হয়; বিস্তারিত দরকার হলে `context_status` তারপর নির্দিষ্ট
+  file/section পড়ুন।
 
 ### SSOT refresh
 
@@ -688,6 +712,7 @@ Plugin-এর `ctx.rpc` door `POST /api/rpc/zombiecoder/<method>`-এ reachable�
 | `syllabus`, `syllabus_append` | Syllabus পড়া / append-only lesson |
 | `memory`, `memory_index`, `audit` | Recent context, archive index, audit log |
 | `models`, `fingerprint` | Current model plan, live project scan |
+| `context_status` | SSOT/syllabus/memory pack status (`uiLine`) |
 
 ---
 

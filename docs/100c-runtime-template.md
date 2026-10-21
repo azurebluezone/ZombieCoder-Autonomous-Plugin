@@ -163,14 +163,38 @@ enforced in the shared agent contract: call it before a factual claim, and repor
 `UNVERIFIED` when it returns `FAIL` or `SKIP`. The gate checks structure and
 evidence presence, not real-world truth.
 
+### Hard response gate and compact context
+
+Two plugin-side layers sit around the model call:
+
+- **Compact context pack** (`src/zombie/context.ts`) — every primary model call
+  receives a bounded pack built from `SSOT.md`, `syllabus.md` and recent session
+  memory, never the whole repository or the whole history. The `context_status`
+  tool returns the same pack's status plus a `uiLine` so the user can see in the
+  UI that SSOT, syllabus and memory are being managed.
+- **Hard response gate** (`src/zombie/responseGate.ts`) — the `http.response`
+  hook inspects primary answers. A completed or successful claim with no
+  `path:line`, test output or exit code is replaced by an explicit `UNVERIFIED`
+  message in the same provider protocol (OpenAI JSON and SSE are rebuilt). Paths
+  outside the allowed root are rejected. Unsupported protocols are passed through
+  and audited as `NOT_TESTED`; the gate never claims to prove factual truth.
+  Set `"responseGate": false` in the plugin config to disable it for diagnosis.
+
+The 15–20 first-principles skill map per agent lives in `docs/skill-map.md`.
+
 Observed:
 
 - self-test: 10/10 fixtures pass
+- plugin tests: 52/52 pass (`npm test`)
+- typecheck: pass (`npm run typecheck`)
+- compact context pack: bounded at 6200 bytes; SSOT/syllabus/memory excerpts
+- response gate: OpenAI JSON and SSE rewrite tests pass; outside-root paths fail
 - live `/v1/models`: `PASS`
 - live chat (`pong`): `PASS`
 - `401` model payload: `FAIL`
 - malformed model list: `FAIL`
 - evidence-less claim: `FAIL` (`evidence_is_nonempty_array`)
+- live OpenCode `http.response` gate: `NOT_TESTED` until the desktop process restarts
 
 ---
 

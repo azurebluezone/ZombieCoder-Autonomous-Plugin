@@ -17,6 +17,7 @@ import { readArchive, readIndex, readRecent, archiveSummary, type StorageLike } 
 import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { scanProject } from "./scan.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
+import { buildContextPack } from "./context.ts";
 import { ROSTER } from "../roster.ts";
 
 export const RPC_ID = "zombiecoder";
@@ -119,6 +120,17 @@ export function rpcDefinition() {
         input: obj({}),
         output: obj({ fingerprint: { type: "object" } }),
       },
+      context_status: {
+        input: obj({ agent: { type: "string" }, sessionID: { type: "string" } }),
+        output: obj({
+          uiLine: { type: "string" },
+          packBytes: { type: "number" },
+          allowedRoot: { type: "string" },
+          ssot: { type: "object" },
+          syllabus: { type: "object" },
+          memory: { type: "object" },
+        }),
+      },
       agents: {
         input: obj({}),
         output: obj({ agents: { type: "array" } }),
@@ -184,6 +196,20 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
       fingerprint: async () => ({
         fingerprint: scanProject(deps.projectRoot()),
       }),
+
+      context_status: async (input: { agent?: string; sessionID?: string }) => {
+        const sessionID = String(input?.sessionID ?? "").trim();
+        const recent = sessionID ? await readRecent(deps.storage, sessionID) : [];
+        const pack = buildContextPack(deps.projectRoot(), String(input?.agent ?? "unknown"), recent);
+        return {
+          uiLine: pack.uiLine,
+          packBytes: pack.bytes,
+          allowedRoot: pack.allowedRoot,
+          ssot: pack.ssot,
+          syllabus: pack.syllabus,
+          memory: pack.memory,
+        };
+      },
 
       agents: async () =>
         ROSTER.map((a) => ({
@@ -260,6 +286,32 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       description: "Scan the project live and return its machine-readable fingerprint. No fingerprint file is created.",
       input: empty,
       run: () => scanProject(deps.projectRoot()),
+    },
+    {
+      name: "context_status",
+      description:
+        "Show the compact context this agent is working from: SSOT, syllabus and session memory. Call it before substantive work and show the uiLine to the user so context management is visible in the UI.",
+      input: {
+        type: "object" as const,
+        properties: {
+          agent: { type: "string", description: "Agent id, when the caller knows it." },
+          sessionID: { type: "string", description: "Session id, to include recent kept memory." },
+        },
+        additionalProperties: false,
+      },
+      run: async (input: any) => {
+        const sessionID = String(input?.sessionID ?? "").trim();
+        const recent = sessionID ? await readRecent(deps.storage, sessionID) : [];
+        const pack = buildContextPack(deps.projectRoot(), String(input?.agent ?? "unknown"), recent);
+        return {
+          uiLine: pack.uiLine,
+          packBytes: pack.bytes,
+          allowedRoot: pack.allowedRoot,
+          ssot: pack.ssot,
+          syllabus: pack.syllabus,
+          memory: pack.memory,
+        };
+      },
     },
     {
       name: "evidence_gate",
@@ -366,7 +418,7 @@ export function registerTools(tool: ToolLike | undefined, deps: SurfaceDeps): To
         output,
         options: { namespace: TOOL_NAMESPACE.name },
         execute: async (input: any) => ({
-          output: spec.run(input),
+          output: await spec.run(input),
           metadata: { source: "zombiecoder", tool: spec.name },
         }),
       });

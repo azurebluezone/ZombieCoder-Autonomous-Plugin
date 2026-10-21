@@ -465,6 +465,7 @@ await step("copy runtime assets", () => {
     ["tools/tls_verify.py", "tools/tls_verify.py", 0o755],
     ["tls/nginx.conf.template", "tls/nginx.conf.template", 0o644],
     ["docs/100c-runtime-template.md", "docs/100c-runtime-template.md", 0o644],
+    ["docs/skill-map.md", "docs/skill-map.md", 0o644],
     ["doc/identity.js", "docs/identity.js", 0o644],
     ["doc/ethics.js", "docs/ethics.js", 0o644],
     ["doc/runtime-operations.js", "docs/runtime-operations.js", 0o644],
@@ -540,6 +541,7 @@ await step("seed zombiecoder config", () => {
     opencodeApiUrl: existing.opencodeApiUrl ?? DEFAULT_OPENCODE_API_URL,
     ssotRefreshMs: existing.ssotRefreshMs ?? defaults.DEFAULT_SSOT_REFRESH_MS,
     modelStrategy: existing.modelStrategy ?? "auto",
+    responseGate: existing.responseGate ?? true,
     createdAt: existing.createdAt ?? new Date().toISOString(),
   };
   writeIfChanged(ZOMBIE_CONFIG, JSON.stringify(next, null, 2) + "\n");

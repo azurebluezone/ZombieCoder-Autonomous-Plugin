@@ -3,16 +3,22 @@
 // The catalog is deliberately small and explicit. Each entry points at a
 // markdown skill that ships with this repo under docs/skills/. The installer
 // seeds a cache at <install>/zombiecoder/skills-catalog; if a skill is missing
-// later, the runtime can fetch it from the configured git repo. A project gets
-// only the skills that its markers need, copied into .zombiecoder/skills, where
-// the existing registerSkills() door sees them.
+// later, the runtime can fetch it from the configured git repo.
+//
+// Skill files are shared, not per-project:
+//   <install>/zombiecoder/skills/*.md   active skills, registered by skills.ts
+//   <install>/zombiecoder/skills-catalog/*.md   offline catalog
+// Opening a working directory never creates <project>/.zombiecoder/skills.
+// When the user names a skill, the agent calls skill_catalog action=install;
+// that downloads the file (if needed) into the shared store and reloads
+// OpenCode's skill registry for every project under this install.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { safe, skillsDir } from "./paths.ts";
+import { installSkillsDir, safe } from "./paths.ts";
 
 export type SkillSpec = {
   id: string;
@@ -25,7 +31,7 @@ export type SkillSpec = {
 
 export type SkillCatalogOptions = {
   /** Install root that contains zombiecoder/. Defaults to the live install. */
-  cacheRoot?: string;
+  installRoot?: string;
   /** Git repo that hosts docs/skills. */
   repoUrl?: string;
   /** Defaults to every catalog entry. */
@@ -243,17 +249,17 @@ function copySkill(source: string, target: string): boolean {
   }
 }
 
-function sourceDirs(cacheRoot?: string): string[] {
-  const dirs = [catalogDir(cacheRoot)];
+function sourceDirs(installRoot?: string): string[] {
+  const dirs = [catalogDir(installRoot)];
   // Source-tree and test-tree fallback: <repo>/src/zombie -> ../../docs/skills.
   dirs.push(path.resolve(hereDir(), "../../docs/skills"));
   return dirs;
 }
 
-function findLocalSkill(id: string, cacheRoot?: string): string | null {
+function findLocalSkill(id: string, installRoot?: string): string | null {
   const spec = findSkill(id);
   if (!spec) return null;
-  for (const dir of sourceDirs(cacheRoot)) {
+  for (const dir of sourceDirs(installRoot)) {
     const file = path.join(dir, spec.file);
     if (fs.existsSync(file)) return file;
   }
@@ -298,13 +304,13 @@ function cloneRepo(repoUrl: string, target: string, timeoutMs: number): string |
 
 async function downloadMissing(
   ids: string[],
-  cacheRoot: string,
+  installRoot: string,
   repoUrl: string,
   timeoutMs: number,
 ): Promise<{ downloaded: string[]; failed: { id: string; error: string }[] }> {
   const downloaded: string[] = [];
   const failed: { id: string; error: string }[] = [];
-  const missing = ids.filter((id) => !findLocalSkill(id, cacheRoot));
+  const missing = ids.filter((id) => !findLocalSkill(id, installRoot));
   if (missing.length === 0) return { downloaded, failed };
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-skills-"));
@@ -327,7 +333,7 @@ async function downloadMissing(
         failed.push({ id, error: "skill file not found in git repo" });
         continue;
       }
-      const target = path.join(catalogDir(cacheRoot), spec.file);
+      const target = path.join(catalogDir(installRoot), spec.file);
       try {
         ensureDir(path.dirname(target));
         fs.writeFileSync(target, text.endsWith("\n") ? text : text + "\n", "utf8");
@@ -351,14 +357,14 @@ async function downloadMissing(
  * failure: a missing skill is reported and the project keeps working.
  */
 export async function ensureSkillCatalog(options: SkillCatalogOptions = {}): Promise<SkillCatalogResult> {
-  const cacheRoot = options.cacheRoot ?? defaultInstallRoot();
-  const cache = catalogDir(cacheRoot);
+  const installRoot = options.installRoot ?? defaultInstallRoot();
+  const cache = catalogDir(installRoot);
   ensureDir(cache);
 
   const ids = (options.ids?.length ? options.ids : catalogIds()).filter((id) => Boolean(findSkill(id)));
   const installed: string[] = [];
   for (const id of ids) {
-    const local = findLocalSkill(id, cacheRoot);
+    const local = findLocalSkill(id, installRoot);
     if (!local) continue;
     const target = path.join(cache, findSkill(id)!.file);
     if (local !== target) copySkill(local, target);
@@ -371,7 +377,7 @@ export async function ensureSkillCatalog(options: SkillCatalogOptions = {}): Pro
   if (missing.length > 0 && options.download !== false) {
     const result = await downloadMissing(
       missing,
-      cacheRoot,
+      installRoot,
       options.repoUrl?.trim() || DEFAULT_SKILL_REPO,
       Number(process.env.ZOMBIECODER_SKILL_TIMEOUT_MS ?? 60000),
     );
@@ -390,16 +396,21 @@ export async function ensureSkillCatalog(options: SkillCatalogOptions = {}): Pro
   };
 }
 
-/** Copy one cached skill into the project's workstation tier. */
-export async function installProjectSkill(
-  projectRoot: string,
+export type SkillInstallResult = { id: string; file: string; copied: boolean; error?: string };
+
+/**
+ * Copy one cached skill into the shared install-root store. The file is shared
+ * by every working directory under this install; nothing is written into the
+ * project.
+ */
+export async function installSharedSkill(
+  installRoot: string,
   id: string,
   options: SkillCatalogOptions = {},
-): Promise<{ id: string; file: string; copied: boolean; error?: string }> {
+): Promise<SkillInstallResult> {
   const spec = findSkill(id);
   if (!spec) return { id, file: "", copied: false, error: "not in catalog" };
-  const cacheRoot = options.cacheRoot ?? defaultInstallRoot();
-  const ensured = await ensureSkillCatalog({ ...options, cacheRoot, ids: [id] });
+  const ensured = await ensureSkillCatalog({ ...options, installRoot, ids: [id] });
   if (!ensured.installed.includes(id)) {
     return {
       id,
@@ -408,8 +419,8 @@ export async function installProjectSkill(
       error: ensured.failed.find((item) => item.id === id)?.error ?? "skill not available",
     };
   }
-  const source = path.join(catalogDir(cacheRoot), spec.file);
-  const target = path.join(skillsDir(projectRoot), safe(id) + ".md");
+  const source = path.join(catalogDir(installRoot), spec.file);
+  const target = path.join(installSkillsDir(installRoot), safe(id) + ".md");
   if (fs.existsSync(target) && !options.force) {
     return { id, file: target, copied: false };
   }
@@ -417,36 +428,74 @@ export async function installProjectSkill(
   return { id, file: target, copied, error: copied ? undefined : "copy failed" };
 }
 
-/** Install the core + detected skills for a project. */
-export async function autoInstallProjectSkills(
+export type SharedSkillInstallSummary = {
+  installRoot: string;
+  skillsDir: string;
+  ids: string[];
+  results: SkillInstallResult[];
+};
+
+async function installMany(
+  installRoot: string,
+  ids: string[],
+  options: SkillCatalogOptions,
+): Promise<SharedSkillInstallSummary> {
+  const unique = [...new Set(ids.filter((id) => Boolean(findSkill(id))))];
+  await ensureSkillCatalog({ ...options, installRoot, ids: unique });
+  const results: SkillInstallResult[] = [];
+  for (const id of unique) {
+    results.push(await installSharedSkill(installRoot, id, { ...options, installRoot }));
+  }
+  return {
+    installRoot,
+    skillsDir: installSkillsDir(installRoot),
+    ids: unique,
+    results,
+  };
+}
+
+/** Ensure the core skill set exists in the shared install-root store. */
+export async function ensureSharedSkills(
+  installRoot: string,
+  ids: string[] = CORE_IDS,
+  options: SkillCatalogOptions = {},
+): Promise<SharedSkillInstallSummary> {
+  return installMany(installRoot, ids, options);
+}
+
+/**
+ * Detect the project's stack and install those skills into the shared store.
+ * Detection reads the project, but no file is created inside it.
+ */
+export async function autoInstallSkills(
+  installRoot: string,
   projectRoot: string,
   options: SkillCatalogOptions = {},
-): Promise<{ ids: string[]; results: { id: string; file: string; copied: boolean; error?: string }[] }> {
+): Promise<SharedSkillInstallSummary> {
   const ids = options.ids?.length ? options.ids : detectProjectSkills(projectRoot);
-  const cacheRoot = options.cacheRoot ?? defaultInstallRoot();
-  await ensureSkillCatalog({ ...options, cacheRoot, ids });
-  const results = [];
-  for (const id of ids) results.push(await installProjectSkill(projectRoot, id, { ...options, cacheRoot }));
-  return { ids, results };
+  return installMany(installRoot, ids, options);
 }
 
 export type CatalogListing = {
   cacheDir: string;
+  skillsDir: string;
   skills: (SkillSpec & { cached: boolean; installed: boolean; file: string })[];
 };
 
 export function listSkillCatalog(
-  projectRoot: string,
+  installRoot: string,
   options: SkillCatalogOptions = {},
 ): CatalogListing {
-  const cacheRoot = options.cacheRoot ?? defaultInstallRoot();
-  const cache = catalogDir(cacheRoot);
+  const root = options.installRoot ?? installRoot;
+  const cache = catalogDir(root);
+  const shared = installSkillsDir(root);
   return {
     cacheDir: cache,
+    skillsDir: shared,
     skills: SKILL_CATALOG.map((skill) => ({
       ...skill,
       cached: fs.existsSync(path.join(cache, skill.file)),
-      installed: fs.existsSync(path.join(skillsDir(projectRoot), skill.id + ".md")),
+      installed: fs.existsSync(path.join(shared, skill.id + ".md")),
       file: path.join(cache, skill.file),
     })),
   };

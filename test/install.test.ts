@@ -113,6 +113,43 @@ test("installer never writes provider/undefined when /models is empty", async ()
   );
 });
 
+test("installer generates lsp config from resolvable server binaries", async () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-install-lsp-"));
+  const configDir = path.join(parent, ".opencode");
+  const bins = path.join(configDir, "lsp", "node_modules", ".bin");
+  fs.mkdirSync(bins, { recursive: true });
+  for (const name of [
+    "typescript-language-server",
+    "pyright-langserver",
+    "bash-language-server",
+    "vscode-json-language-server",
+  ]) {
+    const file = path.join(bins, process.platform === "win32" ? name + ".cmd" : name);
+    fs.writeFileSync(file, "\n", "utf8");
+    if (process.platform !== "win32") fs.chmodSync(file, 0o755);
+  }
+  const result = await runInstaller(
+    ["--config-dir", configDir, "--yes", "--no-install", "--provider-url", "none"],
+    { HOME: parent, XDG_CONFIG_HOME: path.join(parent, ".config") },
+  );
+  try {
+    assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
+    assert.match(result.stdout, /sync LSP config/);
+    const config = JSON.parse(fs.readFileSync(path.join(configDir, "opencode.json"), "utf8"));
+    for (const id of ["typescript", "python", "bash", "json"]) {
+      assert.ok(config.lsp?.[id], `lsp.${id} missing`);
+    }
+    assert.equal(
+      config.lsp.typescript.command[0],
+      path.join(bins, process.platform === "win32" ? "typescript-language-server.cmd" : "typescript-language-server"),
+    );
+    assert.deepEqual(config.lsp.typescript.command.slice(1), ["--stdio"]);
+    assert.ok(config.lsp.typescript.extensions.includes(".ts"));
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("installer --config-dir creates a complete self-contained config root", async () => {
   await withServer(
     (_req, res) => {

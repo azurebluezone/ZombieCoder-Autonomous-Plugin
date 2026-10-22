@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-10-22T13:41:37.373Z",
+  "generated_at": "2026-10-22T14:40:11.187Z",
   "scope": [
     "src",
     "bin",
@@ -10,19 +10,19 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "a0f9a4ab913dd951fc7fa90bef2052014c053bc70e16c6759c6f54c9900d5849",
-  "file_count": 55,
-  "total_bytes": 540279,
+  "root_sha256": "ed36c0fcc1bf451141c5003ccc49875de7cf1f5d77ff3e26dd711b5eff7c373c",
+  "file_count": 57,
+  "total_bytes": 559103,
   "git": {
-    "commit": "34bef15",
+    "commit": "b0f6a75",
     "branch": "main",
     "dirty": true
   },
   "files": [
     {
       "path": "bin/install.mjs",
-      "bytes": 52080,
-      "sha256": "811722379706c312f26c283856eae9ec25e664642c53b4cdba6de90e68a5288a"
+      "bytes": 55489,
+      "sha256": "d7ead4c0e3fd6e8b93efa42d23ae320ad74ccf81185cae6a248f9824b4a49899"
     },
     {
       "path": "bin/quick-install.mjs",
@@ -101,8 +101,8 @@
     },
     {
       "path": "scripts/lsp-probe.mjs",
-      "bytes": 6203,
-      "sha256": "84584f12a0fb62235314474ecee3efdda1e5e921f88f16dc323c09ee840433ab"
+      "bytes": 6818,
+      "sha256": "59f9dca359bcdc7dac673964beef7fc7d40e6e829e603ce3cd4e8bd8ecf3d2ae"
     },
     {
       "path": "scripts/setup.mjs",
@@ -131,13 +131,13 @@
     },
     {
       "path": "src/plugin.ts",
-      "bytes": 53561,
-      "sha256": "d24ffe0bfd1eecc937b31308dc2cfc6e089f2efd5076e865ac62e66fe67e5aab"
+      "bytes": 53780,
+      "sha256": "567a0078fdfb105fdd0c9722d3aadf45c535177b6fa2907499128249354a19a0"
     },
     {
       "path": "src/roster.ts",
-      "bytes": 29021,
-      "sha256": "e809178e4faa55644ed330131236c184a229d5719806d458debe9e92896fd632"
+      "bytes": 29441,
+      "sha256": "bd05ade8bdbe543a6c37e743a2b15e147391c6ca2b79a742e8ac291fc22aaa5d"
     },
     {
       "path": "src/runtime.ts",
@@ -170,6 +170,11 @@
       "sha256": "4ad4e476d20812de3f93bb8182d535cd3e1ed2764a8e117083daa9511cb25604"
     },
     {
+      "path": "src/zombie/lspConfig.ts",
+      "bytes": 6177,
+      "sha256": "b6bbeea0180e672c83302679d42272db9cec8a8d9c13a440daf218638a519e48"
+    },
+    {
       "path": "src/zombie/mcp.ts",
       "bytes": 5564,
       "sha256": "2222d1adb6307c9767ac7392457acd25cf991c9130559825cc5ab383d6503b8a"
@@ -191,8 +196,8 @@
     },
     {
       "path": "src/zombie/paths.ts",
-      "bytes": 3380,
-      "sha256": "e505c8ac33c49b1028b887d5396157bf75457a342af37290da2caa0b8fc14875"
+      "bytes": 3675,
+      "sha256": "11ac1335d655df0c16b877ffacd5e54fc4493b5a2276d1ad1d775f4bf413fa0a"
     },
     {
       "path": "src/zombie/responseGate.ts",
@@ -206,18 +211,18 @@
     },
     {
       "path": "src/zombie/server.ts",
-      "bytes": 21043,
-      "sha256": "4c0c6b73bd144ce8863af8884aaf748205ab0f2bd2d9edd624d6d764a90618f0"
+      "bytes": 21509,
+      "sha256": "504f322b54e91c7f9fe0c93e60e8c3e7775c2229d6b8d21d3f43253378c61be4"
     },
     {
       "path": "src/zombie/skillCatalog.ts",
-      "bytes": 15410,
-      "sha256": "50033eb25880091f7084116ccbd70d5beb6ba1f2875d35a0e5fb9b62d06b81be"
+      "bytes": 16762,
+      "sha256": "e82f8fd76275bd470d7dbd21332694f56e62c7816a9cb1c81e6229228bc46645"
     },
     {
       "path": "src/zombie/skills.ts",
-      "bytes": 4964,
-      "sha256": "c0a1fafd9aa8b0ad0d2c473ceb63df98afb9630826706da676fa22d37cc155d0"
+      "bytes": 4953,
+      "sha256": "477f79a8eb347db8b2961b281f1af0e178d19b4d40356c171a7c2f84dbb569c0"
     },
     {
       "path": "src/zombie/ssot.ts",
@@ -246,8 +251,8 @@
     },
     {
       "path": "test/install.test.ts",
-      "bytes": 20331,
-      "sha256": "710e391bb6d738cfd22ad40c1f1ae3a9b1912f67201e700563d33ba26f79e06c"
+      "bytes": 21978,
+      "sha256": "6f6e86e751dbed1edc8b9fa84f63575c7014fe2c9dc285976d97a1d651d095d6"
     },
     {
       "path": "test/io.test.ts",
@@ -258,6 +263,11 @@
       "path": "test/lsp.test.ts",
       "bytes": 2276,
       "sha256": "e6808cbdb5df0d78dd645b1b5a0e73ce64029eb2aa0e09516e585e523b673a6a"
+    },
+    {
+      "path": "test/lspConfig.test.ts",
+      "bytes": 3803,
+      "sha256": "90a99cc7f9d3e15099fdf8d371cb71c1c425aafc1d2f8c9877b4d1cb4e57b344"
     },
     {
       "path": "test/mcp.test.ts",
@@ -281,8 +291,8 @@
     },
     {
       "path": "test/plugin.test.ts",
-      "bytes": 32600,
-      "sha256": "09e83d88c19fd52c40553bfaaed7a32a5d34d44d4537721815ac016c3ae9a7a1"
+      "bytes": 32872,
+      "sha256": "20dc40cf99f8e7d8b9ebd3012b7f15ca21913a90a88e3c6822151f346fd852c1"
     },
     {
       "path": "test/repo.test.ts",
@@ -291,8 +301,8 @@
     },
     {
       "path": "test/skillCatalog.test.ts",
-      "bytes": 3493,
-      "sha256": "dbc1788cdd977905130663ad555f147edd3c63cbd65688ceeea0449c117f639c"
+      "bytes": 3653,
+      "sha256": "e4e6504842b230cb48df87e81c8aa04e834431ec7fe6240dcede79e5c6750ce5"
     }
   ]
 }

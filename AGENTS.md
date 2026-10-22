@@ -33,6 +33,9 @@ npm run lsp:probe -- --root "$PWD"
 - Do **not** claim editor diagnostics work until the desktop app is restarted,
   a source file is opened, and a real LSP child process is observed.
 - Do **not** claim V2 has no LSP runtime; that was an earlier false conclusion.
+- The installer now generates the `lsp` block automatically from
+  `<install>/lsp/node_modules/.bin` (`src/zombie/lspConfig.ts` → `syncLspConfig`);
+  `--no-lsp` disables both the toolchain install and config generation.
 - `syntax_check` is a syntax fallback, not an LSP server.
 - Use `npm run typecheck`, `npm test`, `node --check`, `python3 -m py_compile`,
   `bash -n`, and `php -l` for CI/agent claims.
@@ -75,8 +78,8 @@ scope, so their footer can be regenerated without changing the code root. Regene
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  a0f9a4ab913dd951fc7fa90bef2052014c053bc70e16c6759c6f54c9900d5849  ║
-║  files 55 · bytes 540279 · base 34bef15 · dirty                          ║
+║  root  ed36c0fcc1bf451141c5003ccc49875de7cf1f5d77ff3e26dd711b5eff7c373c  ║
+║  files 57 · bytes 559103 · base b0f6a75 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -84,7 +87,7 @@ scope, so their footer can be regenerated without changing the code root. Regene
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-22T13:41:37.373Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-22T14:40:11.187Z
 
 </div>
 <!-- INTEGRITY:END -->

@@ -16,9 +16,10 @@
 //
 // Per working directory the runtime creates only .zombiecoder (SSOT, syllabus,
 // memory, .state). Project config/models/fingerprint/footprint/mcp are not
-// created. On first setup the plugin installs the core + project-detected
-// skills into .zombiecoder/skills; a missing skill can be fetched from git by
-// the `skill_catalog` tool. No .opencode in arbitrary working directories.
+// created. Skills live once at <install>/zombiecoder/skills, shared by every
+// working directory; the installer seeds the offline catalog and the runtime
+// `skill_catalog` tool fetches a named skill on demand. No .opencode and no
+// skills directory is created in arbitrary working directories.
 //
 // NO backups, NO .bak files, NO archives: the owner keeps their own. Writes are atomic
 // (temp + rename) and existing files are only replaced when the content actually differs.
@@ -101,6 +102,10 @@ const { modelRef } = modelsModule;
 const { DEFAULT_SKILL_REPO } = await import(
   pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "skillCatalog.ts")).href
 );
+// LSP detection/config is shared with the tests and the runtime docs.
+const { lspPackageList, resolveLspServers, syncLspConfig } = await import(
+  pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "lspConfig.ts")).href
+);
 
 const argv = process.argv.slice(2);
 function flag(name) {
@@ -137,6 +142,7 @@ Options:
   --mcp-url <url>        optional MCP server URL
   --origin-url <url>     optional public origin handshake URL
   --no-install           skip npm install
+  --no-lsp               skip LSP server install + lsp config generation
   --no-provider-config   skip opencode.json provider/agent merge
   --yes, --defaults      non-interactive install
   --help, -h             show this help and exit
@@ -188,6 +194,7 @@ if (typeof process.getuid === "function" && process.getuid() === 0 && !process.e
 
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
+const DO_LSP = !flag("--no-lsp");
 const FAST_MODE = flag("--fast");
 const ALLOW_SLOW = flag("--allow-slow");
 const PROBE_TOOLS = !flag("--no-probe-tools");
@@ -870,6 +877,57 @@ if (DO_INSTALL) {
   report.steps.push({ step: "npm install", ok: true, detail: "skipped (--no-install)" });
 }
 
+// ---- 4b. LSP toolchain -------------------------------------------------------
+// The config is generated below, but a config with no binary is a dead end.
+// Install the four language servers into <install>/lsp once, then let
+// syncLspConfig() point opencode.json at the resolved absolute paths.
+if (DO_LSP) {
+  await step("install LSP servers", () => {
+    const before = resolveLspServers(CONFIG_DIR);
+    if (before.missing.length === 0) {
+      return `4/4 already resolvable (${Object.keys(before.servers).join(", ")})`;
+    }
+    if (!DO_INSTALL) {
+      return `skipped npm (--no-install); missing ${before.missing.join(", ")}`;
+    }
+    const dir = path.join(CONFIG_DIR, "lsp");
+    ensureDir(dir);
+    const manifest = path.join(dir, "package.json");
+    if (!fs.existsSync(manifest)) {
+      fs.writeFileSync(
+        manifest,
+        JSON.stringify({ name: "zombiecoder-lsp", private: true, type: "module" }, null, 2) + "\n",
+      );
+    }
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    const result = spawnSync(
+      npm,
+      ["install", "--no-audit", "--no-fund", "--save-exact", ...lspPackageList()],
+      {
+        cwd: dir,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf8",
+        shell: process.platform === "win32",
+        timeout: 300000,
+      },
+    );
+    if (result.error) {
+      throw new Error(`LSP npm install failed: ${String(result.error.message ?? result.error)}`);
+    }
+    if (result.status !== 0) {
+      const tail = (result.stderr || "").trim().split("\n").slice(-4).join(" ");
+      throw new Error(`LSP npm exited ${result.status}: ${tail}`);
+    }
+    const after = resolveLspServers(CONFIG_DIR);
+    if (after.missing.length > 0) {
+      throw new Error(`LSP binaries still missing after npm install: ${after.missing.join(", ")}`);
+    }
+    return `installed ${lspPackageList().length} package(s); 4/4 resolvable`;
+  });
+} else {
+  report.steps.push({ step: "install LSP servers", ok: true, detail: "skipped (--no-lsp)" });
+}
+
 // ---- 5. core config ----------------------------------------------------------
 await step("seed zombiecoder config", () => {
   const existing = fs.existsSync(ZOMBIE_CONFIG)
@@ -1183,6 +1241,25 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
   return `${providerSummary}; ${roster.ROSTER.length} agents + ${next.permissions.length} permission rules; ${mcpSummary}`;
 });
 
+// ---- 8b. LSP config ----------------------------------------------------------
+// Generate the `lsp` section from binaries that actually resolve. Existing
+// entries and the owner's other keys are preserved.
+if (DO_LSP) {
+  await step("sync LSP config", () => {
+    const sync = syncLspConfig(OPENCODE_JSON, CONFIG_DIR);
+    if (sync.skipped) return `skipped (${sync.skipped})`;
+    const configured = sync.servers.length;
+    if (configured === 0) {
+      return `0 configured; missing ${sync.missing.join(", ")} (run without --no-lsp)`;
+    }
+    return `${configured}/4 configured${sync.updated ? " (written)" : " (unchanged)"}${
+      sync.missing.length ? `; missing ${sync.missing.join(", ")}` : ""
+    }`;
+  });
+} else {
+  report.steps.push({ step: "sync LSP config", ok: true, detail: "skipped (--no-lsp)" });
+}
+
 // ---- 9. agent markdown --------------------------------------------------------
 await step("write agent markdown", async () => {
   const mod = await import(path.join(PACKAGE_ROOT, "src", "roster.ts"));
@@ -1262,8 +1339,10 @@ if (SELF_MODE || GLOBAL_MODE) {
   console.log("per-directory: each working directory gets only .zombiecoder");
   console.log("  (SSOT, syllabus, memory, .state); no .opencode is created there.");
   console.log("  no per-project config.json/models.json/fingerprint.json/footprint.jsonl/mcp.json.");
-  console.log("skills: core + project-detected skills are installed on first setup;");
-  console.log("        `skill_catalog` can fetch a missing skill from git at runtime.");
+  console.log("skills: shared at <install>/zombiecoder/skills (not per working directory);");
+  console.log("        `skill_catalog` action=install fetches a named skill from git on demand.");
+  console.log("lsp: opencode.json `lsp` generated from installed server binaries;");
+  console.log("     verify with `npm run lsp:probe`.");
 } else {
   console.log(`project: ${TARGET}/.opencode/{agents,plugins} + ${TARGET}/.zombiecoder`);
   console.log("per-directory: nested working directories still get their own .zombiecoder.");

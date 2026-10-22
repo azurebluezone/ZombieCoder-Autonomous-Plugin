@@ -59,7 +59,7 @@ import {
 import { fetchOriginHandshake } from "./zombie/origin.ts";
 import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
-import { autoInstallProjectSkills, DEFAULT_SKILL_REPO } from "./zombie/skillCatalog.ts";
+import { ensureSharedSkills, DEFAULT_SKILL_REPO } from "./zombie/skillCatalog.ts";
 import { buildContextPack } from "./zombie/context.ts";
 import { applyResponseGate } from "./zombie/responseGate.ts";
 import {
@@ -93,7 +93,8 @@ export type ZombieConfig = {
   // Hard response gate: an unproven claim is replaced by an explicit UNVERIFIED
   // message before the user sees it. Set false only for diagnosis.
   responseGate: boolean;
-  // Install the core + project-detected skills into .zombiecoder/skills.
+  // Register the shared skill store at setup. Skills are never copied into the
+  // working directory; a new skill arrives through `skill_catalog`.
   autoSkills: boolean;
   // Git source for the runtime skill catalog.
   skillRepo: string;
@@ -773,23 +774,24 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.outputs.bound = bound;
 
   // ---- §6 skills ------------------------------------------------------------
-  // The installer seeds <install>/zombiecoder/skills-catalog. Setup installs the
-  // core + project-detected skills from that local cache; an explicit
-  // skill_catalog tool call can fetch a missing skill from git at runtime.
+  // Skills live once at <install>/zombiecoder/skills. The installer seeds the
+  // offline catalog there; setup only makes sure the core set exists and then
+  // registers the shared store. A user-named skill is fetched on demand by the
+  // skill_catalog tool, never by writing into this working directory.
   const skillCatalog = await stepAsync("prepare-skills", async () => {
     if (!config.autoSkills) return "skipped (autoSkills=false)";
-    const result = await autoInstallProjectSkills(root!, {
+    const result = await ensureSharedSkills(layout.dir, undefined, {
       repoUrl: config.skillRepo,
       download: false,
     });
     const copied = result.results.filter((item) => item.copied).length;
     const failed = result.results.filter((item) => item.error).length;
-    return `${copied} new, ${result.ids.length} selected${failed ? `, ${failed} unavailable` : ""}`;
+    return `${copied} new, ${result.ids.length} shared${failed ? `, ${failed} unavailable` : ""} (${result.skillsDir})`;
   });
   report.outputs.skillCatalog = skillCatalog;
 
   const skills = step("register-skills", () => {
-    const registration = registerSkills(ctx.skill, root!);
+    const registration = registerSkills(ctx.skill, layout.dir);
     cleanups.push(registration.release);
     report.outputs.skills = "pending (applies after setup returns)";
     watchTransform(
@@ -816,6 +818,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   // ---- §6/§7 control surface ------------------------------------------------
   const deps = {
     projectRoot: () => root!,
+    installRoot: () => layout.dir,
     storage: ctx.storage,
     refreshSsot: writeSsotNow,
     modelPlan: () => plan,

@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   detectProjectSkills,
   ensureSkillCatalog,
-  installProjectSkill,
+  installSharedSkill,
   listSkillCatalog,
 } from "../src/zombie/skillCatalog.ts";
 
@@ -46,7 +46,7 @@ test("detectProjectSkills picks core plus the project's stack", () => {
   }
 });
 
-test("runtime downloads a missing skill from a git repo and installs it per project", async (t) => {
+test("runtime downloads a missing skill from a git repo and installs it once at the install root", async (t) => {
   const git = spawnSync("git", ["--version"], { encoding: "utf8" });
   if (git.status !== 0) {
     t.skip("git is not installed");
@@ -76,20 +76,24 @@ test("runtime downloads a missing skill from a git repo and installs it per proj
 
     const project = path.join(root, "project");
     fs.mkdirSync(project, { recursive: true });
-    const cacheRoot = path.join(root, "install");
+    const installRoot = path.join(root, "install");
     const catalog = await ensureSkillCatalog({
-      cacheRoot,
+      installRoot,
       repoUrl: repo,
       ids: ["node"],
     });
     assert.deepEqual(catalog.installed, ["node"]);
-    assert.ok(fs.existsSync(path.join(cacheRoot, "zombiecoder", "skills-catalog", "node.md")));
+    assert.ok(fs.existsSync(path.join(installRoot, "zombiecoder", "skills-catalog", "node.md")));
 
-    const installed = await installProjectSkill(project, "node", { cacheRoot, repoUrl: repo });
+    const installed = await installSharedSkill(installRoot, "node", { repoUrl: repo });
     assert.equal(installed.copied, true);
-    assert.ok(fs.existsSync(path.join(project, ".zombiecoder", "skills", "node.md")));
+    assert.ok(fs.existsSync(path.join(installRoot, "zombiecoder", "skills", "node.md")));
+    assert.ok(
+      !fs.existsSync(path.join(project, ".zombiecoder", "skills")),
+      "opening a project must not create a per-project skill tree",
+    );
 
-    const listing = listSkillCatalog(project, { cacheRoot });
+    const listing = listSkillCatalog(installRoot);
     const node = listing.skills.find((skill) => skill.id === "node");
     assert.equal(node?.installed, true);
     assert.equal(node?.cached, true);

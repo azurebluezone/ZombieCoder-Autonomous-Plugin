@@ -403,7 +403,8 @@ pointing an origin hostname at this machine.
 | Fallback | Provider saved, not selected; all 9 agents → `opencode/big-pickle` | `CONFIG_VALIDATED` |
 | Baseline catalog | `opencode/big-pickle` active, cost 0/0 | `LIVE_PROBE_PASSED` |
 | Skills cache | 10 files in `~/.opencode/zombiecoder/skills-catalog` | `SOURCE_VERIFIED` |
-| Project skills | 4 core files in `.zombiecoder/skills` | `END_TO_END_TESTED` (function), `NOT_TESTED` (post-restart UI) |
+| Shared skills | 4 core files in `~/.opencode/zombiecoder/skills` (one copy for every project) | `END_TO_END_TESTED` (function), `NOT_TESTED` (post-restart UI) |
+| LSP config | Installer generates `opencode.json.lsp` from `<install>/lsp` binaries (`syncLspConfig`) | `SOURCE_VERIFIED`; live probe separately |
 | Tests | `npm test` 61/61 pass; `npm run typecheck` pass | `SOURCE_VERIFIED` |
 
 Why the fallback: the local 3B model answers short prompts, but OpenCode sends
@@ -476,8 +477,8 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  a0f9a4ab913dd951fc7fa90bef2052014c053bc70e16c6759c6f54c9900d5849  ║
-║  files 55 · bytes 540279 · base 34bef15 · dirty                          ║
+║  root  ed36c0fcc1bf451141c5003ccc49875de7cf1f5d77ff3e26dd711b5eff7c373c  ║
+║  files 57 · bytes 559103 · base b0f6a75 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -485,7 +486,7 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-22T13:41:37.373Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-22T14:40:11.187Z
 
 </div>
 <!-- INTEGRITY:END -->

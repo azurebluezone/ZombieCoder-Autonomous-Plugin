@@ -1,19 +1,22 @@
-// Spec §6 — two-tier skills.
+// Spec §6 — shared skills.
 //
-//   workstation tier : <project>/.zombiecoder/skills/*.md   (ours, travels with the project)
-//   project tier     : <project>/.opencode/skills/*.md      (OpenCode's own folder)
+//   shared tier : <install>/zombiecoder/skills/*.md   (one copy for every project)
 //
-// Both are plain markdown with a tiny frontmatter block. We do not invent a new
-// skill format — OpenCode's Skill.Info has {id, name, description, path, content}
-// and we fill exactly those fields through its own ctx.skill door.
+// Skills are owned by the install root, so opening a working directory never
+// creates a second skill tree. OpenCode still discovers its own
+// <project>/.opencode/skills natively; we do not register those again.
+//
+// Plain markdown with a tiny frontmatter block. We do not invent a new skill
+// format — OpenCode's Skill.Info has {id, name, description, path, content} and
+// we fill exactly those fields through its own ctx.skill door.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readText } from "./io.ts";
-import { opencodeSkillsDir, safe, skillsDir } from "./paths.ts";
+import { installSkillsDir, safe } from "./paths.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
 
-export type SkillTier = "workstation" | "project";
+export type SkillTier = "workstation";
 
 export type DiscoveredSkill = {
   id: string;
@@ -71,11 +74,8 @@ function discoverTier(dir: string, tier: SkillTier): DiscoveredSkill[] {
   return out;
 }
 
-export function discoverSkills(projectRoot: string): DiscoveredSkill[] {
-  return [
-    ...discoverTier(skillsDir(projectRoot), "workstation"),
-    ...discoverTier(opencodeSkillsDir(projectRoot), "project"),
-  ];
+export function discoverSkills(installRoot: string): DiscoveredSkill[] {
+  return discoverTier(installSkillsDir(installRoot), "workstation");
 }
 
 export type SkillRegistration = {
@@ -86,11 +86,11 @@ export type SkillRegistration = {
   release: () => Promise<void>;
 };
 
-export function registerSkills(skill: SkillLike | undefined, projectRoot: string): SkillRegistration {
-  // Project-tier skills live in .opencode/skills, which OpenCode discovers by
-  // itself. Register only the workstation tier, or every project skill appears
-  // twice (once native, once namespaced) in ctx.skill.list().
-  const discovered = discoverSkills(projectRoot).filter((s) => s.tier === "workstation");
+export function registerSkills(skill: SkillLike | undefined, installRoot: string): SkillRegistration {
+  // Project-tier skills in <project>/.opencode/skills are discovered by OpenCode
+  // itself. Register only the shared install-root store, or every project skill
+  // appears twice (once native, once namespaced) in ctx.skill.list().
+  const discovered = discoverSkills(installRoot);
   if (!skill || typeof skill.transform !== "function") {
     return {
       registered: [],

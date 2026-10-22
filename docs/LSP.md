@@ -2,10 +2,13 @@
 
 > **সংক্ষেপে:** OpenCode **V2.1.1-এ LSP runtime আছে**। `No LSP servers configured`
 > মানে upstream-এ LSP নেই — তা নয়; এর মানে `lsp` config বা language-server
-> binary নেই। এই setup-এ `typescript`, `python`, `bash`, `json` — ৪টি server
-> configure করা, আর direct `initialize` probe **4/4 pass** (`npm run lsp:probe`,
-> exit `0`)। Editor UI-তে diagnostics এখনো `NOT_TESTED`; desktop app restart করে
-> একটা source file খুললে সেটা যাচাই করতে হবে।
+> binary নেই। এখন **installer নিজেই** `<install>/lsp`-এ server toolchain নামায়
+> এবং resolve হওয়া absolute path দিয়ে `opencode.json`-এর `lsp` block লেখে
+> (`src/zombie/lspConfig.ts` → `syncLspConfig`); `--no-lsp` দিলে দুটোই skip হয়।
+> এই setup-এ `typescript`, `python`, `bash`, `json` — ৪টি server configured,
+> আর direct `initialize` probe **4/4 pass** (`npm run lsp:probe`, exit `0`)।
+> Editor UI-তে diagnostics এখনো `NOT_TESTED`; desktop app restart করে একটা
+> source file খুললে সেটা যাচাই করতে হবে।
 
 ---
 
@@ -57,7 +60,9 @@ grep -aob 'textDocument/hover' "$ASAR"
 
 ---
 
-## ৩. Install (এই machine-এ করা হয়েছে)
+## ৩. Install (installer এখন স্বয়ংক্রিয়ভাবে করে)
+
+Manual reproduction (installer `--no-lsp` ছাড়া এটাই চালায়):
 
 ```bash
 LSP="$HOME/.opencode/lsp"
@@ -89,8 +94,8 @@ Binary paths:
 
 ## ৪. Config
 
-`~/.opencode/opencode.json`-এ `lsp` object যোগ করা হয়েছে। এই machine-এর actual
-paths:
+Installer `syncLspConfig` দিয়ে `opencode.json`-এর `lsp` object নিজে লেখে; user-এর
+আগের entry বা অন্য key মুছে না। এই machine-এর actual paths:
 
 ```jsonc
 {
@@ -261,8 +266,8 @@ Endpoint Cloudflare-এর পিছনে:
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  a0f9a4ab913dd951fc7fa90bef2052014c053bc70e16c6759c6f54c9900d5849  ║
-║  files 55 · bytes 540279 · base 34bef15 · dirty                          ║
+║  root  ed36c0fcc1bf451141c5003ccc49875de7cf1f5d77ff3e26dd711b5eff7c373c  ║
+║  files 57 · bytes 559103 · base b0f6a75 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -270,7 +275,7 @@ Endpoint Cloudflare-এর পিছনে:
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-22T13:41:37.373Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-22T14:40:11.187Z
 
 </div>
 <!-- INTEGRITY:END -->

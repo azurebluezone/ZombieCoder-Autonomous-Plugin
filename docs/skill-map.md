@@ -31,11 +31,18 @@ files on demand. A new domain gets the same treatment before it enters a prompt.
 
 ## Runtime skill catalog (`docs/skills`)
 
-The 10 files below are installed per project by `src/zombie/skillCatalog.ts`.
-Core skills go to every project; stack skills are copied only when a marker is
-present. The installer seeds the cache at
-`<install>/zombiecoder/skills-catalog`; a missing skill can be fetched from git
-by the `skill_catalog` tool.
+The 10 files below are shared from the install root by
+`src/zombie/skillCatalog.ts`, not copied into every project:
+
+```text
+<install>/zombiecoder/skills/*.md          active, registered for every project
+<install>/zombiecoder/skills-catalog/*.md  offline catalog seeded by the installer
+```
+
+The installer seeds the catalog; setup keeps the core skills in the shared store.
+When the user names a skill or a domain, the agent calls `skill_catalog`
+`action=install`; a missing file is fetched from the configured git repo and then
+registered. A working directory never gets its own `skills/` tree.
 
 | Skill id | Marker / use | Primary agents |
 |---|---|---|

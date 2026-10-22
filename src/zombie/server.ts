@@ -20,8 +20,8 @@ import { keepTransform, type TransformDoor } from "./transform.ts";
 import { buildContextPack } from "./context.ts";
 import { syntaxCheck } from "./lsp.ts";
 import {
-  autoInstallProjectSkills,
-  installProjectSkill,
+  autoInstallSkills,
+  installSharedSkill,
   listSkillCatalog,
 } from "./skillCatalog.ts";
 import { ROSTER } from "../roster.ts";
@@ -40,6 +40,8 @@ export type ToolLike = {
 
 export type SurfaceDeps = {
   projectRoot: () => string;
+  /** OpenCode config directory: the shared skill store lives under it. */
+  installRoot: () => string;
   storage: StorageLike;
   refreshSsot: () => { sha256: string; file: string; bytes: number };
   modelPlan: () => unknown;
@@ -451,7 +453,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "skill_catalog",
       description:
-        "List or install runtime skills. The catalog covers Laravel, Node, Next, Python, FastAPI, cPanel, resource optimization, server operations, first-principles and evidence-before-confidence. Use action=auto to install the core + project-detected skills into .zombiecoder/skills.",
+        "List or install shared runtime skills. The catalog covers Laravel, Node, Next, Python, FastAPI, cPanel, resource optimization, server operations, first-principles and evidence-before-confidence. Skills live once at <install>/zombiecoder/skills, shared by every working directory. When the user names a skill or domain, call action=install with its id: the file is fetched from the gate/git catalog if missing, copied into the shared store, and the skill registry reloads. action=auto detects the current project's stack and installs those ids into the same shared store.",
       input: {
         type: "object" as const,
         properties: {
@@ -463,18 +465,19 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       },
       run: async (input: any) => {
         const action = String(input?.action ?? "list");
-        if (action === "list") return listSkillCatalog(deps.projectRoot());
+        const installRoot = deps.installRoot();
+        if (action === "list") return listSkillCatalog(installRoot);
         if (action === "auto") {
           const ids = Array.isArray(input?.ids)
             ? input.ids.map((value: any) => String(value)).filter(Boolean)
             : undefined;
-          const result = await autoInstallProjectSkills(deps.projectRoot(), { ids });
+          const result = await autoInstallSkills(installRoot, deps.projectRoot(), { ids, download: true });
           await deps.reloadSkills?.();
           return result;
         }
         const id = String(input?.id ?? "").trim();
         if (!id) throw new Error("id is required for action=install");
-        const result = await installProjectSkill(deps.projectRoot(), id);
+        const result = await installSharedSkill(installRoot, id, { download: true });
         await deps.reloadSkills?.();
         return result;
       },

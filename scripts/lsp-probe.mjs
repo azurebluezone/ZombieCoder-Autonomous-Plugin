@@ -6,15 +6,16 @@
 // every active server answered initialize; 1 means at least one failed.
 
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const USAGE = `Usage: node scripts/lsp-probe.mjs [options]
 
 Options:
-  --config <path>   OpenCode config (default: ~/.opencode/opencode.json)
+  --config <path>   OpenCode config (default: $OPENCODE_CONFIG, then
+                    ~/.config/opencode, ~/.opencode)
   --root <path>     Workspace root URI (default: current directory)
   --timeout <ms>    Per-server initialize timeout (default: 15000)
   -h, --help        Show this help
@@ -31,7 +32,21 @@ function option(name, fallback) {
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : fallback;
 }
 
-const configPath = resolve(option("--config", resolve(homedir(), ".opencode/opencode.json")));
+function defaultConfig() {
+  const fromEnv = process.env.OPENCODE_CONFIG || process.env.OPENCODE_CONFIG_DIR;
+  if (fromEnv && fromEnv.trim()) {
+    const value = resolve(fromEnv.trim());
+    return value.endsWith(".json") ? value : join(value, "opencode.json");
+  }
+  const candidates = [
+    join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "opencode", "opencode.json"),
+    join(homedir(), ".config", "opencode", "opencode.json"),
+    join(homedir(), ".opencode", "opencode.json"),
+  ];
+  return candidates.find((file) => existsSync(file)) ?? candidates[0];
+}
+
+const configPath = resolve(option("--config", defaultConfig()));
 const root = resolve(option("--root", process.cwd()));
 const timeoutMs = Number(option("--timeout", "15000"));
 

@@ -347,15 +347,20 @@ Installer নিচের কাজগুলো ধাপে ধাপে সম
 3. `zombiecoder/{docs,tools,tls,model.mjs,skills-catalog}` runtime asset copy করে।
 4. `@opencode/plugin` dependency যোগ করে।
 5. `npm install` চালায় (অথবা `--no-install` দিলে skip করে)।
-6. `zombiecoder/config.json` seed বা update করে।
-7. MCP URL থাকলে probe করে।
-8. Provider-এর `/v1/models` probe করে, তারপর `/v1/chat/completions`-এ chat ও
+6. `<install>/lsp`-এ LSP server toolchain install করে (`typescript-language-server`,
+   `pyright`, `bash-language-server`, `vscode-langservers-extracted`); `--no-lsp`
+   দিলে skip করে।
+7. `zombiecoder/config.json` seed বা update করে।
+8. MCP URL থাকলে probe করে।
+9. Provider-এর `/v1/models` probe করে, তারপর `/v1/chat/completions`-এ chat ও
    tool-call probe চালায়। Chat/tool fail বা prompt throughput `<20 tok/s` হলে
    provider config-এ থাকলেও baseline free model নির্বাচন করে।
-9. `opencode.json`-এ provider, models, agents, permissions ও MCP merge করে।
-10. ৯টি agent markdown লেখে এবং পুরনো legacy agent prune করে।
-11. Project-local legacy install-এ `.zombiecoder` seed করে।
-12. `--config-dir ~/.opencode` হলে `~/.config/opencode`-এর ছয়টি entry-কে
+10. `opencode.json`-এ provider, models, agents, permissions ও MCP merge করে।
+11. Resolve হওয়া LSP binary থেকে `opencode.json`-এর `lsp` block স্বয়ংক্রিয়ভাবে
+    লেখে (`syncLspConfig`); আগের entry অক্ষত থাকে।
+12. ৯টি agent markdown লেখে এবং পুরনো legacy agent prune করে।
+13. Project-local legacy install-এ `.zombiecoder` seed করে।
+14. `--config-dir ~/.opencode` হলে `~/.config/opencode`-এর ছয়টি entry-কে
     একটি self-contained root-এ link করে (symlink; Windows-এ junction, না পারলে
     copy); পুরনো regular file/directory `~/.config/opencode/.backups/`-এ সরিয়ে রাখে।
 
@@ -363,25 +368,26 @@ Install শেষ হলে কোথায় কী থাকবে:
 
 | Path | বিষয়বস্তু |
 |---|---|
-| `~/.opencode/opencode.json` | Provider, model, agent ও permission config (mode `600`) |
+| `~/.opencode/opencode.json` | Provider, model, agent, permission ও LSP config (mode `600`) |
 | `~/.opencode/agents/*.md` | ৯টি agent persona |
 | `~/.opencode/plugins/zombiecoder.ts` | Plugin entrypoint |
+| `~/.opencode/lsp/` | ৪টি language-server binary |
 | `~/.opencode/zombiecoder/config.json` | Runtime configuration |
 | `~/.opencode/zombiecoder/models.json` | Model plan, chat/tool probe ও slow evidence |
 | `~/.opencode/zombiecoder/tools/` | `evidence_gate.py`, TLS/origin/scanner tools |
 | `~/.opencode/zombiecoder/docs/` | Runtime template ও identity/ethics JS |
 | `~/.opencode/zombiecoder/skills-catalog/` | ১০টি runtime skill-এর offline cache |
+| `~/.opencode/zombiecoder/skills/` | Shared skill store — সব working directory একই copy ব্যবহার করে |
 | `~/.opencode/zombiecoder/tls/` | Nginx TLS template |
 | `~/.opencode/zombiecoder/model.mjs` | Model probe ও deterministic mapping |
 | `~/.opencode/node_modules/` | Runtime dependencies |
 | `<project>/.zombiecoder/SSOT.md` | Project scan ও agent team |
 | `<project>/.zombiecoder/syllabus.md` | Project footprint ও lessons |
 | `<project>/.zombiecoder/memory/` | Conversation context ও archive index |
-| `<project>/.zombiecoder/skills/` | Core + project-detected skills (frontmatter markdown) |
 | `<project>/.zombiecoder/.state/` | Setup report ও audit log |
 
-> Project-এ `config.json`, `models.json`, `fingerprint.json`, `footprint.jsonl`
-> বা `mcp.json` তৈরি হয় না।
+> Project-এ `skills/`, `config.json`, `models.json`, `fingerprint.json`,
+> `footprint.jsonl` বা `mcp.json` তৈরি হয় না।
 
 ---
 
@@ -821,7 +827,7 @@ Persona inject না হলে model generic উত্তর দেবে — �
 | `zombiecoder.memory_archive` | Archive করা conversation পড়া |
 | `zombiecoder.append_syllabus` | নতুন lesson append করা |
 | `zombiecoder.syntax_check` | Syntax fallback (LSP নয়): JSON, JS, TS, Python, Bash, PHP |
-| `zombiecoder.skill_catalog` | Runtime skill list/install/auto; git থেকে missing skill নামায় |
+| `zombiecoder.skill_catalog` | Shared skill list/install/auto; user-requested skill gate/git থেকে নামিয়ে install root-এ রাখে |
 
 Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
 
@@ -832,20 +838,25 @@ Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
 ### Skills
 
 ```text
-<project>/.zombiecoder/skills/*.md
+<install>/zombiecoder/skills/*.md        # active, shared by every working directory
+<install>/zombiecoder/skills-catalog/*.md # offline source cache
 ```
 
-Project setup-এ core + project-detected skill install হয়:
+Skill আর প্রতিটি project-এ copy হয় না। Install root-এ একবার থাকে, তাই ১০টি
+working directory খুললেও ১০টি skill tree তৈরি হয় না। Installer catalog seed করে
+এবং core skill (`first-principles`, `evidence-before-confidence`,
+`resource-optimization`, `server`) shared store-এ রাখে।
 
-- core: `first-principles`, `evidence-before-confidence`,
-  `resource-optimization`, `server`
-- detected: `laravel`, `node`, `next`, `python`, `fastapi`, `cpanel`
+User কোনো skill/ডোমেইন বললে agent সঙ্গে সঙ্গে
+`skill_catalog` `action=install` (id সহ) call করে। Tool ক্যাটালগে থাকলে local
+copy ব্যবহার করে, না থাকলে configured repo থেকে clone/raw fetch করে
+`skills-catalog`-এ নামায়, তারপর `skills/`-এ install করে এবং OpenCode-এর skill
+registry reload করে — অর্থাৎ পরের request থেকেই সেটি পাওয়া যায়। Project-এর
+ভিতরে কোনো skill file লেখা হয় না।
 
-Skill source repo-তে `docs/skills/`; installer এগুলো
-`<install>/zombiecoder/skills-catalog`-এ seed করে। কোনো skill cache-এ না থাকলে
-`skill_catalog` tool git clone (fallback: raw GitHub) দিয়ে নামায়। Skill একটি
-ছোট markdown + frontmatter; `registerSkills` সেটি OpenCode-এর skill door-এ
-register করে।
+Skill একটি ছোট markdown + frontmatter; `registerSkills` install root-এর shared
+store-কে OpenCode-এর skill door-এ register করে। `action=auto` current project-এর
+marker দেখে দরকারি id বেছে নেয়, কিন্তু install target একই shared store।
 
 ### Memory
 
@@ -906,6 +917,7 @@ Plugin-এর `ctx.rpc` door `POST /api/rpc/zombiecoder/<method>`-এ reachable�
 | `--origin-url <url>` | URL-only origin handshake; `none` দিলে বন্ধ |
 | `--yes` | কোনো prompt ছাড়া install |
 | `--no-install` | `npm install` skip |
+| `--no-lsp` | LSP server install ও `lsp` config generation skip |
 | `--no-provider-config` | `opencode.json` provider merge skip |
 
 Environment variables:
@@ -1001,18 +1013,22 @@ Backup-এ API key থাকতে পারে; permission restrict করু�
 | পুরনো session ভিন্ন model ব্যবহার করছে | নতুন session নিন অথবা model picker থেকে বদলান |
 | `No LSP servers configured` | `~/.opencode/opencode.json`-এ `lsp` server নেই বা binary missing; install + config + restart; [`docs/LSP.md`](docs/LSP.md) দেখুন। |
 
-### ১৪.১ LSP — configure করা আছে, editor restart বাকি
+### ১৪.১ LSP — installer auto-generate করে
 
 OpenCode V2.1.1-এ LSP runtime আছে। `No LSP servers configured`-এর মানে `lsp`
-config বা language-server binary নেই। এই setup-এ `typescript`, `python`, `bash`,
-`json` — ৪টি server configured; `npm run lsp:probe` exit `0` (4/4 initialize
-pass)। Config `config.updated` event-এ reload হয়েছে, কিন্তু desktop editor-এ
-LSP child process এখনো দেখা যায়নি। তাই editor diagnostics `NOT_TESTED`:
+config বা language-server binary নেই। এখন installer নিজেই `<install>/lsp`-এ ৪টি
+server install করে এবং resolve হওয়া binary path দিয়ে `opencode.json`-এর `lsp`
+block লেখে (`syncLspConfig`; পুরনো entry অক্ষত থাকে)। এই machine-এ
+`typescript`, `python`, `bash`, `json` — ৪টি server configured এবং
+`npm run lsp:probe` exit `0` (4/4 initialize pass)। Config `config.updated`
+event-এ reload হয়েছে, কিন্তু desktop editor-এ LSP child process এখনো দেখা যায়নি।
+তাই editor diagnostics `NOT_TESTED`:
 OpenCode পুনরায় চালু করে একটি `.ts` file খুলুন, তারপর যাচাই করুন।
 
-- Config: `~/.opencode/opencode.json` → `lsp`
-- Binaries: `~/.opencode/lsp/node_modules/.bin/`
+- Config: `<install>/opencode.json` → `lsp` (installer-generated)
+- Binaries: `<install>/lsp/node_modules/.bin/`
 - Probe: `npm run lsp:probe -- --root "$PWD"`
+- `--no-lsp` দিলে toolchain ও config generation skip হয়।
 - LSP না মিললে [`docs/LSP.md`](docs/LSP.md) §5 দেখুন।
 - `syntax_check` শুধু fallback; LSP নয়। CI-তে `npm run typecheck`, `npm test` চালান।
 
@@ -1179,8 +1195,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  a0f9a4ab913dd951fc7fa90bef2052014c053bc70e16c6759c6f54c9900d5849  ║
-║  files 55 · bytes 540279 · base 34bef15 · dirty                          ║
+║  root  ed36c0fcc1bf451141c5003ccc49875de7cf1f5d77ff3e26dd711b5eff7c373c  ║
+║  files 57 · bytes 559103 · base b0f6a75 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1188,7 +1204,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-22T13:41:37.373Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-22T14:40:11.187Z
 
 </div>
 <!-- INTEGRITY:END -->

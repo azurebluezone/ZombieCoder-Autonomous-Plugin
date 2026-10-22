@@ -115,7 +115,7 @@ function tempProject(): string {
 test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors", async () => {
   const root = tempProject();
   fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
-  fs.mkdirSync(path.join(root, ".zombiecoder", "skills"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".opencode", "zombiecoder", "skills"), { recursive: true });
   fs.writeFileSync(
     path.join(root, ".environment"),
     "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL=\n",
@@ -133,7 +133,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
     }),
   );
   fs.writeFileSync(
-    path.join(root, ".zombiecoder", "skills", "sample.md"),
+    path.join(root, ".opencode", "zombiecoder", "skills", "sample.md"),
     "---\nid: sample\nname: Sample\ndescription: Sample skill\n---\nUse evidence.\n",
   );
 
@@ -242,9 +242,14 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(fake.skills.length, 5);
   assert.ok(
     fake.skills.some(
-      (skill: any) => skill.path === path.join(root, ".zombiecoder", "skills", "sample.md"),
+      (skill: any) =>
+        skill.path === path.join(root, ".opencode", "zombiecoder", "skills", "sample.md"),
     ),
-    "the project's own sample skill must be registered",
+    "the shared sample skill must be registered",
+  );
+  assert.ok(
+    !fs.existsSync(path.join(root, ".zombiecoder", "skills")),
+    "no per-project skill tree may be created",
   );
 
   const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
@@ -371,14 +376,17 @@ test("global install writes agents/config at the global root and leaves the work
 
     assert.ok(!fs.existsSync(path.join(root, ".opencode")), "global install must not create .opencode in the working directory");
     assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "SSOT.md")));
-    assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "skills")), "core skills should be installed");
     assert.ok(
-      fs.existsSync(path.join(root, ".zombiecoder", "skills", "first-principles.md")),
-      "first-principles skill missing",
+      !fs.existsSync(path.join(root, ".zombiecoder", "skills")),
+      "a working directory must not get its own skill tree",
     );
     assert.ok(
-      fs.existsSync(path.join(root, ".zombiecoder", "skills", "evidence-before-confidence.md")),
-      "evidence skill missing",
+      fs.existsSync(path.join(globalDir, "zombiecoder", "skills", "first-principles.md")),
+      "first-principles skill missing from the shared install root",
+    );
+    assert.ok(
+      fs.existsSync(path.join(globalDir, "zombiecoder", "skills", "evidence-before-confidence.md")),
+      "evidence skill missing from the shared install root",
     );
 
     assert.ok(fs.existsSync(path.join(globalDir, "agents", "zombiecoder.md")));

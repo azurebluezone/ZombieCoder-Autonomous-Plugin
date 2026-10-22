@@ -10,9 +10,10 @@
 // optional manual override, never auto-created. No fingerprint.json, footprint.jsonl,
 // models.json or mcp.json is created in the project.
 //
-// Skills: setup installs core + project-detected skills into .zombiecoder/skills.
-// The directory is not part of bootstrapDirs because a global install must not
-// create per-project files until a working directory is actually opened.
+// Skills are owned by the install root, never by a working directory:
+//   <install>/zombiecoder/skills/*.md        shared, registered for every project
+//   <install>/zombiecoder/skills-catalog/    offline catalog seeded by the installer
+// A project keeps only SSOT, syllabus, memory and .state.
 
 import path from "node:path";
 
@@ -39,8 +40,13 @@ export function syllabusFile(projectRoot: string): string {
   return path.join(zombieRoot(projectRoot), "syllabus.md");
 }
 
-export function skillsDir(projectRoot: string): string {
-  return path.join(zombieRoot(projectRoot), "skills");
+/**
+ * Shared skill store at the install root. `installRoot` is OpenCode's config
+ * directory (`~/.config/opencode` for a global install, `<project>/.opencode`
+ * for a project-local install), not a working directory.
+ */
+export function installSkillsDir(installRoot: string): string {
+  return path.join(installRoot, "zombiecoder", "skills");
 }
 
 export function memoryDir(projectRoot: string): string {

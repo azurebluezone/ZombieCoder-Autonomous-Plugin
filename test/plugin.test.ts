@@ -21,6 +21,12 @@ function makeContext(root: string) {
   const tools: any[] = [];
   const skills: any[] = [];
   const hooks: string[] = [];
+  const toolHooks: Record<string, (event: any) => any> = {};
+  const sessionHooks: Record<string, (event: any) => any> = {};
+  const agentSwitches: Array<{ sessionID: string; agent: string }> = [];
+  const switchState = { fail: false };
+  const synthetics: Array<{ sessionID: string; text: string; description?: string }> = [];
+  const prompts: Array<{ sessionID: string; text: string; delivery?: string }> = [];
   const storage = new Map<string, unknown>();
   const deferred = (fn: () => void) => setTimeout(fn, 5);
   const registration = { dispose: async () => undefined };
@@ -60,7 +66,7 @@ function makeContext(root: string) {
       reload: async () => undefined,
       hook: async (name: string, fn: (event: any) => any) => {
         hooks.push(name);
-        void fn;
+        toolHooks[name] = fn;
         return registration;
       },
       transform: async (cb: (editor: any) => void) => {
@@ -84,12 +90,22 @@ function makeContext(root: string) {
     session: {
       hook: async (name: string, fn: (event: any) => any) => {
         hooks.push(name);
-        void fn;
+        sessionHooks[name] = fn;
         return registration;
+      },
+      switchAgent: async (input: { sessionID: string; agent: string }) => {
+        if (switchState.fail) throw new Error("agent not found");
+        agentSwitches.push(input);
+      },
+      synthetic: async (input: { sessionID: string; text: string; description?: string }) => {
+        synthetics.push(input);
+      },
+      prompt: async (input: { sessionID: string; text: string; delivery?: string }) => {
+        prompts.push(input);
       },
     },
   };
-  return { ctx, tools, skills, hooks };
+  return { ctx, tools, skills, hooks, toolHooks, sessionHooks, agentSwitches, synthetics, prompts, storage, switchState };
 }
 
 function tempProject(): string {
@@ -100,6 +116,10 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const root = tempProject();
   fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
   fs.mkdirSync(path.join(root, ".zombiecoder", "skills"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".environment"),
+    "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL=\n",
+  );
   fs.writeFileSync(
     path.join(root, ".zombiecoder", "config.json"),
     JSON.stringify({
@@ -129,6 +149,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   }
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "setup-report.json")), "setup report missing");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "memory")), "memory dir missing");
+  assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "memory", "index.json")), "memory index missing");
 
   const agents = fs.readdirSync(path.join(root, ".opencode", "agents"));
   assert.equal(agents.length, 9);
@@ -187,8 +208,16 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.ok(contextTool, "context_status tool missing");
   const contextOutput = (await contextTool.execute({ agent: "manu" })).output;
   assert.equal(contextOutput.allowedRoot, root);
-  assert.match(contextOutput.uiLine, /Context: SSOT OK \| Syllabus OK/);
+  assert.match(contextOutput.uiLine, /Context: SSOT OK \(manu\) \| Syllabus OK \(halim\)/);
   assert.ok(contextOutput.packBytes > 0, "context pack must not be empty");
+  const setupReport = JSON.parse(
+    fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"),
+  );
+  assert.equal(setupReport.outputs.modelStrategy, "free-fallback");
+  assert.equal(
+    setupReport.steps.find((item: any) => item.step === "memory-index")?.ok,
+    true,
+  );
   assert.ok(fake.hooks.includes("http.response"), "http.response gate hook missing");
   assert.ok(fake.hooks.includes("context"), "context hook missing");
   const fingerprintTool = fake.tools.find((tool) => tool.name === "project_fingerprint");
@@ -225,6 +254,95 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
 
   await cleanup();
+});
+
+test("three consecutive tool errors hand the session to the next roster agent once", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const after = fake.toolHooks["execute.after"];
+  assert.equal(typeof after, "function", "tool failure hook was not registered");
+
+  const event = (status: "error" | "completed", id: string) => ({
+    status,
+    sessionID: "ses_failures",
+    agent: "manu",
+    tool: "read",
+    id,
+    ...(status === "completed" ? { result: { output: "ok" } } : { error: new Error("failed") }),
+  });
+  for (let index = 0; index < 2; index++) {
+    await after(event("error", `call-${index}`));
+  }
+  await after(event("completed", "call-success"));
+  for (let index = 2; index < 4; index++) {
+    await after(event("error", `call-${index}`));
+  }
+  assert.equal(fake.agentSwitches.length, 0, "a completed tool must reset the consecutive failure count");
+  await after(event("error", "call-4"));
+
+  assert.deepEqual(fake.agentSwitches, [{ sessionID: "ses_failures", agent: "jarin" }]);
+
+  await after(event("error", "call-5"));
+  assert.equal(fake.agentSwitches.length, 1, "one failed agent must not trigger repeated switches");
+  await cleanup();
+});
+
+test("session.idle archives the complete OpenCode session context", async () => {
+  const root = tempProject();
+  assert.equal(fs.existsSync(path.join(root, ".zombiecoder")), false);
+  const fake = makeContext(root);
+  const queue: any[] = [];
+  let wake: (() => void) | undefined;
+  let messages: any[] = [
+    { id: "user-1", type: "user", text: "Check the source." },
+    { id: "assistant-1", type: "assistant", content: [{ type: "text", text: "I will inspect it." }] },
+  ];
+  const controllerSignal = { current: undefined as AbortSignal | undefined };
+
+  (fake.ctx as any).session.context = async () => messages;
+  (fake.ctx as any).event = {
+    subscribe: ({ signal }: { signal: AbortSignal }) => {
+      controllerSignal.current = signal;
+      return {
+        async *[Symbol.asyncIterator]() {
+          while (!signal.aborted) {
+            if (queue.length > 0) {
+              yield queue.shift();
+              continue;
+            }
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+              signal.addEventListener("abort", () => resolve(), { once: true });
+            });
+          }
+        },
+      };
+    },
+  };
+
+  const cleanup = await setup(fake.ctx);
+  assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "SSOT.md")));
+  assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "syllabus.md")));
+  assert.ok(fs.existsSync(path.join(root, ".zombiecoder", "memory", "index.json")));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  queue.push({ type: "session.idle", data: { sessionID: "ses_idle" } });
+  wake?.();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  const { readArchive, readIndex } = await import("../src/zombie/memory.ts");
+  assert.equal(readArchive(root, "ses_idle")[0].archived.length, 2);
+  assert.equal(readIndex(root).sessions.ses_idle.archivedTotal, 2);
+
+  messages = [...messages, { id: "user-2", type: "user", text: "One more message." }];
+  queue.push({ type: "session.idle", data: { sessionID: "ses_idle" } });
+  wake?.();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(readArchive(root, "ses_idle").reduce((n: number, row: any) => n + row.archived.length, 0), 3);
+
+  assert.equal(controllerSignal.current?.aborted, false);
+  await cleanup();
+  assert.equal(controllerSignal.current?.aborted, true);
 });
 
 test("global install writes agents/config at the global root and leaves the working directory .opencode-free", async () => {
@@ -522,4 +640,142 @@ test("syncProviderBaseUrl touches only settings.baseURL", () => {
   assert.equal(after.agents.manu.mode, "primary");
   assert.equal(fs.statSync(file).mode & 0o777, 0o600, "provider config mode must be preserved");
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a gate-blocked answer escalates through three agents and then opens the breaker", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const hook = fake.sessionHooks["http.response"];
+  assert.equal(typeof hook, "function", "http.response hook was not registered");
+
+  const sse = (chunks: string[]) => chunks.join("\n") + "\n";
+  const delta = (value: unknown) => `data: ${JSON.stringify(value)}`;
+  const unproven = sse([
+    delta({ choices: [{ delta: { role: "assistant", content: "I fixed the login bug, the issue was the poll timer and the stale HTML." } }] }),
+    delta({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+    "data: [DONE]",
+  ]);
+  const toolTurn = sse([
+    delta({ choices: [{ delta: { role: "assistant", content: "I fixed the login bug in src/ghost.ts." } }] }),
+    delta({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "edit", arguments: "{}" } }] }, finish_reason: "tool_calls" }] }),
+    "data: [DONE]",
+  ]);
+
+  const event = (agent: string, body: string, sessionID = "ses_gate") => ({
+    kind: "primary",
+    sessionID,
+    agent,
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    response: new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }),
+  });
+
+  // An intermediate tool turn must never trip the breaker.
+  const toolEvent = event("manu", toolTurn, "ses_tool");
+  await hook(toolEvent);
+  assert.deepEqual(fake.agentSwitches, []);
+  assert.equal(fake.prompts.length, 0);
+  assert.equal(fake.synthetics.length, 0);
+
+  const first = event("manu", unproven);
+  await hook(first);
+  assert.match(await first.response.text(), /UNVERIFIED/, "the blocked answer must stay truthful");
+  assert.deepEqual(fake.agentSwitches, [{ sessionID: "ses_gate", agent: "jarin" }]);
+  assert.equal(fake.prompts.length, 1);
+  assert.equal(fake.prompts[0].delivery, "queue");
+  assert.match(fake.prompts[0].text, /circuit breaker/);
+  assert.match(fake.prompts[0].text, /claim without evidence/);
+  assert.match(fake.synthetics[0].text, /Circuit breaker/);
+  assert.match(fake.synthetics[0].text, /1\/3/);
+
+  await hook(event("jarin", unproven));
+  assert.deepEqual(fake.agentSwitches.at(-1), { sessionID: "ses_gate", agent: "brishti" });
+  assert.match(fake.synthetics.at(-1)!.text, /2\/3/);
+
+  const third = event("brishti", unproven);
+  await hook(third);
+  assert.equal(fake.agentSwitches.length, 2, "the third failure must not switch agent again");
+  assert.equal(fake.prompts.length, 2, "the third failure must not queue another attempt");
+  const last = fake.synthetics.at(-1)!;
+  assert.match(last.text, /কাজটি সমাধান হয়নি/);
+  assert.match(last.text, /manu.*jarin.*brishti/);
+  assert.match(last.text, /প্রমাণ দিন/);
+
+  const breaker = fake.storage.get("agent/breaker/ses_gate") as any;
+  assert.equal(breaker.failures.length, 3);
+  assert.deepEqual(breaker.agents, ["manu", "jarin", "brishti"]);
+  assert.match(breaker.failures[0].context.blockedPreview, /I fixed the login bug/);
+
+  await cleanup();
+});
+
+test("a passing final answer resets the breaker for the next question", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const hook = fake.sessionHooks["http.response"];
+
+  const chunk = (value: unknown) => `data: ${JSON.stringify(value)}`;
+  const blocked = [
+    chunk({ choices: [{ delta: { role: "assistant", content: "I fixed the login bug, the issue was the poll timer and the stale HTML." } }] }),
+    "data: [DONE]",
+    "",
+  ].join("\n");
+  const proven = [
+    chunk({ choices: [{ delta: { role: "assistant", content: "The fix is verified: npm test reports 78/78 pass." } }] }),
+    "data: [DONE]",
+    "",
+  ].join("\n");
+  const event = (agent: string, body: string) => ({
+    kind: "primary",
+    sessionID: "ses_reset",
+    agent,
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    response: new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+  });
+
+  await hook(event("manu", blocked));
+  assert.equal((fake.storage.get("agent/breaker/ses_reset") as any).failures.length, 1);
+
+  const good = event("jarin", proven);
+  await hook(good);
+  assert.match(await good.response.text(), /78\/78 pass/, "a passing answer must not be rewritten");
+  const state = fake.storage.get("agent/breaker/ses_reset") as any;
+  assert.equal(state.failures.length, 0, "a completed task must clear the failure count");
+  assert.deepEqual(state.agents, []);
+  assert.equal(fake.agentSwitches.length, 1, "the reset itself must not switch agent");
+
+  await cleanup();
+});
+
+test("a failed agent switch still keeps the task moving on the current agent", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const hook = fake.sessionHooks["http.response"];
+  fake.switchState.fail = true;
+
+  const blocked = [
+    `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: "I fixed the login bug, the issue was the poll timer and the stale HTML." } }] })}`,
+    "data: [DONE]",
+    "",
+  ].join("\n");
+  await hook({
+    kind: "primary",
+    sessionID: "ses_switch_fail",
+    agent: "manu",
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    response: new Response(blocked, { status: 200, headers: { "content-type": "text/event-stream" } }),
+  });
+
+  assert.equal(fake.agentSwitches.length, 0, "the failed switch must not be reported as applied");
+  assert.equal(fake.synthetics.length, 1, "the user still gets a status message");
+  assert.match(fake.synthetics[0].text, /Circuit breaker/);
+  assert.equal(fake.prompts.length, 1, "the retry must still be queued on the current agent");
+  assert.match(fake.prompts[0].text, /circuit breaker/);
+
+  await cleanup();
 });

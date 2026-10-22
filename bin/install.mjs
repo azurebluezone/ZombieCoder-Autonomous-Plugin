@@ -192,6 +192,42 @@ const envText = (name) => {
   const text = typeof raw === "string" ? raw.trim() : "";
   return text || null;
 };
+function readEnvironmentFile(file) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
+    return {};
+  }
+  const values = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(trimmed);
+    if (!match) continue;
+    let value = match[2].trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    } else {
+      value = value.replace(/\s+#.*$/, "").trim();
+    }
+    values[match[1]] = value;
+  }
+  return values;
+}
+
+const environmentRoot = SELF_MODE || GLOBAL_MODE || HOME_MODE ? PACKAGE_ROOT : TARGET;
+const environmentFile = readEnvironmentFile(path.join(environmentRoot, ".environment"));
+const externalProviderKey = "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL";
+const externalProviderValue = Object.prototype.hasOwnProperty.call(process.env, externalProviderKey)
+  ? String(process.env[externalProviderKey] ?? "")
+  : environmentFile[externalProviderKey];
+const environmentProviderApiKey = environmentFile.EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY;
+const environmentMcpUrl = environmentFile.EXTERNAL_MCP_URL;
 const envProviderId = envText("ZOMBIECODER_PROVIDER_ID");
 const envProviderUrl = envText("ZOMBIECODER_PROVIDER_URL");
 const envMcpUrl = envText("ZOMBIECODER_MCP_URL");
@@ -210,14 +246,21 @@ const previous = priorConfig();
 const initialProvider =
   providerFlag !== null
     ? cleanUrl(providerFlag, DEFAULT_PROVIDER_URL)
-    : envProviderUrl ??
-      (typeof previous.customProviderUrl === "string"
-        ? previous.customProviderUrl
-        : DEFAULT_PROVIDER_URL);
+    : externalProviderValue !== undefined
+      ? cleanUrl(externalProviderValue, "")
+      : envProviderUrl ??
+        (typeof previous.customProviderUrl === "string" &&
+        previous.customProviderUrl !== DEFAULT_PROVIDER_URL
+          ? previous.customProviderUrl
+          : "");
 const initialMcp =
   mcpFlag !== null
     ? cleanUrl(mcpFlag, DEFAULT_MCP_URL)
-    : envMcpUrl ??
+    : envText("EXTERNAL_MCP_URL") ??
+      envMcpUrl ??
+      (typeof environmentMcpUrl === "string" && environmentMcpUrl.trim()
+        ? cleanUrl(environmentMcpUrl, "")
+        : null) ??
       (typeof previous.mcpUrl === "string" ? previous.mcpUrl : DEFAULT_MCP_URL);
 const originProvided = originFlag !== null || envOriginUrl !== null;
 const ORIGIN_URL = originProvided
@@ -229,6 +272,7 @@ const ORIGIN_URL = originProvided
 let PROVIDER_URL = initialProvider;
 let MCP_URL = initialMcp;
 if (FAST_MODE) PROVIDER_URL = "";
+const INSTALL_MODEL_STRATEGY = MODEL_STRATEGY_FLAG ?? (PROVIDER_URL ? "auto" : "free");
 
 // Provider identity and credential, resolved once. A flag wins, then the
 // environment, then the previous install, then the shipped default. The key is
@@ -240,7 +284,13 @@ const PROVIDER_ID =
 let PROVIDER_KEY =
   providerKeyFlag !== null
     ? String(providerKeyFlag).trim()
-    : DEFAULT_CUSTOM_PROVIDER_KEY ||
+    : (envText("EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY") ??
+      envText("ZOMBIECODER_PROVIDER_KEY") ??
+      envText("ZOMBIECODER_API_KEY") ??
+      (typeof environmentProviderApiKey === "string" && environmentProviderApiKey.trim()
+        ? environmentProviderApiKey.trim()
+        : "")) ||
+      DEFAULT_CUSTOM_PROVIDER_KEY ||
       (typeof previous.customProviderApiKey === "string"
         ? previous.customProviderApiKey.trim()
         : "");
@@ -641,6 +691,20 @@ await step("copy runtime assets", () => {
     fs.chmodSync(to, mode);
   }
 
+  // Research corpora are documentation, not prompts, but agents retrieve them on
+  // demand from the installed docs tree. Copy every markdown file so the corpus
+  // stays available offline with the runtime.
+  const researchSource = path.join(PACKAGE_ROOT, "docs", "skills-research");
+  if (fs.existsSync(researchSource)) {
+    for (const name of fs.readdirSync(researchSource)) {
+      if (!name.endsWith(".md")) continue;
+      const to = path.join(RUNTIME_ASSETS_DIR, "docs", "skills-research", name);
+      ensureDir(path.dirname(to));
+      fs.copyFileSync(path.join(researchSource, name), to);
+      fs.chmodSync(to, 0o644);
+    }
+  }
+
   // Seed the runtime skill catalog. The plugin copies only the skills a project
   // needs; keeping the full catalog here means setup is offline and fast.
   const skillSource = path.join(PACKAGE_ROOT, "docs", "skills");
@@ -715,7 +779,7 @@ await step("seed zombiecoder config", () => {
     originUrl: ORIGIN_URL,
     opencodeApiUrl: existing.opencodeApiUrl ?? DEFAULT_OPENCODE_API_URL,
     ssotRefreshMs: existing.ssotRefreshMs ?? defaults.DEFAULT_SSOT_REFRESH_MS,
-    modelStrategy: existing.modelStrategy ?? "auto",
+    modelStrategy: INSTALL_MODEL_STRATEGY,
     responseGate: existing.responseGate ?? true,
     autoSkills: existing.autoSkills ?? true,
     skillRepo: existing.skillRepo ?? DEFAULT_SKILL_REPO,
@@ -752,7 +816,27 @@ await step("probe provider + assign models", async () => {
     /* no plan yet */
   }
 
-  if (PROVIDER_URL) {
+  // Without a configured compatible URL, use the OpenCode free-model plan.
+  const effectiveStrategy = INSTALL_MODEL_STRATEGY;
+  const freeMode = effectiveStrategy === "free";
+  let priorFreeAssignment = {};
+  if (freeMode) {
+    try {
+      const current = JSON.parse(fs.readFileSync(OPENCODE_JSON, "utf8"));
+      for (const agent of roster.ROSTER) {
+        const ref = current?.agents?.[agent.id]?.model;
+        if (typeof ref === "string" && ref.startsWith("opencode/")) {
+          priorFreeAssignment[agent.id] = ref;
+        }
+      }
+    } catch {
+      /* no current opencode.json; leave the assignment empty */
+    }
+    installAssignment = priorFreeAssignment;
+    candidates = Object.values(priorFreeAssignment);
+  }
+
+  if (PROVIDER_URL && !freeMode) {
     providerProbe = await probeProviderModels(PROVIDER_URL, 5000, PROVIDER_KEY);
     // `ok` with an empty list is not a usable provider. Treating it as one was
     // what produced the `provider/undefined` default model.
@@ -781,7 +865,7 @@ await step("probe provider + assign models", async () => {
   }
 
   // A dead/slow provider must not inherit the previous install's model refs.
-  if (!providerReachable) installAssignment = {};
+  if (!providerReachable && !freeMode) installAssignment = {};
 
   candidates = providerReachable
     ? providerProbe.models
@@ -797,11 +881,15 @@ await step("probe provider + assign models", async () => {
       Object.entries(installAssignment).filter(([, ref]) => allowed.has(ref)),
     );
   }
-  if (Object.keys(installAssignment).length === 0) {
+  if (!freeMode && Object.keys(installAssignment).length === 0) {
     installAssignment = assignModels(roster.ROSTER, candidates, false, BASELINE_MODEL);
   }
 
-  const strategy = providerReachable ? "custom-provider" : "baseline";
+  const strategy = freeMode
+    ? "free-fallback"
+    : providerReachable
+      ? "custom-provider"
+      : "baseline";
   const plan = {
     generatedAt: new Date().toISOString(),
     strategy,
@@ -820,7 +908,8 @@ await step("probe provider + assign models", async () => {
   // Persist the decision so the runtime resolver does not re-adopt a model the
   // installer just proved unusable. `--model-strategy` always wins.
   const configStrategy =
-    MODEL_STRATEGY_FLAG ?? (providerReachable ? "auto" : "baseline");
+    MODEL_STRATEGY_FLAG ??
+    (freeMode ? "free" : providerReachable ? "auto" : "baseline");
   try {
     const seeded = JSON.parse(fs.readFileSync(ZOMBIE_CONFIG, "utf8"));
     if (seeded.modelStrategy !== configStrategy) {
@@ -832,7 +921,9 @@ await step("probe provider + assign models", async () => {
     /* step 5 already reported a malformed config; do not mask it here */
   }
 
-  const summary = !PROVIDER_URL
+  const summary = freeMode
+    ? `modelStrategy: free — gateway probe skipped; ${new Set(Object.values(installAssignment)).size} free model(s) kept`
+    : !PROVIDER_URL
     ? "custom provider disabled (free/baseline models)"
     : providerReachable
       ? `${providerProbe.models.length} model(s) from ${providerProbe.url}; chat ok${
@@ -933,11 +1024,19 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
     ? modelRef(providerID, providerProbe.models[0])
     : null;
   const existingModel = typeof existing.model === "string" ? existing.model : null;
-  next.model = providerReachable
-    ? existingModel && candidates.includes(existingModel)
-      ? existingModel
-      : firstCandidate ?? BASELINE_MODEL
-    : BASELINE_MODEL;
+  const effectiveStrategy = INSTALL_MODEL_STRATEGY;
+  if (effectiveStrategy === "free") {
+    // Per-agent models are authoritative. A global `model` pins every agent to
+    // one model, which defeats the agent -> model mapping.
+    delete next.model;
+  } else if (providerReachable) {
+    next.model =
+      existingModel && candidates.includes(existingModel)
+        ? existingModel
+        : firstCandidate ?? BASELINE_MODEL;
+  } else {
+    next.model = BASELINE_MODEL;
+  }
 
   // Only register an MCP server we actually reached. A dead default URL in
   // opencode.json slows every boot and teaches the user to ignore errors.

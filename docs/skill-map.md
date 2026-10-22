@@ -11,6 +11,22 @@ Databricks inference guidance, Brendan Gregg USE and flame graphs,
 "Don't Break the Cache", LLM-judge reliability studies, Anthropic context
 engineering, adr.github.io, Google SRE Book ch. 15.
 
+## Research corpus (first-principles, 2026-10-21)
+
+Three web-researched corpora back the specialist tables below. Each skill follows
+**what → why → how**, names a workspace application, and cites a source that was
+actually fetched. Failed fetches are listed separately in each file and are not
+used as evidence.
+
+| Corpus | Owner | Skills | File |
+|---|---|---:|---|
+| UI/UX, accessibility, interaction states | Nila | 20 | `docs/skills-research/uiux.md` |
+| AIML auditing, evals, injection, routing | Tuhin | 20 | `docs/skills-research/aiml.md` |
+| Regex safety, codegen, performance | Nila + Rashed | 20 | `docs/skills-research/regex-performance.md` |
+
+Prompts carry the 5-skill focus; the full 20-skill set is retrieved from these
+files on demand. A new domain gets the same treatment before it enters a prompt.
+
 ---
 
 ## Runtime skill catalog (`docs/skills`)
@@ -123,6 +139,7 @@ by the `skill_catalog` tool.
 | Batch/streaming split | Which work can tolerate latency? | Batch async jobs, stream user-facing ones |
 | KV cache memory math | Does the cache fit at the batch size you want? | batch × seq × layers × kv_heads × head_dim × bytes × 2 |
 | Benchmark methodology hygiene | Does this number compare like with like? | Warmup, realistic mix, repeats, variance |
+| Full regex/perf set (20) | What/why/how for each skill? | `docs/skills-research/regex-performance.md` |
 
 ## Halim — Documentation & Knowledge Engineer
 
@@ -167,7 +184,7 @@ by the `skill_catalog` tool.
 | Minimal reproduction | Can a stranger reproduce it in one command? | Script + seed + pinned version |
 | Exit criteria + dual sign-off | Who approved what, against which criteria? | Engineer and user validation separate |
 
-## Nila — UI/UX Designer & Regex Pattern Smith
+## Nila — UI/UX Designer & Regex Paga
 
 | Skill | First-principles question | Workspace use |
 |---|---|---|
@@ -187,6 +204,8 @@ by the `skill_catalog` tool.
 | Unicode and anchor correctness | Does it accept real names and reject trailing newlines? | Slug rules with `\p{L}` + `u` |
 | Parser-before-regex | Is the target language actually regular? | Extract fenced blocks with a parser |
 | Pattern fixture harness | Are patterns tested as data? | Fixtures + adversarial timing test |
+| Full UI/UX set (20) | What/why/how for each skill? | `docs/skills-research/uiux.md` |
+| Full regex/perf set (20) | What/why/how for each skill? | `docs/skills-research/regex-performance.md` |
 
 ## Tuhin — AIML & Model Auditor
 
@@ -208,6 +227,7 @@ by the `skill_catalog` tool.
 | Injection-resistance eval | Can untrusted context override instructions? | Payload corpus against each prompt version |
 | Cost–quality Pareto sweep | Cheapest model that still passes evals? | Routing table from measured quality per tier |
 | Live drift monitoring | Is production input drifting from eval distribution? | Track drift and per-task groundedness |
+| Full AIML set (20) | What/why/how for each skill? | `docs/skills-research/aiml.md` |
 
 ## ZombieCoder — Chief Arbiter
 

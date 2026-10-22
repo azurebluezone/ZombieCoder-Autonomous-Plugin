@@ -151,12 +151,28 @@ evidence presence যাচাই করে, বাস্তব সত্য ন
   উত্তর `UNVERIFIED` message দিয়ে replace করা হয় (`src/zombie/responseGate.ts`)।
   message-এ কী সমস্যা, এজেন্ট থামানো হয়েছে, আর user এখন কী করতে পারেন
   (প্রমাণ দিন / ব্যাখ্যা চান / নতুন নির্দেশ) স্পষ্ট থাকে। replacement terminal
-  (`finish_reason: stop`), তাই agent আর tool call চালায় না। এজেন্ট নিজে থেকে
-  প্রমাণ ছাড়া এগোয় না। Gate structural; সে factual truth প্রমাণ করে না, আর
-  unsupported provider protocol `NOT_TESTED` হিসেবে audit-এ থাকে। Disable করতে
-  config-এ `"responseGate": false` দিন।
-- **File path permission** — allowed root (working directory) চিহ্নিত। `../` বা
-  বাইরের absolute path evidence হিসেবে ব্যবহৃত হলে দাবি fail করে।
+  (`finish_reason: stop`)। শুধু **final answer** গেট হয়: যে turn-এ model
+  tool/function call দেয় সেটি intermediate ধরে হুবহু pass through করা হয়, নইলে
+  gate `finish_reason` কে `stop` করে tool chain মাঝপথে ভেঙে দিত। প্রমাণও
+  structural: `path:line`-এর file ও line দুটোই থাকতে হয় (line count ছাড়িয়ে গেলে
+  গ্রহণ নয়), টেস্ট output-এ count থাকতে হয় (`78/78 pass`, `tests 81`,
+  `exit code 0`); একা `line 177`, `5/10` বা path-মাত্র (`src/plugin.ts`) প্রমাণ নয়।
+  এজেন্ট নিজে থেকে প্রমাণ ছাড়া এগোয় না। Gate structural; সে factual truth
+  প্রমাণ করে না, আর unsupported provider protocol `NOT_TESTED` হিসেবে audit-এ
+  থাকে। Disable করতে config-এ `"responseGate": false` দিন।
+- **Circuit breaker** — গেট আটকালে উত্তরটি শুধু replace হয়ে থেমে যায় না:
+  failure-এর কারণ ও context (`agent/breaker/<sessionID>`) storage-এ লেখা হয়, user
+  UI-তে synthetic status message যায়, session পরের roster agent-এ switch হয় এবং
+  একটি queued prompt দিয়ে একই কাজ প্রমাণসহ আবার শুরু হয় (`src/zombie/circuitBreaker.ts`)।
+  এভাবে সর্বোচ্চ ৩টি agent চেষ্টা করে; ৩টি ব্যর্থ হলে breaker খুলে user-কে স্পষ্ট
+  unresolved message দেয় — কী কী চেষ্টা হয়েছে, শেষ কারণ কী, আর এখন কী করা যায়
+  (প্রমাণ দিন / কাজ ছোট করুন / নতুন নির্দেশ / gate বন্ধ করে diagnosis)।
+- **Evidence path policy** — agent যেকোনো ফাইল পড়তে পারে, তাই gate path-কে
+  sandbox করে না; শুধু যাচাই করে cited ফাইলটি সত্যিই আছে কি না। resolution order:
+  working directory → OpenCode config/data root (`$XDG_CONFIG_HOME/opencode`,
+  `~/.opencode`, `$XDG_DATA_HOME/opencode`) → absolute/`~` path। `../`, absolute
+  বা global config path — সবই বৈধ প্রমাণ, যদি ফাইল ও লাইনটি সত্যিই থাকে।
+  Extension ছাড়া absolute file-ও চলে, তবে তখন `:line` লাগবে (`/etc/hostname:1`)।
 - **Skill map** — প্রতিটি agent-এর 15–20 first-principles skill:
   [`docs/skill-map.md`](docs/skill-map.md)।
 
@@ -508,7 +524,38 @@ $env:ZOMBIECODER_MODEL_STRATEGY = "auto"
 $env:ZOMBIECODER_BASELINE_MODEL = "opencode/big-pickle"
 ```
 
-### ৬.৪ Native tool calls
+### ৬.৪ `.environment` থেকে provider ও MCP
+
+Project-এর root-এ `.environment` ফাইল তৈরি/সম্পাদনা করুন:
+
+```dotenv
+EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL=https://your-gateway.example/v1
+EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY=your-provider-api-key
+EXTERNAL_MCP_URL=https://your-mcp.example/mcp
+```
+
+`EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY` হলো ওই OpenAI-compatible
+provider-এর key—এটি MCP key নয়। `.environment` ফাইল shell script হিসেবে execute হয় না; কেবল `KEY=value` পড়া
+হয়। Installer provider URL/key এবং MCP URL পড়ে; provider key
+`opencode.json`-এ OpenCode ব্যবহার করার জন্য সংরক্ষণ করে। Secret-bearing
+`.environment` এবং generated config commit করবেন না।
+
+Plugin সক্রিয় project-এর `.environment`-এ provider URL/key পড়ে এবং
+`EXTERNAL_MCP_URL`-এর MCP endpoint-এ read-only `initialize`/`tools/list` probe
+করে। তবে project `.environment` থেকে MCP URL পড়া মানেই OpenCode-এর MCP
+server auto-register হওয়া নয়: server-টি `opencode.json`-এ লিখতে installer
+চালাতে হবে, যেমন `npm run install-pack -- --dir "$PWD" --yes` (provider/MCP
+config OpenCode-এ project scope-এ রাখতে চাইলে)। `--dir` install target-এর
+`.environment` installer পড়ে; global install-এ installer package root-এর
+`.environment` পড়ে। Runtime সব সময় সক্রিয় project-এর `.environment` পড়ে।
+
+Process environment-এ একই variable দিলে ফাইলের চেয়ে সেটি অগ্রাধিকার পায়।
+Provider URL ফাঁকা/অনুপস্থিত হলে free-model strategy চলে। পরিবর্তনের পরে
+OpenCode/plugin reload করুন। MCP endpoint-এর জন্য bearer/API authentication এই
+probe path-এ এখনো সমর্থিত নয়; authenticated MCP server লাগলে installer probe
+ও runtime probe দুটোই বর্তমানে fail করতে পারে।
+
+### ৬.৫ Native tool calls
 
 OpenCode tool execute করে רק যখন provider/model OpenAI-এর native
 `tool_calls` return করে। Model text-এর ভিতরে JSON tool call দিলে OpenCode সেটি
@@ -528,7 +575,7 @@ tool-capable model ব্যবহার করুন।
 text-এর ভিতরে JSON থাকলে সেটি OpenCode execute করবে না—তখন model অথবা chat
 template বদলাতে হবে, plugin-এ tool যোগ করলে সমস্যা মিটবে না।
 
-### ৬.৫ Origin URL handshake (URL-only)
+### ৬.৬ Origin URL handshake (URL-only)
 
 Cloud runtime-এ provider-এর public URL মাঝে মাঝে বদলাতে পারে, কিন্তু API key
 একই থাকতে হবে। এই ক্ষেত্রে একটি trusted **origin URL** সেট করা যায়; plugin সেখান
@@ -786,11 +833,21 @@ register করে।
 ### Memory
 
 - শেষ ৫টি message context-এ রাখা হয়।
-- পুরনো message archive হয়।
+- `session.idle` হলে OpenCode-এর session context থেকে দৃশ্যমান message text
+  `.zombiecoder/memory/<session>.jsonl`-এ append হয়; message ID দিয়ে duplicate
+  বাদ দেওয়া হয়। Reasoning/thinking block archive করা হয় না। OpenCode-এর
+  session context API না থাকলে setup report-এ subscription skipped দেখাবে;
+  archive চলাকালীন error হলে audit/console-এ দেখা যাবে। কেবল memory index তৈরি
+  হওয়া মানেই conversation archive হওয়া নয়।
 - Archive index: `.zombiecoder/memory/index.json`।
 - প্রতিটি model call-এ full history নয় — SSOT/syllabus/recent memory-র bounded
   context pack inject হয়; বিস্তারিত দরকার হলে `context_status` তারপর নির্দিষ্ট
   file/section পড়ুন।
+- Runtime tool-এ পরপর তিনটি execution error হলে একই session-এ পরের roster agent-এ
+  একবার handoff চেষ্টা হয়; switch ব্যর্থ হলে audit log-এ স্পষ্ট error থাকে।
+  Semantic ভুল যা tool execution error হিসেবে ধরা পড়ে না, তা এই counter
+  স্বয়ংক্রিয়ভাবে শনাক্ত করে না। Evidence gate-ও evidence-এর কাঠামো পরীক্ষা করে,
+  দাবির সত্যতা প্রমাণ করে না।
 
 ### SSOT refresh
 
@@ -1105,8 +1162,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  08fd997ed76e8180fbf98e882700d2d4c08f19989a51c2bef808cd89ea392fc6  ║
-║  files 52 · bytes 450795 · base cd69d81 · clean                          ║
+║  root  9ea676d6f7f54a28114559a825491cdc3d3c0d3e608ad31df687538917556fa5  ║
+║  files 55 · bytes 535927 · base 4b0a4c9 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1114,7 +1171,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-21T03:26:46.730Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-22T13:30:21.441Z
 
 </div>
 <!-- INTEGRITY:END -->

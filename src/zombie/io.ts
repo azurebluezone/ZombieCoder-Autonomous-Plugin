@@ -62,6 +62,33 @@ export function readText(file: string): string | undefined {
   }
 }
 
+export function parseEnvironmentFile(raw: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const line of String(raw ?? "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(trimmed);
+    if (!match) continue;
+    let value = match[2].trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    } else {
+      value = value.replace(/\s+#.*$/, "").trim();
+    }
+    values[match[1]] = value;
+  }
+  return values;
+}
+
+export function readEnvironmentFile(file: string): Record<string, string> {
+  const raw = readText(file);
+  return raw === undefined ? {} : parseEnvironmentFile(raw);
+}
+
 export function readJson<T = any>(file: string): T | undefined {
   const raw = readText(file);
   if (raw === undefined) return undefined;
@@ -78,7 +105,8 @@ export function writeJson(file: string, value: unknown): void {
 
 export function appendJsonl(file: string, value: unknown): void {
   ensureDir(path.dirname(file));
-  fs.appendFileSync(file, JSON.stringify(value) + "\n", { encoding: "utf8" });
+  fs.appendFileSync(file, JSON.stringify(value) + "\n", { encoding: "utf8", mode: 0o600 });
+  fs.chmodSync(file, 0o600);
 }
 
 export function readJsonl<T = any>(file: string, limit?: number): T[] {

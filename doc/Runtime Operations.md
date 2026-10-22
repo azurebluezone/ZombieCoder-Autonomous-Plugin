@@ -88,6 +88,8 @@ modern (`2025-03-26`) ও legacy (`2024-11-05`) — দুই protocol era-ত�
 | `ctx.location` | বর্তমান ডিরেক্টরি — built-in, watcher লাগে না |
 | `ctx.storage` (`get`/`set`/`remove`/`scan`) | memory ও state (DB-backed) |
 | `ctx.session.hook` | `context`, `compaction`, `http.request`, `http.response` |
+| `ctx.event.subscribe` + `ctx.session.context` | `session.idle` হলে দৃশ্যমান message text project-local JSONL archive-এ; `reasoning`/`thinking` বাদ |
+| `ctx.session.switchAgent` + `ctx.tool.hook` | একই session/agent-এ পরপর ৩টি tool execution error হলে পরের roster agent-এ একবার handoff |
 | `ctx.skill` (`list`/`add`/`reload`) | workstation-tier skill register; project-tier `.opencode/skills/` OpenCode নিজেই পড়ে |
 | `ctx.rpc.register` | প্লাগইনের নিজের endpoint — "ছোট সার্ভার" এখানেই |
 | `ctx.tool` (`transform`/`list`/`reload`) | প্লাগইনের নিজের টুল, `zombiecoder` namespace-এ |
@@ -104,6 +106,10 @@ modern (`2025-03-26`) ও legacy (`2024-11-05`) — দুই protocol era-ত�
 - install root না থাকলে: নিজে তৈরি → package manifest → dependency install → config → provider/MCP merge → agent md → `.zombiecoder`।
 - বিদ্যমান ফাইল **কখনো নীরব overwrite নয়**: merge করে রাখা হয়, লেখা atomic (temp → rename), কোনো `.bak`/archive নয়।
 - provider/mcp URL না মিললে কিছুই ভাঙে না — শুধু `NOT_CONFIGURED` লেখা থাকে, আর OpenCode-এর ডিফল্ট মডেল আমাদের agent/persona/meta নিয়ে কাজ চালিয়ে যায়।
+- Active project-এর `.environment` থেকে `EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL`, `EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY` ও `EXTERNAL_MCP_URL` পড়া হয়; process environment একই key-তে অগ্রাধিকার পায়। Provider key OpenAI-compatible gateway-এর জন্য, MCP auth-এর জন্য নয়। ফাইলটি execute হয় না।
+- Installer target `.environment` থেকে provider/MCP URL পড়ে, probe-verified MCP URL OpenCode config-এ register করে। Runtime project `.environment` থেকে MCP URL probe করে; project config-এ নিজে MCP server register করে না। URL ফাঁকা/অনুপস্থিত ও explicit strategy না থাকলে provider `free` fallback হয়।
+- Project খুললে `.zombiecoder/`, SSOT, syllabus ও memory index তৈরি হয়; প্রতি `session.idle`-এ OpenCode context API থেকে দৃশ্যমান message snapshot archive হয়। API অনুপস্থিত হলে setup report-এ skipped; চলাকালীন archive error console/audit-এ থাকে।
+- Handoff শুধু hook-এ ধরা পরপর তিনটি tool execution error-এ কাজ করে; semantic ভুল শনাক্ত করে না। Evidence gate evidence-এর কাঠামো যাচাই করে, দাবির সত্যতা স্বয়ংক্রিয়ভাবে প্রমাণ করে না।
 
 ## ৬. কেন এই ফাইল আগে ছিল না
 

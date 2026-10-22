@@ -1,0 +1,6 @@
+# OpenAI-compatible provider. Leave the URL empty to use free models.
+EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL=
+EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY=
+
+# Optional MCP server endpoint.
+EXTERNAL_MCP_URL=

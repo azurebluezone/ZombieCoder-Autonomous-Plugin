@@ -171,18 +171,34 @@ Two plugin-side layers sit around the model call:
   receives a bounded pack built from `SSOT.md`, `syllabus.md` and recent session
   memory, never the whole repository or the whole history. The `context_status`
   tool returns the same pack's status plus a `uiLine` so the user can see in the
-  UI that SSOT, syllabus and memory are being managed.
+  UI that SSOT, syllabus and memory are being managed, and which agent owns each surface (SSOT=manu, syllabus=halim, memory=zombiecoder, skills=tuhin, gate=brishti).
 - **Hard response gate** (`src/zombie/responseGate.ts`) — the `http.response`
   hook inspects primary answers. A completed or successful claim with no
   `path:line`, test output or exit code is replaced by an explicit `UNVERIFIED`
-  message in the same provider protocol (OpenAI JSON and SSE are rebuilt). The
-  message states what failed, that the agent has been stopped, and what the user
-  can do next (supply evidence, ask for an explicitly unverified explanation, or
-  start a new instruction). The replacement is terminal (`finish_reason: stop`
-  for OpenAI Chat, `stop_reason: end_turn` for Anthropic) so the client does not
-  continue the stopped turn. It must not end in a silent dead-end. Paths outside
-  the allowed root are rejected. Unsupported protocols are passed through and
-  audited as `NOT_TESTED`; the gate never claims to prove factual truth. Set
+  message in the same provider protocol (OpenAI JSON and SSE are rebuilt). Only
+  the final answer is gated: a turn that carries an OpenAI `tool_calls` /
+  Anthropic `tool_use` / Responses `function_call` payload is intermediate and
+  passes through untouched, because rewriting its `finish_reason` to `stop`
+  terminated the tool chain mid-task. Evidence is structural: the cited file must
+  exist and the cited line must be within it, test output must carry a count
+  (`78/78 pass`, `tests 81`, `exit code 0`), and a bare `line 177`, a bare `5/10`
+  or a path without a line is a reference, not proof. A blocked answer is also
+  a circuit-breaker event: the failure (agent, reason, violations, blocked text
+  preview) is stored under `agent/breaker/<sessionID>`, the user gets a synthetic
+  status line, and the session is switched to the next untried roster agent with a
+  queued prompt that demands evidence. After three failed agents the breaker
+  opens with an unresolved message and concrete next steps instead of another
+  silent stop. The replacement message states what failed, that the agent has
+  been stopped, and what the user can do next (supply evidence, ask for an
+  explicitly unverified explanation, or start a new instruction). The
+  replacement is terminal (`finish_reason: stop` for OpenAI Chat, `stop_reason:
+  end_turn` for Anthropic) so the client does not continue the stopped turn. It
+  must not end in a silent dead-end. Evidence paths are not sandboxed: the agent
+  may read any file, so a citation is accepted when the file and line exist,
+  whether it sits in the working directory, an OpenCode config/data root, or an
+  absolute/`~` path. An extension-less absolute file needs an explicit line
+  (`/etc/hostname:1`). Unsupported protocols are passed through and audited as
+  `NOT_TESTED`; the gate never claims to prove factual truth. Set
   `"responseGate": false` in the plugin config to disable it for diagnosis.
 
 The 15–20 first-principles skill map per agent lives in `docs/skill-map.md`.
@@ -190,9 +206,9 @@ The 15–20 first-principles skill map per agent lives in `docs/skill-map.md`.
 Observed:
 
 - self-test: 10/10 fixtures pass
-- plugin tests: 52/52 pass (`npm test`)
+- plugin tests: 66/66 pass (`npm test`)
 - typecheck: pass (`npm run typecheck`)
-- compact context pack: bounded at 6200 bytes; SSOT/syllabus/memory excerpts
+- compact context pack: bounded at 2800 bytes; role-scoped SSOT/syllabus/memory excerpts
 - response gate: OpenAI JSON and SSE rewrite tests pass; outside-root paths fail
 - live `/v1/models`: `PASS`
 - live chat (`pong`): `PASS`
@@ -460,8 +476,8 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  08fd997ed76e8180fbf98e882700d2d4c08f19989a51c2bef808cd89ea392fc6  ║
-║  files 52 · bytes 450795 · base cd69d81 · clean                          ║
+║  root  9ea676d6f7f54a28114559a825491cdc3d3c0d3e608ad31df687538917556fa5  ║
+║  files 55 · bytes 535927 · base 4b0a4c9 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -469,7 +485,7 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-21T03:26:46.730Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-22T13:30:21.441Z
 
 </div>
 <!-- INTEGRITY:END -->

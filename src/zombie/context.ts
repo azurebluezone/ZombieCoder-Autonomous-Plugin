@@ -13,12 +13,47 @@ import { readSyllabus } from "./syllabus.ts";
 import { memoryIndexFile, ssotFile, syllabusFile } from "./paths.ts";
 
 export const CONTEXT_LIMITS = {
-  ssot: 2200,
-  syllabus: 1800,
-  memoryPerMessage: 320,
-  memoryTotal: 1400,
-  total: 6200,
+  // Only the slices an agent needs for the current task. The full SSOT and
+  // syllabus stay on disk and are read on demand through tools.
+  ssot: 1200,
+  syllabus: 650,
+  memoryPerMessage: 220,
+  memoryTotal: 700,
+  total: 2800,
 } as const;
+
+// Which SSOT sections each role actually needs. A documentation agent does not
+// need the technology census; an architecture agent does not need the whole
+// structure tree. Unknown agents get the three cheap essentials.
+const SSOT_FOCUS: Record<string, string[]> = {
+  manu: ["## 1. Project", "## 3. Structure"],
+  jarin: ["## 2. Detected technologies", "## 3. Structure"],
+  brishti: ["## 1. Project", "## 2. Detected technologies"],
+  rashed: ["## 2. Detected technologies", "## 3. Structure"],
+  halim: ["## 1. Project", "## 3. Structure"],
+  majnu: ["## 1. Project", "## 2. Detected technologies"],
+  nila: ["## 3. Structure"],
+  tuhin: ["## 2. Detected technologies"],
+  zombiecoder: ["## 1. Project", "## 2. Detected technologies"],
+};
+const DEFAULT_SSOT_FOCUS = ["## 1. Project", "## 2. Detected technologies", "## 3. Structure"];
+const SSOT_SECTION_BUDGET: Record<string, number> = {
+  "## 1. Project": 350,
+  "## 2. Detected technologies": 260,
+  "## 3. Structure": 420,
+};
+
+// Who owns each context surface. The UI line names them so a user can see that
+// SSOT, syllabus and memory are being managed, not silently assumed.
+export const CONTEXT_OWNERS = {
+  ssot: { agent: "manu", role: "Chief Systems Architect" },
+  syllabus: { agent: "halim", role: "Documentation & Knowledge Engineer" },
+  memory: { agent: "zombiecoder", role: "Chief Arbiter" },
+  skills: { agent: "tuhin", role: "AIML & Model Auditor" },
+  gate: { agent: "brishti", role: "Chief Security & Trust Analyst" },
+} as const;
+
+export type ContextOwners = typeof CONTEXT_OWNERS;
 
 export type ContextFileStatus = {
   file: string;
@@ -44,6 +79,7 @@ export type ContextPack = {
   ssot: ContextFileStatus;
   syllabus: ContextFileStatus;
   memory: MemoryStatus;
+  owners: ContextOwners;
 };
 
 function clip(text: string, limit: number, from: "head" | "tail" = "head"): string {
@@ -81,21 +117,19 @@ function section(text: string, prefix: string, limit: number): string {
   return clip(body, limit);
 }
 
-function ssotExcerpt(text: string): string {
-  const parts = [
-    section(text, "## 1. Project", 700),
-    section(text, "## 2. Detected technologies", 700),
-    section(text, "## 3. Structure", 900),
-    section(text, "## 7. Agent team", 900),
-  ].filter(Boolean);
+function ssotExcerpt(text: string, agentID: string): string {
+  const focus = SSOT_FOCUS[agentID] ?? DEFAULT_SSOT_FOCUS;
+  const parts = focus
+    .map((prefix) => section(text, prefix, SSOT_SECTION_BUDGET[prefix] ?? 300))
+    .filter(Boolean);
   return clip(parts.join("\n\n"), CONTEXT_LIMITS.ssot);
 }
 
 function syllabusExcerpt(text: string): string {
-  const scope = section(text, "## 1. Scope", 450);
-  const agents = section(text, "## 3. Agents bound", 500);
-  const lessons = section(text, "## 5. Lessons", 1000);
-  return clip([scope, agents, lessons].filter(Boolean).join("\n\n"), CONTEXT_LIMITS.syllabus, "tail");
+  // Lessons are the only syllabus content that changes per turn. Scope and the
+  // agent list are already in the system prompt, so do not pay for them twice.
+  const lessons = section(text, "## 5. Lessons", CONTEXT_LIMITS.syllabus);
+  return clip(lessons, CONTEXT_LIMITS.syllabus, "tail");
 }
 
 function memorySummary(recent: MemoryMessage[]): string {
@@ -144,33 +178,35 @@ export function buildContextPack(
     "## ZombieCoder Compact Context Pack",
     "",
     `Agent: ${agentID}`,
-    `Goal: work inside the allowed root, read only the files needed, and make every claim evidence-backed.`,
     `Allowed root: ${projectRoot}`,
     `Path policy: paths outside the allowed root are denied; a claim with no path/test evidence is UNVERIFIED.`,
     "",
     `### SSOT (${ssot.exists ? `${ssot.bytes}B, ${ssot.lines} lines` : "missing"})`,
-    ssot.exists ? ssotExcerpt(ssotText ?? "") : `Missing: ${ssotPath}. Run the plugin setup before making claims.`,
+    ssot.exists
+      ? ssotExcerpt(ssotText ?? "", agentID)
+      : `Missing: ${ssotPath}. Run the plugin setup before making claims.`,
     "",
     `### Syllabus (${syllabus.exists ? `${syllabus.bytes}B, ${syllabus.lines} lines` : "missing"})`,
     syllabus.exists
       ? syllabusExcerpt(syllabusText ?? "")
       : `Missing: ${syllabusPath}. Run the plugin setup before making claims.`,
     "",
-    `### Session memory (${memory.recent} recent, ${memory.archives} archives)`,
+    `### Session memory (${memory.recent} recent, ${memory.archives} archives) — owner: ${CONTEXT_OWNERS.memory.agent}`,
     memorySummary(recent),
     "",
-    "### Context rules",
-    "- Read the specific file/section before claiming a fact; do not reload the whole project.",
-    "- Do not send secrets or whole repository contents to the provider.",
-    "- If the pack is insufficient, call `context_status`, then read only the named file/section.",
+    "### Context ownership (visible in the UI)",
+    `- SSOT → ${CONTEXT_OWNERS.ssot.agent} (${CONTEXT_OWNERS.ssot.role})`,
+    `- Syllabus → ${CONTEXT_OWNERS.syllabus.agent} (${CONTEXT_OWNERS.syllabus.role})`,
+    `- Memory → ${CONTEXT_OWNERS.memory.agent} (${CONTEXT_OWNERS.memory.role})`,
+    `- Skills → ${CONTEXT_OWNERS.skills.agent} (${CONTEXT_OWNERS.skills.role})`,
+    `- Evidence gate → ${CONTEXT_OWNERS.gate.agent} (${CONTEXT_OWNERS.gate.role})`,
   ];
   const text = clip(lines.join("\n"), CONTEXT_LIMITS.total);
-  const uiLine = `Context: SSOT ${ssot.exists ? "OK" : "MISSING"} | Syllabus ${
+  const uiLine = `Context: SSOT ${ssot.exists ? "OK" : "MISSING"} (${CONTEXT_OWNERS.ssot.agent}) | Syllabus ${
     syllabus.exists ? "OK" : "MISSING"
-  } | Memory ${memory.recent} recent / ${memory.archives} archives | Pack ${Buffer.byteLength(
-    text,
-    "utf8",
-  )}B`;
+  } (${CONTEXT_OWNERS.syllabus.agent}) | Memory ${memory.recent} recent / ${memory.archives} archives (${
+    CONTEXT_OWNERS.memory.agent
+  }) | Pack ${Buffer.byteLength(text, "utf8")}B`;
   return {
     text,
     bytes: Buffer.byteLength(text, "utf8"),
@@ -179,6 +215,7 @@ export function buildContextPack(
     ssot,
     syllabus,
     memory,
+    owners: CONTEXT_OWNERS,
   };
 }
 

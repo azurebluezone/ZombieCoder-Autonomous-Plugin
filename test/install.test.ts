@@ -35,12 +35,18 @@ function withServer(
 
 function runInstaller(
   args: string[],
+  env: Record<string, string | null> = {},
 ): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    const childEnv = { ...process.env };
+    for (const [key, value] of Object.entries(env)) {
+      if (value === null) delete childEnv[key];
+      else childEnv[key] = value;
+    }
     const child = spawn(
       process.execPath,
       ["--experimental-strip-types", INSTALLER, ...args],
-      { cwd: ROOT },
+      { cwd: ROOT, env: childEnv },
     );
     let stdout = "";
     let stderr = "";
@@ -154,6 +160,145 @@ test("installer --config-dir creates a complete self-contained config root", asy
         }
       } finally {
         fs.rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+test("installer links a self-contained home to OpenCode's canonical loader", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-link-home-"));
+  const selfRoot = path.join(home, ".opencode");
+  const canonical = path.join(home, ".config", "opencode");
+  fs.mkdirSync(path.join(selfRoot, "node_modules"), { recursive: true });
+  const result = await runInstaller(
+    ["--config-dir", selfRoot, "--yes", "--no-install", "--provider-url", "none"],
+    { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config"), EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL: null },
+  );
+  try {
+    assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
+    for (const item of ["opencode.json", "agents", "plugins", "zombiecoder", "node_modules", "package.json"]) {
+      const link = path.join(canonical, item);
+      assert.equal(fs.lstatSync(link).isSymbolicLink(), true, `${item} should link into the self-contained root`);
+      assert.equal(fs.realpathSync(link), fs.realpathSync(path.join(selfRoot, item)));
+    }
+    assert.match(result.stdout, /link self-contained root to global loader/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("installer uses free agent assignments when the project environment URL is empty", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-free-env-"));
+  const roster = await import("../src/roster.ts");
+  const assignment = Object.fromEntries(
+    roster.ROSTER.map((agent, index) => [agent.id, `opencode/free-model-${index + 1}`]),
+  );
+  fs.writeFileSync(
+    path.join(root, ".environment"),
+    "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL=\n",
+  );
+  fs.writeFileSync(
+    path.join(root, "opencode.json"),
+    JSON.stringify({ agents: roster.renderAgentsConfig(roster.ROSTER, assignment) }, null, 2),
+  );
+  const result = await runInstaller(
+    ["--dir", root, "--yes", "--no-install"],
+    { EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL: null, ZOMBIECODER_PROVIDER_URL: null },
+  );
+  try {
+    assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
+    const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+    assert.equal(config.model, undefined);
+    for (const agent of roster.ROSTER) {
+      assert.equal(config.agents[agent.id].model, assignment[agent.id]);
+    }
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"));
+    assert.equal(state.customProviderUrl, "");
+    assert.equal(state.modelStrategy, "free");
+    const plan = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", "models.json"), "utf8"));
+    assert.equal(plan.strategy, "free-fallback");
+    assert.match(result.stdout, /modelStrategy: free/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("installer reads the compatible URL from the project .environment file", async () => {
+  await withServer(
+    providerHandler,
+    async (base) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-environment-url-"));
+      const apiKey = "project-provider-secret-123";
+      fs.writeFileSync(
+        root + "/.environment",
+        [
+          `EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL=${base}`,
+          `EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY=${apiKey}`,
+          "",
+        ].join("\n"),
+      );
+      const result = await runInstaller(
+        ["--dir", root, "--yes", "--no-install"],
+        { EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL: null, ZOMBIECODER_PROVIDER_URL: null },
+      );
+      try {
+        assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
+        const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+        assert.equal(config.providers.missionbarisal.settings.baseURL, base);
+        assert.equal(config.providers.missionbarisal.settings.apiKey, apiKey);
+        assert.equal(config.agents.manu.model, "missionbarisal/live-model");
+        const state = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"));
+        assert.equal(state.customProviderUrl, base);
+        assert.equal(state.customProviderApiKey, apiKey);
+        assert.equal(state.modelStrategy, "auto");
+        assert.ok(!result.stdout.includes(apiKey));
+        assert.ok(!result.stderr.includes(apiKey));
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+test("installer reads and registers the MCP URL from the project .environment file", async () => {
+  await withServer(
+    (req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += String(chunk)));
+      req.on("end", () => {
+        const body = JSON.parse(raw || "{}");
+        res.setHeader("content-type", "application/json");
+        if (body.method === "notifications/initialized") {
+          res.statusCode = 202;
+          res.end();
+          return;
+        }
+        const result =
+          body.method === "initialize"
+            ? {
+                protocolVersion: "2024-11-05",
+                capabilities: { tools: {} },
+                serverInfo: { name: "test-mcp", version: "1.0.0" },
+              }
+            : { tools: [{ name: "example" }] };
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }));
+      });
+    },
+    async (base) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-environment-mcp-"));
+      fs.writeFileSync(root + "/.environment", `EXTERNAL_MCP_URL=${base}\n`);
+      const result = await runInstaller(
+        ["--dir", root, "--yes", "--no-install"],
+        { EXTERNAL_MCP_URL: null, ZOMBIECODER_MCP_URL: null },
+      );
+      try {
+        assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
+        const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+        assert.equal(config.mcp.servers.zombiecoder.url, base);
+        const state = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"));
+        assert.equal(state.mcpUrl, base);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
       }
     },
   );

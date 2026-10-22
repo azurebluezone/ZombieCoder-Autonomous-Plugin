@@ -182,6 +182,7 @@ export function freeModels(catalog: Catalog): CatalogModel[] {
       m.inputCost === 0 &&
       m.outputCost === 0 &&
       m.enabled !== false &&
+      m.tools !== false &&
       (m.status === null || m.status === "active"),
   );
 }
@@ -265,17 +266,25 @@ export function assignModels(
     for (const a of agents) assignment[a.id] = baseline;
     return assignment;
   }
+  // Round-robin over a sorted pool: deterministic for the same roster and
+  // catalog, and it spreads agents across different models instead of letting
+  // hash collisions put half the team on one model. Parallel agents on distinct
+  // models do not queue behind each other.
+  const pool = [...candidates].sort();
+  let cursor = 0;
   for (const a of agents) {
     // A roster entry pinned by hand wins; otherwise the mapping is stable by
     // default, and intentionally random only when the owner asks for it.
-    if (a.model && a.model !== baseline && candidates.includes(a.model)) {
+    if (a.model && a.model !== baseline && pool.includes(a.model)) {
       assignment[a.id] = a.model;
       continue;
     }
-    const index = randomize
-      ? Math.floor(Math.random() * candidates.length)
-      : stableHash(a.id) % candidates.length;
-    assignment[a.id] = candidates[index];
+    if (randomize) {
+      assignment[a.id] = pool[Math.floor(Math.random() * pool.length)];
+      continue;
+    }
+    assignment[a.id] = pool[cursor % pool.length];
+    cursor += 1;
   }
   return assignment;
 }
@@ -311,7 +320,15 @@ export async function resolveModels(
 
   const catalog = await readCatalog(doors);
   const defaultModel = await readDefaultModel(doors);
-  const free = freeModels(catalog);
+  // A free model from the *custom* provider is still the custom provider: if its
+  // server is down, or its context window is too small, assigning it to agents
+  // is the same failure. Free fallback means OpenCode's own catalog. Anchor on
+  // the baseline model's provider (opencode/*), not the catalog default: the
+  // default can point at a local provider (ollama-cloud) that is not reachable.
+  const freeAll = freeModels(catalog).filter((m) => m.providerID !== customProviderID);
+  const baselineProviderID = baselineModel.split("/")[0];
+  const preferred = freeAll.filter((m) => m.providerID === baselineProviderID);
+  const free = preferred.length > 0 ? preferred : freeAll;
   notes.push(
     `catalog(${doors?.provider ? "provider.list" : "no-provider-door"}/${
       doors?.model ? "model.list" : "no-model-door"

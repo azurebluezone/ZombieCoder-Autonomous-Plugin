@@ -8,6 +8,7 @@ coverage/
 __pycache__/
 *.pyc
 origin/origin-profile.json
+.environment
 
 # Installer output for this repo; the plugin source is not a consumer project.
 opencode.json

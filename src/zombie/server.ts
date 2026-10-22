@@ -137,6 +137,7 @@ export function rpcDefinition() {
           ssot: { type: "object" },
           syllabus: { type: "object" },
           memory: { type: "object" },
+          owners: { type: "object" },
         }),
       },
       agents: {
@@ -216,6 +217,7 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
           ssot: pack.ssot,
           syllabus: pack.syllabus,
           memory: pack.memory,
+          owners: pack.owners,
         };
       },
 
@@ -333,8 +335,14 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             type: "string",
             enum: ["auto", "models", "chat", "stream", "responses", "anthropic", "tls", "claim"],
           },
+          claim: { type: "string", description: "Inline factual claim; used when file is omitted." },
+          evidence: {
+            type: "array",
+            description: "Inline evidence records for a claim: [{source, observation, verified}].",
+            items: { type: "object" },
+          },
         },
-        required: ["file"],
+        required: [],
         additionalProperties: false,
       },
       run: (input: any) => {
@@ -344,27 +352,59 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             "evidence_gate.py is not installed; run the ZombieCoder installer to copy runtime assets",
           );
         }
+        let file: string;
+        let ephemeral = false;
         const requested = String(input?.file ?? "").trim();
-        if (!requested) throw new Error("file is required");
-        const file = path.isAbsolute(requested)
-          ? requested
-          : path.resolve(deps.projectRoot(), requested);
-        if (!fs.existsSync(file)) throw new Error(`evidence payload not found: ${file}`);
-        const kind = String(input?.kind ?? "auto");
-        const result = spawnSync("python3", [script, "--kind", kind, "--file", file], {
-          encoding: "utf8",
-          timeout: 30000,
-          maxBuffer: 4 * 1024 * 1024,
-        });
-        if (result.error) throw new Error(`evidence_gate failed: ${result.error.message}`);
-        const stdout = String(result.stdout ?? "").trim();
-        if (!stdout) {
-          throw new Error(`evidence_gate returned no output (exit ${result.status ?? "unknown"})`);
+        if (requested) {
+          file = path.isAbsolute(requested)
+            ? requested
+            : path.resolve(deps.projectRoot(), requested);
+        } else if (String(input?.claim ?? "").trim()) {
+          const dir = path.join(deps.projectRoot(), ".zombiecoder", ".state");
+          fs.mkdirSync(dir, { recursive: true });
+          file = path.join(dir, `evidence-gate-${process.pid}-${Date.now()}.json`);
+          fs.writeFileSync(
+            file,
+            JSON.stringify({
+              claim: String(input.claim),
+              evidence: Array.isArray(input.evidence) ? input.evidence : [],
+            }),
+            { mode: 0o600 },
+          );
+          ephemeral = true;
+        } else {
+          throw new Error("file or claim is required");
         }
+        if (!fs.existsSync(file)) throw new Error(`evidence payload not found: ${file}`);
         try {
-          return JSON.parse(stdout);
-        } catch {
-          throw new Error(`evidence_gate returned non-JSON output: ${stdout.slice(0, 200)}`);
+          const kind = String(input?.kind ?? (ephemeral ? "claim" : "auto"));
+          const result = spawnSync(
+            "python3",
+            [script, "--kind", kind, "--file", file, "--root", deps.projectRoot()],
+            {
+              encoding: "utf8",
+              timeout: 30000,
+              maxBuffer: 4 * 1024 * 1024,
+            },
+          );
+          if (result.error) throw new Error(`evidence_gate failed: ${result.error.message}`);
+          const stdout = String(result.stdout ?? "").trim();
+          if (!stdout) {
+            throw new Error(`evidence_gate returned no output (exit ${result.status ?? "unknown"})`);
+          }
+          try {
+            return JSON.parse(stdout);
+          } catch {
+            throw new Error(`evidence_gate returned non-JSON output: ${stdout.slice(0, 200)}`);
+          }
+        } finally {
+          if (ephemeral) {
+            try {
+              fs.unlinkSync(file);
+            } catch {
+              // best-effort cleanup of the ephemeral payload
+            }
+          }
         }
       },
     },

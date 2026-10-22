@@ -148,18 +148,19 @@ function targetVerify(target) {
   const syllabusFile = path.join(zd, "syllabus.md");
   const ssot = fileInfo(ssotFile);
   const syllabus = fileInfo(syllabusFile);
+  const memoryIndex = fileInfo(path.join(zd, "memory", "index.json"));
   const ssotText = readTextIfExists(ssotFile) ?? "";
   const syllabusText = readTextIfExists(syllabusFile) ?? "";
   return {
     zombiecoder: zd,
     ssot,
     syllabus,
-    memoryIndex: fileInfo(path.join(zd, "memory", "index.json")),
+    memoryIndex,
     setupReport: fileInfo(path.join(zd, ".state", "setup-report.json")),
     configureReport: fileInfo(path.join(zd, ".state", "configure-report.json")),
     hasProjectMap: syllabusText.includes("### Project map"),
     hasAgentTeam: ssotText.includes("## 7. Agent team"),
-    ok: ssot.exists && syllabus.exists,
+    ok: ssot.exists && syllabus.exists && memoryIndex.exists,
   };
 }
 
@@ -198,9 +199,9 @@ function printStatusHuman(report) {
   );
   console.log(`  SSOT.md              : ${fmtFile(p.ssot)}`);
   console.log(`  syllabus.md          : ${fmtFile(p.syllabus)}`);
+  console.log(`  memory/index.json    : ${fmtFile(p.memoryIndex)}`);
   console.log(`  Project map          : ${p.hasProjectMap ? "yes" : "no"}`);
   console.log(`  Agent team (SSOT)    : ${p.hasAgentTeam ? "yes" : "no"}`);
-  console.log(`  memory/index.json    : ${fmtFile(p.memoryIndex)}`);
   console.log(`  .state/setup-report  : ${fmtFile(p.setupReport)}`);
   console.log(`  .state/configure     : ${fmtFile(p.configureReport)}`);
 }

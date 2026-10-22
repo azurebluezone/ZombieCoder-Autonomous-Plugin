@@ -8,11 +8,12 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildContextPack, resolveAllowedPath } from "../src/zombie/context.ts";
+import { buildContextPack, CONTEXT_LIMITS, resolveAllowedPath } from "../src/zombie/context.ts";
 import {
   applyResponseGate,
   evaluateResponse,
   parseResponseBody,
+  resolveEvidencePath,
 } from "../src/zombie/responseGate.ts";
 
 function tempProject(): string {
@@ -22,6 +23,11 @@ function tempProject(): string {
 function seedProject(): string {
   const root = tempProject();
   fs.mkdirSync(path.join(root, ".zombiecoder", "memory"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "src", "plugin.ts"),
+    Array.from({ length: 800 }, (_, index) => `// line ${index + 1}`).join("\n") + "\n",
+  );
   fs.writeFileSync(
     path.join(root, ".zombiecoder", "SSOT.md"),
     [
@@ -76,11 +82,17 @@ test("context pack merges SSOT, syllabus and memory into a bounded pack", () => 
   assert.match(pack.text, /### Syllabus/);
   assert.match(pack.text, /### Session memory \(2 recent, 0 archives\)/);
   assert.match(pack.text, /Allowed root: /);
-  assert.ok(pack.bytes > 0 && pack.bytes <= 6200, `pack must stay bounded, got ${pack.bytes}`);
-  assert.match(pack.uiLine, /Context: SSOT OK \| Syllabus OK \| Memory 2 recent/);
+  assert.ok(pack.bytes > 0 && pack.bytes <= CONTEXT_LIMITS.total, `pack must stay bounded, got ${pack.bytes}`);
+  assert.match(pack.uiLine, /Context: SSOT OK \(manu\) \| Syllabus OK \(halim\) \| Memory 2 recent/);
   assert.equal(pack.ssot.exists, true);
   assert.equal(pack.syllabus.exists, true);
   assert.equal(pack.allowedRoot, root);
+  assert.equal(pack.owners.ssot.agent, "manu");
+  assert.equal(pack.owners.syllabus.agent, "halim");
+  assert.equal(pack.owners.memory.agent, "zombiecoder");
+  assert.match(pack.uiLine, /SSOT OK \(manu\)/);
+  assert.match(pack.uiLine, /Syllabus OK \(halim\)/);
+  assert.match(pack.text, /### Context ownership/);
 });
 
 test("context pack marks missing SSOT instead of inventing content", () => {
@@ -120,7 +132,7 @@ test("response gate blocks an unproven claim and passes real evidence", () => {
     { allowedRoot: root },
   );
   assert.equal(outside.passed, false);
-  assert.ok(outside.violations.length > 0);
+  assert.match(outside.reason, /does not exist/);
 
   const urlOnly = evaluateResponse(
     "I fixed the bug in the login flow; see https://example.com/src/plugin.ts:759 for the patch.",
@@ -140,6 +152,47 @@ test("response gate blocks an unproven claim and passes real evidence", () => {
   );
   assert.equal(explanatory.passed, true);
   assert.match(explanatory.reason, /explanatory/);
+});
+
+test("response gate blocks a short Bengali success claim", () => {
+  const root = seedProject();
+  const blocked = evaluateResponse("ফিক্স করেছি, টেস্ট পাস করেছে।", {
+    allowedRoot: root,
+  });
+  assert.equal(blocked.passed, false);
+  assert.match(blocked.reason, /claim without evidence/);
+});
+
+test("response gate lets a Bengali explanation through", () => {
+  const root = seedProject();
+  const ok = evaluateResponse("এই ফাংশনটা ঠিক করার উপায় হলো পাথ যাচাই করা।", {
+    allowedRoot: root,
+  });
+  assert.equal(ok.passed, true);
+});
+
+test("response gate rejects a file path that does not exist", () => {
+  const root = seedProject();
+  const fake = evaluateResponse(
+    "I fixed the bug in src/ghost.ts:42 and the suite passed 45/45 tests.",
+    { allowedRoot: root },
+  );
+  assert.equal(fake.passed, false);
+  assert.match(fake.reason, /does not exist/);
+});
+
+test("response gate blocks a short success claim instead of treating it as trivial", () => {
+  const root = seedProject();
+  const short = evaluateResponse("সব ঠিক আছে", { allowedRoot: root });
+  assert.equal(short.passed, false);
+  assert.match(short.reason, /short claim without evidence/);
+
+  const shortEnglish = evaluateResponse("Everything works now", { allowedRoot: root });
+  assert.equal(shortEnglish.passed, false);
+
+  const greeting = evaluateResponse("OK", { allowedRoot: root });
+  assert.equal(greeting.passed, true);
+  assert.match(greeting.reason, /trivial/);
 });
 
 test("parseResponseBody extracts OpenAI JSON and SSE assistant text", () => {
@@ -244,4 +297,227 @@ test("applyResponseGate rewrites an unproven SSE stream into a truthful stream",
   assert.match(body, /এখন কী করব/);
   assert.match(body, /"finish_reason":"stop"/);
   assert.match(body, /^data: /m);
+});
+
+test("response gate skips an intermediate tool-call turn instead of killing the chain", async () => {
+  const root = seedProject();
+  // Real regression: this exact prose was gated on a tool turn and the gate
+  // rewrote finish_reason to "stop", ending the task mid-flight.
+  const progress = "এখন edit.blade.php আর shipment.blade.php-এ একই পরিবর্তন করি";
+  const sse = [
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: "assistant", content: progress }, finish_reason: null }] })}`,
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "edit", arguments: "{}" } }] }, finish_reason: "tool_calls" }] })}`,
+    "data: [DONE]",
+    "",
+  ].join("\n");
+  const sseResponse = new Response(sse, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+  const parsed = parseResponseBody(sse, "text/event-stream");
+  assert.equal(parsed.toolCalls, true);
+
+  const sseResult = await applyResponseGate(sseResponse, { allowedRoot: root });
+  assert.equal(sseResult.verdict.passed, true);
+  assert.match(sseResult.verdict.reason, /tool-call turn/);
+  assert.equal(sseResult.response, sseResponse, "tool turn must pass through untouched");
+  assert.equal((await sseResult.response.text()).includes("finish_reason\":\"stop"), false);
+
+  const jsonResponse = new Response(
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: "I fixed the login bug.",
+            tool_calls: [{ id: "call_2", type: "function", function: { name: "read", arguments: "{}" } }],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+  const jsonResult = await applyResponseGate(jsonResponse, { allowedRoot: root });
+  assert.equal(jsonResult.verdict.passed, true);
+  assert.equal(jsonResult.response, jsonResponse);
+
+  // The final answer (no tool call) must still be gated.
+  const finalSse = [
+    `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: progress } }] })}`,
+    "data: [DONE]",
+    "",
+  ].join("\n");
+  const finalResult = await applyResponseGate(
+    new Response(finalSse, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    { allowedRoot: root },
+  );
+  assert.equal(finalResult.verdict.passed, false);
+
+  // Prose that merely mentions a tool-call field is not a tool call.
+  const prose = parseResponseBody(
+    JSON.stringify({ choices: [{ message: { content: "the function_call field is empty here" } }] }),
+    "application/json",
+  );
+  assert.equal(prose.toolCalls, false);
+});
+
+test("response gate detects Anthropic tool_use blocks", () => {
+  const anthropic = parseResponseBody(
+    JSON.stringify({
+      type: "message",
+      content: [
+        { type: "text", text: "checking the file" },
+        { type: "tool_use", id: "toolu_1", name: "read", input: {} },
+      ],
+    }),
+    "application/json",
+  );
+  assert.equal(anthropic.protocol, "anthropic");
+  assert.equal(anthropic.toolCalls, true);
+
+  const textOnly = parseResponseBody(
+    JSON.stringify({ type: "message", content: [{ type: "text", text: "done" }] }),
+    "application/json",
+  );
+  assert.equal(textOnly.toolCalls, false);
+});
+
+test("response gate resolves a bare basename that lives in a nested directory", () => {
+  const root = seedProject();
+  fs.mkdirSync(path.join(root, "resources", "views"), { recursive: true });
+  fs.writeFileSync(path.join(root, "resources", "views", "edit.blade.php"), "<div></div>\n");
+  fs.writeFileSync(path.join(root, "resources", "views", "shipment.blade.php"), "<div></div>\n");
+
+  const resolution = resolveEvidencePath(root, "edit.blade.php");
+  assert.equal(resolution.status, "ok");
+  assert.equal(resolution.status === "ok" && resolution.exact, false);
+
+  // The old failure mode: "file path does not exist inside allowed root".
+  const progress = evaluateResponse(
+    "এখন edit.blade.php আর shipment.blade.php-এ একই পরিবর্তন করি",
+    { allowedRoot: root },
+  );
+  assert.equal(progress.violations.length, 0);
+  assert.doesNotMatch(progress.reason, /does not exist/);
+  assert.equal(progress.passed, true);
+
+  // A claim that names only a basename has no path:line, so it is still blocked
+  // as a claim without evidence — but not as an escape.
+  const claim = evaluateResponse("আমি edit.blade.php ঠিক করেছি", { allowedRoot: root });
+  assert.equal(claim.passed, false);
+  assert.match(claim.reason, /claim without evidence/);
+  assert.equal(claim.violations.length, 0);
+
+  const ghost = evaluateResponse(
+    "আমি ghost.blade.php ফাইলটা ঠিক করেছি, এখন পুরো ফ্লো ঠিকঠাক চলছে।",
+    { allowedRoot: root },
+  );
+  assert.equal(ghost.passed, false);
+  assert.match(ghost.reason, /does not exist/);
+});
+
+test("evidence outside the working directory counts when the file exists", () => {
+  const root = seedProject();
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-outside-"));
+  const outsideFile = path.join(outsideDir, "config.json");
+  fs.writeFileSync(outsideFile, "{\n  \"ok\": true\n}\n");
+
+  // Absolute path outside the root: readable by the agent, so it is evidence.
+  const absolute = resolveEvidencePath(root, `${outsideFile}:2`);
+  assert.equal(absolute.status, "ok");
+  assert.equal(absolute.status === "ok" && absolute.file, outsideFile);
+  const claim = evaluateResponse(`I fixed it in ${outsideFile}:2 and 78/78 tests pass.`, {
+    allowedRoot: root,
+  });
+  assert.equal(claim.passed, true);
+
+  // ".." is resolved, not rejected: a real file is evidence, a missing one is not.
+  const viaParent = resolveEvidencePath(root, `../${path.basename(outsideDir)}/config.json`);
+  assert.equal(viaParent.status, "ok");
+  assert.equal(resolveEvidencePath(root, "../outside/ghost.ts").status, "missing");
+
+  // A global config citation resolves through the extra OpenCode roots.
+  const globalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-global-"));
+  fs.mkdirSync(path.join(globalRoot, "zombiecoder"), { recursive: true });
+  fs.writeFileSync(path.join(globalRoot, "zombiecoder", "syllabus.md"), "# syllabus\n");
+  const globalCitation = resolveEvidencePath(root, "zombiecoder/syllabus.md", [globalRoot]);
+  assert.equal(globalCitation.status, "ok");
+  assert.equal(
+    globalCitation.status === "ok" && globalCitation.file,
+    path.join(globalRoot, "zombiecoder", "syllabus.md"),
+  );
+
+  const missing = evaluateResponse(
+    "I fixed it in zombiecoder/syllabus.md:3 and everything works.",
+    { allowedRoot: root },
+  );
+  assert.equal(missing.passed, false);
+  assert.match(missing.reason, /does not exist/);
+});
+
+test("response gate rejects weak evidence shapes and keeps real results", () => {
+  const root = seedProject();
+  const weak = [
+    "I fixed the bug; see line 177 for the change.",
+    "I fixed the bug and the checks are green at 5/10.",
+    "I fixed the bug in src/plugin.ts.",
+    "I fixed the bug; ran npm test.",
+  ];
+  for (const text of weak) {
+    const verdict = evaluateResponse(text, { allowedRoot: root });
+    assert.equal(verdict.passed, false, `${text} -> ${verdict.reason}`);
+    assert.match(verdict.reason, /claim without evidence/, text);
+  }
+
+  const strong = [
+    "I fixed the bug in src/plugin.ts:759.",
+    "I fixed the bug; the suite is 78/78 pass.",
+    "I fixed the bug; exit code 0.",
+    "I fixed the bug; npm test reported 80 pass.",
+  ];
+  for (const text of strong) {
+    const verdict = evaluateResponse(text, { allowedRoot: root });
+    assert.equal(verdict.passed, true, `${text} -> ${verdict.reason}`);
+  }
+
+  const outOfRange = evaluateResponse(
+    "I fixed the bug in src/plugin.ts:9999 and the login flow now behaves correctly.",
+    { allowedRoot: root },
+  );
+  assert.equal(outOfRange.passed, false);
+  assert.match(outOfRange.reason, /line out of range/);
+});
+
+test("absolute, extension-less and OpenCode config-root evidence is accepted when real", () => {
+  const root = seedProject();
+
+  // An extension-less absolute file (/etc/hostname style) with an explicit line.
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-bare-"));
+  const bareFile = path.join(bare, "hostname");
+  fs.writeFileSync(bareFile, "host-a\n");
+  const bareClaim = evaluateResponse(`I read ${bareFile}:1 and fixed the gate.`, {
+    allowedRoot: root,
+  });
+  assert.equal(bareClaim.passed, true);
+  assert.match(bareClaim.reason, /evidence:/);
+
+  // A file under the OpenCode config root ($XDG_CONFIG_HOME/opencode) is evidence.
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-xdg-"));
+  const note = path.join(configHome, "opencode", "plugins", "zombiecoder", "note.md");
+  fs.mkdirSync(path.dirname(note), { recursive: true });
+  fs.writeFileSync(note, "# note\n");
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = configHome;
+  try {
+    const globalClaim = evaluateResponse(
+      "I read plugins/zombiecoder/note.md:1 and fixed the gate.",
+      { allowedRoot: root },
+    );
+    assert.equal(globalClaim.passed, true);
+    assert.match(globalClaim.reason, /evidence:/);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previous;
+  }
 });

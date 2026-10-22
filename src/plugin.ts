@@ -26,11 +26,26 @@ import {
   type AgentDef,
 } from "./roster.ts";
 import { bootstrapDirs, configFile, setupReportFile } from "./zombie/paths.ts";
-import { ensureDir, readJson, writeJson, writeAtomic, redact, PLUGIN_VERSION } from "./zombie/io.ts";
+import {
+  ensureDir,
+  readEnvironmentFile,
+  readJson,
+  writeJson,
+  writeAtomic,
+  redact,
+  PLUGIN_VERSION,
+} from "./zombie/io.ts";
 import { scanProject } from "./zombie/scan.ts";
 import { writeSsot } from "./zombie/ssot.ts";
 import { ensureSyllabus } from "./zombie/syllabus.ts";
-import { keepRecent, readRecent, touchIndex } from "./zombie/memory.ts";
+import {
+  archiveSessionSnapshot,
+  keepRecent,
+  readIndex,
+  readRecent,
+  touchIndex,
+  writeIndex,
+} from "./zombie/memory.ts";
 import { resolveModels, type CatalogDoors, type ModelStrategy } from "./zombie/models.ts";
 import {
   DEFAULT_CUSTOM_PROVIDER_ID,
@@ -47,6 +62,15 @@ import { registerSkills } from "./zombie/skills.ts";
 import { autoInstallProjectSkills, DEFAULT_SKILL_REPO } from "./zombie/skillCatalog.ts";
 import { buildContextPack } from "./zombie/context.ts";
 import { applyResponseGate } from "./zombie/responseGate.ts";
+import {
+  BREAKER_LIMIT,
+  breakerContext,
+  decideBreaker,
+  fallbackPrompt,
+  readBreakerState,
+  statusMessage,
+  unresolvedMessage,
+} from "./zombie/circuitBreaker.ts";
 import { registerRpc, registerTools, audit } from "./zombie/server.ts";
 
 export const PLUGIN_ID = "zombiecoder";
@@ -164,7 +188,11 @@ type Ctx = {
     reload?: () => Promise<void>;
     transform?: (cb: (editor: any) => void) => Promise<{ dispose: () => Promise<void> }>;
   };
-  session?: { hook?: (name: string, cb: (event: any) => any) => Promise<{ dispose: () => Promise<void> }> };
+  session?: {
+    context?: (input: { sessionID: string }) => Promise<any[]>;
+    switchAgent?: (input: { sessionID: string; agent: string }) => Promise<void>;
+    hook?: (name: string, cb: (event: any) => any) => Promise<{ dispose: () => Promise<void> }>;
+  };
   tool?: {
     hook?: (name: string, cb: (event: any) => any) => Promise<{ dispose: () => Promise<void> }>;
     transform?: (cb: (editor: any) => void) => Promise<{ dispose: () => Promise<void> }>;
@@ -185,7 +213,7 @@ type Ctx = {
   };
   rpc?: { register: (definition: any, handlers: any) => Promise<any> };
   storage: { get: (key: string) => Promise<unknown>; set: (key: string, value: any) => Promise<void> };
-  event?: { subscribe?: (cb: (event: any) => any) => Promise<{ dispose: () => Promise<void> }> };
+  event?: { subscribe?: (options?: { signal?: AbortSignal }) => AsyncIterable<any> };
 };
 
 type Report = {
@@ -274,19 +302,47 @@ function loadConfig(projectRoot: string): ZombieConfig {
     {};
   const existing = readJson<Partial<ZombieConfig>>(configFile(projectRoot));
   const merged = { ...DEFAULT_CONFIG, ...global, ...(existing ?? {}) };
+  const projectEnvironment = readEnvironmentFile(path.join(projectRoot, ".environment"));
+  const externalUrlPresent =
+    Object.prototype.hasOwnProperty.call(process.env, "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL") ||
+    Object.prototype.hasOwnProperty.call(projectEnvironment, "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL");
+  const externalUrl = Object.prototype.hasOwnProperty.call(
+    process.env,
+    "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL",
+  )
+    ? String(process.env.EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL ?? "").trim()
+    : String(projectEnvironment.EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL ?? "").trim();
+  const externalApiKey =
+    envOverride("EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY") ??
+    envOverride("ZOMBIECODER_PROVIDER_KEY") ??
+    envOverride("ZOMBIECODER_API_KEY") ??
+    projectEnvironment.EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY;
+  const externalMcpUrl =
+    envOverride("EXTERNAL_MCP_URL") ??
+    envOverride("ZOMBIECODER_MCP_URL") ??
+    projectEnvironment.EXTERNAL_MCP_URL;
   const env: Record<string, string | undefined> = {
     customProviderUrl: envOverride("ZOMBIECODER_PROVIDER_URL"),
     customProviderID: envOverride("ZOMBIECODER_PROVIDER_ID"),
-    customProviderApiKey:
-      envOverride("ZOMBIECODER_PROVIDER_KEY") ?? envOverride("ZOMBIECODER_API_KEY"),
+    customProviderApiKey: externalApiKey,
     baselineModel: envOverride("ZOMBIECODER_BASELINE_MODEL"),
-    mcpUrl: envOverride("ZOMBIECODER_MCP_URL"),
+    mcpUrl: externalMcpUrl,
     originUrl: originEnvOverride(),
     opencodeApiUrl: envOverride("OPENCODE_API_URL") ?? envOverride("OPENCODE_BASE"),
     modelStrategy: envOverride("ZOMBIECODER_MODEL_STRATEGY") as ModelStrategy | undefined,
   };
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  if (externalUrlPresent) {
+    merged.customProviderUrl = externalUrl;
+    if (!env.modelStrategy) merged.modelStrategy = externalUrl ? "auto" : "free";
+  } else if (
+    merged.customProviderUrl === DEFAULT_CUSTOM_PROVIDER_URL &&
+    merged.modelStrategy === "auto"
+  ) {
+    merged.customProviderUrl = "";
+    if (!env.modelStrategy) merged.modelStrategy = "free";
   }
   return merged;
 }
@@ -564,6 +620,10 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   // ---- §3.1 layout ----------------------------------------------------------
   const created = step("bootstrap-dirs", () => ensureZombieDirs(root!));
   report.outputs.createdDirs = created ?? [];
+  step("memory-index", () => {
+    writeIndex(root!, readIndex(root!));
+    return "memory/index.json ready";
+  });
 
   const config = step("load-config", () => loadConfig(root!)) ?? DEFAULT_CONFIG;
 
@@ -619,12 +679,17 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   // free models cannot rewrite the global agents. Project installs keep the
   // project plan.
   const globalAssignment = layout.global ? globalAgentAssignment(layout.configFile, ROSTER) : {};
-  // A live provider plan (or a real outage fallback) is newer evidence than the
-  // installer-owned assignment. A project that merely disables the provider
-  // (`customProviderUrl: ""`) must not rewrite the global agents.
+  // A live provider plan (or a free-model plan) is newer evidence than the
+  // installer-owned assignment. In global mode the plan is computed from the
+  // same config file, so a free mapping is the owner's current choice and must
+  // reach the agents instead of being masked by the installer's old baseline.
+  // Explicit `modelStrategy: "free"` is an owner choice and wins in global mode.
+  // A plain `auto` fallback (provider disabled) still must not rewrite the
+  // installer-owned global agents.
+  const explicitFree = String(config.modelStrategy ?? "").toLowerCase() === "free";
   const runtimePlanWins =
     plan?.strategy === "custom-provider" ||
-    (plan?.strategy === "free-fallback" && Boolean(plan?.customProviderUrl));
+    (plan?.strategy === "free-fallback" && (Boolean(plan?.customProviderUrl) || explicitFree));
   const agentAssignment = layout.global
     ? runtimePlanWins
       ? (plan?.assignment ?? {})
@@ -813,7 +878,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
               "Read SSOT and syllabus before acting. The footprint lives inside syllabus.md — never create a separate footprint file.",
               "All agents are main agents and may delegate to each other with only the necessary context.",
               "Evidence before confidence. No evidence means no verified answer.",
-              `Before substantive work, call \`context_status\` and show one line: \`${pack.uiLine}\`.`,
+              `Context ownership: SSOT=${pack.owners.ssot.agent}, Syllabus=${pack.owners.syllabus.agent}, Memory=${pack.owners.memory.agent}, Skills=${pack.owners.skills.agent}, Gate=${pack.owners.gate.agent}.`,
+              `Before substantive work, call \`context_status\` and show its uiLine. Make this the first visible line after \"ভাইয়া\" so the user sees who manages SSOT, syllabus and memory: ${pack.uiLine}`,
             ].join("\n"),
           });
         }
@@ -852,6 +918,54 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     );
     if (compactionHook) cleanups.push(() => compactionHook.dispose());
 
+    step("archive-session-idle", () => {
+      if (!ctx.event?.subscribe || !ctx.session?.context) {
+        return "skipped (session event/context API unavailable)";
+      }
+      const controller = new AbortController();
+      const task = (async () => {
+        try {
+          for await (const event of ctx.event!.subscribe!({ signal: controller.signal })) {
+            if (event?.type !== "session.idle") continue;
+            const sessionID = String(event?.data?.sessionID ?? "").trim();
+            if (!sessionID) continue;
+            try {
+              const messages = await ctx.session!.context!({ sessionID });
+              const result = await archiveSessionSnapshot(ctx.storage, root!, sessionID, messages);
+              audit(root!, "plugin", {
+                kind: "session.archive",
+                sessionID,
+                kept: result.kept,
+                archived: result.archived,
+                archiveFile: result.archiveFile,
+                ok: true,
+              });
+            } catch (error: any) {
+              const message = redact(String(error?.message ?? error));
+              audit(root!, "plugin", {
+                kind: "session.archive",
+                sessionID,
+                ok: false,
+                error: message,
+              });
+              console.error(`[zombiecoder] session archive failed for ${sessionID}: ${message}`);
+            }
+          }
+        } catch (error: any) {
+          if (!controller.signal.aborted) {
+            const message = redact(String(error?.message ?? error));
+            audit(root!, "plugin", { kind: "session.archive.subscription", ok: false, error: message });
+            console.error(`[zombiecoder] session archive subscription failed: ${message}`);
+          }
+        }
+      })();
+      cleanups.push(async () => {
+        controller.abort();
+        await task;
+      });
+      return "subscribed to session.idle";
+    });
+
     const modelHook = await stepAsync("hook-model-request", () =>
       ctx.session!.hook!("model.request", (event: any) => {
         audit(root!, String(event?.agent ?? "unknown"), {
@@ -878,6 +992,125 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     );
     if (sessionHook) cleanups.push(() => sessionHook.dispose());
 
+    // ---- circuit breaker ---------------------------------------------------
+    // A blocked answer is a recorded failure, not a dead end. The session moves
+    // to the next roster agent (queued prompt) up to BREAKER_LIMIT times, then
+    // the breaker opens with an actionable message instead of silently stopping.
+    const breakerInflight = new Set<string>();
+    const escalateGateBlock = async (input: {
+      sessionID: string;
+      agentID: string;
+      model?: string;
+      protocol: string;
+      blockedText: string;
+      verdict: { reason: string; violations: string[]; matched: string[] };
+    }) => {
+      const { sessionID, agentID, model } = input;
+      if (!sessionID || sessionID === "unknown") return;
+      if (breakerInflight.has(sessionID)) return;
+      const session = ctx.session as any;
+      const available = Boolean(session?.synthetic && session?.prompt && session?.switchAgent);
+      const failure = {
+        agent: agentID,
+        kind: "response_gate" as const,
+        reason: input.verdict.reason,
+        at: new Date().toISOString(),
+        context: breakerContext(input.verdict, input.blockedText, {
+          model,
+          detail: `protocol=${input.protocol}`,
+        }),
+      };
+      const key = `agent/breaker/${sessionID}`;
+      breakerInflight.add(sessionID);
+      try {
+        const state = readBreakerState(await ctx.storage.get(key), sessionID);
+        const { state: nextState, decision } = decideBreaker(state, ROSTER, failure, BREAKER_LIMIT);
+        await ctx.storage.set(key, nextState);
+        audit(root!, "plugin", {
+          kind: "agent.failure",
+          sessionID,
+          agent: agentID,
+          model,
+          source: "response_gate",
+          reason: failure.reason,
+          violations: failure.context?.violations,
+          failures: nextState.failures.length,
+          limit: BREAKER_LIMIT,
+        });
+        if (!available) {
+          audit(root!, "plugin", {
+            kind: "agent.escalation",
+            sessionID,
+            from: agentID,
+            ok: false,
+            reason: "session.synthetic/prompt/switchAgent unavailable",
+          });
+          return;
+        }
+        if (decision.action === "stop") {
+          await session.synthetic({
+            sessionID,
+            text: unresolvedMessage(nextState, decision.limit),
+            description: "zombiecoder circuit breaker",
+          });
+          audit(root!, "plugin", {
+            kind: "agent.breaker.open",
+            sessionID,
+            agent: agentID,
+            tried: nextState.agents,
+            failures: nextState.failures.length,
+          });
+          return;
+        }
+        // If the switch itself fails, keep the task moving on the current agent
+        // rather than leaving the user with only the UNVERIFIED replacement.
+        let switched = true;
+        try {
+          await session.switchAgent({ sessionID, agent: decision.next });
+        } catch (switchError: any) {
+          switched = false;
+          audit(root!, "plugin", {
+            kind: "agent.escalation.switch",
+            sessionID,
+            from: agentID,
+            to: decision.next,
+            ok: false,
+            error: redact(String(switchError?.message ?? switchError)),
+          });
+        }
+        await session.synthetic({
+          sessionID,
+          text: statusMessage(failure, decision),
+          description: "zombiecoder circuit breaker",
+        });
+        await session.prompt({
+          sessionID,
+          text: fallbackPrompt(failure, input.blockedText, decision),
+          delivery: "queue",
+        });
+        audit(root!, "plugin", {
+          kind: "agent.escalation",
+          sessionID,
+          from: agentID,
+          to: switched ? decision.next : agentID,
+          attempt: decision.attempt,
+          limit: decision.limit,
+          ok: switched,
+          reason: failure.reason,
+        });
+      } catch (error: any) {
+        audit(root!, "plugin", {
+          kind: "agent.escalation",
+          sessionID,
+          from: agentID,
+          ok: false,
+          error: redact(String(error?.message ?? error)),
+        });
+      } finally {
+        breakerInflight.delete(sessionID);
+      }
+    };
+
     // Hard response gate: only the primary assistant answer is gated. Title,
     // compaction and generate calls are internal and must stay untouched.
     if (config.responseGate !== false) {
@@ -900,11 +1133,42 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
               passed: result.verdict.passed,
               supported: result.verdict.supported,
               protocol: result.parsed.protocol,
+              toolCalls: result.parsed.toolCalls,
               reason: result.verdict.reason,
               matched: result.verdict.matched,
               violations: result.verdict.violations,
             });
-            if (!result.verdict.passed) event.response = result.response;
+            if (!result.verdict.passed) {
+              event.response = result.response;
+              await escalateGateBlock({
+                sessionID: String(event?.sessionID ?? "unknown"),
+                agentID: String(event?.agent ?? "unknown"),
+                model,
+                protocol: result.parsed.protocol,
+                blockedText: result.parsed.text,
+                verdict: result.verdict,
+              });
+            } else if (!result.parsed.toolCalls) {
+              // A passing final answer closes the incident: the next user
+              // question must not inherit an old failure count.
+              const breakerKey = `agent/breaker/${String(event?.sessionID ?? "unknown")}`;
+              const previous = readBreakerState(
+                await ctx.storage.get(breakerKey),
+                String(event?.sessionID ?? "unknown"),
+              );
+              if (previous.failures.length > 0) {
+                await ctx.storage.set(breakerKey, {
+                  sessionID: previous.sessionID,
+                  agents: [],
+                  failures: [],
+                });
+                audit(root!, "plugin", {
+                  kind: "agent.breaker.reset",
+                  sessionID: previous.sessionID,
+                  failures: previous.failures.length,
+                });
+              }
+            }
           } catch (error: any) {
             audit(root!, String(event?.agent ?? "unknown"), {
               kind: "response.gate.error",
@@ -924,14 +1188,64 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   // ---- per-agent tool footprint --------------------------------------------
   if (ctx.tool?.hook) {
     const toolHook = await stepAsync("hook-tool-after", () =>
-      ctx.tool!.hook!("execute.after", (event: any) => {
+      ctx.tool!.hook!("execute.after", async (event: any) => {
+        const agentID = String(event?.agent ?? "unknown");
+        const sessionID = String(event?.sessionID ?? "unknown");
+        const failureKey = `agent/failures/${sessionID}/${agentID}`;
+        const previous = (await ctx.storage.get(failureKey)) as
+          | { count?: number; escalated?: boolean }
+          | undefined;
+        const failed = event?.status === "error";
+        const count = failed ? Math.max(0, Number(previous?.count) || 0) + 1 : 0;
+        if (failed || previous) {
+          await ctx.storage.set(failureKey, { count, escalated: previous?.escalated ?? false });
+        }
         audit(root!, String(event?.agent ?? "unknown"), {
           kind: "tool",
-          sessionID: event?.sessionID,
+          sessionID,
           tool: event?.tool,
           callID: event?.id,
           status: event?.status ?? "unknown",
+          consecutiveFailures: count,
         });
+        if (!failed || count < 3 || previous?.escalated) return;
+
+        const index = ROSTER.findIndex((agent) => agent.id === agentID);
+        const next = index >= 0 ? ROSTER[(index + 1) % ROSTER.length] : ROSTER[0];
+        await ctx.storage.set(failureKey, { count, escalated: true });
+        if (!ctx.session?.switchAgent) {
+          audit(root!, "plugin", {
+            kind: "agent.escalation",
+            sessionID,
+            from: agentID,
+            to: next.id,
+            ok: false,
+            reason: "session.switchAgent unavailable",
+          });
+          console.error(`[zombiecoder] cannot switch agent after repeated tool failures: ${agentID} -> ${next.id}`);
+          return;
+        }
+        try {
+          await ctx.session.switchAgent({ sessionID, agent: next.id });
+          audit(root!, "plugin", {
+            kind: "agent.escalation",
+            sessionID,
+            from: agentID,
+            to: next.id,
+            ok: true,
+            reason: "three consecutive tool execution errors",
+          });
+        } catch (error: any) {
+          audit(root!, "plugin", {
+            kind: "agent.escalation",
+            sessionID,
+            from: agentID,
+            to: next.id,
+            ok: false,
+            error: redact(String(error?.message ?? error)),
+          });
+          console.error(`[zombiecoder] agent switch failed: ${redact(String(error?.message ?? error))}`);
+        }
       }),
     );
     if (toolHook) cleanups.push(() => toolHook.dispose());

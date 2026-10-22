@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -155,8 +156,35 @@ def validate_chat(payload: Any, report: Report) -> None:
         report.warn("usage is missing; token accounting is not proven")
 
 
-def validate_claim(payload: Any, report: Report) -> None:
-    """A factual claim needs at least one explicit, verified evidence record."""
+EVIDENCE_FILE_RE = re.compile(
+    r"([\w./\\-]+\.(?:ts|tsx|js|jsx|py|java|go|rs|php|rb|json|md|css|html|yml|yaml|sh|sql|toml|ini))(?::(\d+))?"
+)
+
+
+def _evidence_path(source: str, root: Path) -> tuple[Path, int | None, bool] | None:
+    match = EVIDENCE_FILE_RE.search(source or "")
+    if not match:
+        return None
+    candidate = Path(match.group(1))
+    line = int(match.group(2)) if match.group(2) else None
+    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    try:
+        resolved.relative_to(root.resolve())
+        inside = True
+    except ValueError:
+        inside = False
+    return resolved, line, inside
+
+
+def validate_claim(payload: Any, report: Report, root: Path | None = None) -> None:
+    """A factual claim needs evidence that resolves to a real artifact.
+
+    `verified: true` is a claim by the model, not proof. A path source must exist
+    inside the allowed root (and a :line must be in range); a command source must
+    carry a result marker (exit code, PASS/FAIL, test count, timing). This is what
+    stops a fabricated evidence object from passing by shape alone.
+    """
+    base = (root or Path.cwd()).resolve()
     report.check("payload_is_object", isinstance(payload, dict))
     if not isinstance(payload, dict):
         return
@@ -165,14 +193,41 @@ def validate_claim(payload: Any, report: Report) -> None:
     report.check("evidence_is_nonempty_array", isinstance(evidence, list) and len(evidence) > 0)
     if not isinstance(evidence, list):
         return
+    verifiable = 0
     for index, item in enumerate(evidence):
         prefix = f"evidence[{index}]"
         report.check(f"{prefix}_is_object", isinstance(item, dict))
         if not isinstance(item, dict):
             continue
-        report.check(f"{prefix}.source_is_string", nonempty_str(item.get("source")))
-        report.check(f"{prefix}.observation_is_string", nonempty_str(item.get("observation")))
-        report.check(f"{prefix}.verified_is_true", item.get("verified") is True)
+        source_ok = report.check(f"{prefix}.source_is_string", nonempty_str(item.get("source")))
+        observation_ok = report.check(f"{prefix}.observation_is_string", nonempty_str(item.get("observation")))
+        verified_ok = report.check(f"{prefix}.verified_is_true", item.get("verified") is True)
+        if not (source_ok and observation_ok and verified_ok):
+            continue
+        source = str(item.get("source") or "")
+        observation = str(item.get("observation") or "")
+        ref = _evidence_path(source, base)
+        if ref is not None:
+            resolved, line, inside = ref
+            report.check(f"{prefix}.source_inside_root", inside, str(resolved))
+            exists = inside and resolved.is_file()
+            report.check(f"{prefix}.source_exists", exists, str(resolved))
+            if exists and line is not None:
+                try:
+                    total = len(resolved.read_text(encoding="utf-8", errors="replace").splitlines())
+                except Exception:
+                    total = 0
+                report.check(f"{prefix}.line_in_range", 0 < line <= total, f"{line} <= {total}")
+            if exists:
+                verifiable += 1
+        else:
+            has_result = bool(
+                re.search(r"\b(?:exit(?:ed)?(?:\s+with)?(?:\s+code)?\s*\d+|PASS|FAIL|OK|\d+\s*/\s*\d+|\d+\s*(?:tests?|checks?)|tok/s|\d+\s*ms)\b", observation, re.I)
+            )
+            report.check(f"{prefix}.observation_has_result", has_result)
+            if has_result:
+                verifiable += 1
+    report.check("at_least_one_verifiable_evidence", verifiable > 0, verifiable)
     report.usable = not report.missing
 
 
@@ -356,7 +411,7 @@ def detect(payload: Any) -> str:
     return "unknown"
 
 
-def validate(kind: str, payload: Any) -> Report:
+def validate(kind: str, payload: Any, root: Path | None = None) -> Report:
     actual = detect(payload) if kind == "auto" else kind
     report = Report(actual)
     if actual == "models":
@@ -372,7 +427,7 @@ def validate(kind: str, payload: Any) -> Report:
     elif actual == "tls":
         validate_tls(payload, report)
     elif actual == "claim":
-        validate_claim(payload, report)
+        validate_claim(payload, report, root)
     else:
         report.check("known_payload_kind", False, actual)
     return report
@@ -418,7 +473,7 @@ def self_test() -> int:
         "anthropic_valid": {"type": "message", "role": "assistant", "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}},
         "stream_valid": "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n",
         "responses_valid": {"object": "response", "status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}]},
-        "claim_valid": {"claim": "The file exists.", "evidence": [{"source": "stat config.json", "observation": "mode 600", "verified": True}]},
+        "claim_valid": {"claim": "The file exists.", "evidence": [{"source": "tools/evidence_gate.py:1", "observation": "line 1 exists", "verified": True}]},
         "claim_invalid_no_evidence": {"claim": "The capital of France is Berlin.", "evidence": []},
     }
     expected = {
@@ -453,6 +508,7 @@ def main() -> int:
     parser.add_argument("--kind", default="auto", choices=["auto", "models", "chat", "stream", "responses", "anthropic", "tls", "claim"])
     parser.add_argument("--file", default="")
     parser.add_argument("--json-out", default="")
+    parser.add_argument("--root", default=".")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
@@ -483,7 +539,7 @@ def main() -> int:
         print(json.dumps({"status": "FAIL", "error": f"invalid JSON: {exc}"}, indent=2))
         return 1
 
-    report = validate(args.kind, payload)
+    report = validate(args.kind, payload, Path(args.root).expanduser())
     result = result_dict(report, raw)
     if args.json_out:
         out = Path(args.json_out).expanduser()

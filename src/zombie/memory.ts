@@ -10,7 +10,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { appendJsonl, readJson, readJsonl, readText, writeJson } from "./io.ts";
+import { appendJsonl, readJson, readJsonl, readText, sha256, writeJson } from "./io.ts";
 import { memoryArchiveFile, memoryDir, memoryIndexFile, safe } from "./paths.ts";
 
 export const KEEP_RECENT = 5;
@@ -24,6 +24,7 @@ export type StorageLike = {
 };
 
 export type MemoryMessage = {
+  id?: string;
   role?: string;
   text: string;
   at: string;
@@ -69,8 +70,14 @@ export function textOf(item: any): string {
   if (!item || typeof item !== "object") return "";
   if (typeof item.text === "string") return item.text;
   if (typeof item.content === "string") return item.content;
-  if (Array.isArray(item.parts)) return item.parts.map(textOf).filter(Boolean).join(" ");
-  if (Array.isArray(item.content)) return item.content.map(textOf).filter(Boolean).join(" ");
+  const visible = (parts: any[]) =>
+    parts
+      .filter((part) => part?.type !== "reasoning" && part?.type !== "thinking")
+      .map(textOf)
+      .filter(Boolean)
+      .join(" ");
+  if (Array.isArray(item.parts)) return visible(item.parts);
+  if (Array.isArray(item.content)) return visible(item.content);
   if (Array.isArray(item.messages)) return item.messages.map(textOf).filter(Boolean).join(" ");
   return "";
 }
@@ -81,8 +88,20 @@ export function roleOf(item: any): string | undefined {
   return typeof r === "string" ? r : undefined;
 }
 
-export function toMemoryMessage(item: any): MemoryMessage {
-  return { role: roleOf(item), text: textOf(item), at: new Date().toISOString() };
+export function toMemoryMessage(item: any, index?: number): MemoryMessage {
+  const sourceID = item?.id ?? item?.messageID ?? item?.messageId;
+  const id =
+    typeof sourceID === "string" && sourceID.length > 0
+      ? sourceID
+      : Number.isInteger(index)
+        ? `snapshot-index-${index}`
+        : undefined;
+  return {
+    id,
+    role: roleOf(item),
+    text: textOf(item),
+    at: new Date().toISOString(),
+  };
 }
 
 // Disk is the truth. If an archive file exists but predates the index (or was
@@ -140,6 +159,7 @@ export function writeIndex(projectRoot: string, index: MemoryIndex): MemoryIndex
   index.updatedAt = new Date().toISOString();
   if (!Array.isArray(index.archives)) index.archives = [];
   writeJson(memoryIndexFile(projectRoot), index);
+  fs.chmodSync(memoryIndexFile(projectRoot), 0o600);
   return index;
 }
 
@@ -176,6 +196,79 @@ export async function readRecent(storage: StorageLike, sessionID: string): Promi
     .slice(-KEEP_RECENT);
 }
 
+function archiveIdentity(message: MemoryMessage): string {
+  return message.id
+    ? `id:${message.id}`
+    : `content:${sha256(`${message.role ?? "message"}\n${message.text}`)}`;
+}
+
+function appendUniqueArchive(
+  projectRoot: string,
+  sessionID: string,
+  messages: MemoryMessage[],
+): { archived: number; file: string; bytes: number } {
+  const file = memoryArchiveFile(projectRoot, sessionID);
+  const existing = readJsonl<{ archived?: MemoryMessage[] }>(file);
+  const seen = new Set<string>();
+  for (const record of existing) {
+    for (const message of Array.isArray(record.archived) ? record.archived : []) {
+      if (typeof message?.text === "string") seen.add(archiveIdentity(message));
+    }
+  }
+  const fresh = messages.filter((message) => {
+    const identity = archiveIdentity(message);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+  if (fresh.length > 0) {
+    appendJsonl(file, { ts: new Date().toISOString(), sessionID, archived: fresh });
+  }
+  let bytes = 0;
+  try {
+    bytes = fs.statSync(file).size;
+  } catch {
+    /* no archive exists until the first non-empty append */
+  }
+  return { archived: fresh.length, file, bytes };
+}
+
+function recordArchive(
+  projectRoot: string,
+  sessionID: string,
+  kept: number,
+  archived: number,
+  archiveFile: string,
+  bytes: number,
+): void {
+  const now = new Date().toISOString();
+  const index = readIndex(projectRoot);
+  const previous = index.sessions[sessionID];
+  index.sessions[sessionID] = {
+    ...(previous ?? {}),
+    sessionID,
+    updatedAt: now,
+    kept,
+    archivedTotal: (previous?.archivedTotal ?? 0) + archived,
+    archiveFile,
+    lastMessageAt: now,
+  };
+  if (archived > 0) {
+    const previousArchive = index.archives.find((entry) => entry.sessionID === sessionID);
+    index.archives = index.archives.filter((entry) => entry.sessionID !== sessionID);
+    index.archives.push({
+      sessionID,
+      file: archiveFile,
+      archived: (previousArchive?.archived ?? 0) + archived,
+      bytes,
+      firstAt: previousArchive?.firstAt ?? now,
+      lastAt: now,
+      updatedAt: now,
+    });
+  }
+  writeIndex(projectRoot, index);
+}
+
 export async function keepRecent(
   storage: StorageLike,
   projectRoot: string,
@@ -192,54 +285,32 @@ export async function keepRecent(
     recent,
   });
 
-  if (older.length > 0) {
-    appendJsonl(memoryArchiveFile(projectRoot, sessionID), {
-      ts: new Date().toISOString(),
-      sessionID,
-      archived: older,
-    });
-  }
-
-  const now = new Date().toISOString();
-  const archiveFile = memoryArchiveFile(projectRoot, sessionID);
-  const index = readIndex(projectRoot);
-  const prev = index.sessions[sessionID];
-  index.sessions[sessionID] = {
-    ...(prev ?? {}),
-    sessionID,
-    updatedAt: now,
-    kept: recent.length,
-    archivedTotal: (prev?.archivedTotal ?? 0) + older.length,
-    archiveFile,
-    lastMessageAt: recent.length ? recent[recent.length - 1].at : now,
-  };
-
-  if (older.length > 0) {
-    let size = 0;
-    try {
-      size = fs.statSync(archiveFile).size;
-    } catch {
-      size = 0;
-    }
-    const previousArchive = index.archives.find((a) => a.sessionID === sessionID);
-    index.archives = index.archives.filter((a) => a.sessionID !== sessionID);
-    index.archives.push({
-      sessionID,
-      file: archiveFile,
-      archived: (previousArchive?.archived ?? 0) + older.length,
-      bytes: size,
-      firstAt: previousArchive?.firstAt ?? now,
-      lastAt: now,
-      updatedAt: now,
-    });
-  }
-  writeIndex(projectRoot, index);
+  const appended = appendUniqueArchive(projectRoot, sessionID, older);
+  recordArchive(projectRoot, sessionID, recent.length, appended.archived, appended.file, appended.bytes);
 
   return {
     kept: recent.length,
-    archived: older.length,
-    archiveFile,
+    archived: appended.archived,
+    archiveFile: appended.file,
   };
+}
+
+export async function archiveSessionSnapshot(
+  storage: StorageLike,
+  projectRoot: string,
+  sessionID: string,
+  messages: any[],
+): Promise<{ kept: number; archived: number; archiveFile: string }> {
+  const all = messages.map(toMemoryMessage).filter((message) => message.text.length > 0);
+  const recent = all.slice(-KEEP_RECENT);
+  await storage.set(storageKey(sessionID), {
+    updatedAt: new Date().toISOString(),
+    sessionID,
+    recent,
+  });
+  const appended = appendUniqueArchive(projectRoot, sessionID, all);
+  recordArchive(projectRoot, sessionID, recent.length, appended.archived, appended.file, appended.bytes);
+  return { kept: recent.length, archived: appended.archived, archiveFile: appended.file };
 }
 
 export function readArchive(projectRoot: string, sessionID: string, limit = 50): any[] {

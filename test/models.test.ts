@@ -48,6 +48,13 @@ test("assignModels is deterministic by default and random when asked", () => {
   for (const model of Object.values(random)) assert.ok(candidates.includes(model));
 });
 
+test("assignModels spreads agents across the candidate pool", () => {
+  const candidates = ["a/1", "b/2", "c/3"];
+  const assigned = assignModels(ROSTER, candidates);
+  const used = new Set(Object.values(assigned));
+  assert.equal(used.size, candidates.length, "every candidate should carry at least one agent");
+});
+
 test("assignModels pins to baseline when there are no candidates", () => {
   const assigned = assignModels(ROSTER, []);
   assert.equal(assigned.manu, "opencode/big-pickle");
@@ -60,6 +67,7 @@ test("freeModels keeps only cost 0/0 active models", () => {
       { ref: "a/free", providerID: "a", modelID: "free", inputCost: 0, outputCost: 0, status: "active", tools: true, enabled: true },
       { ref: "a/paid", providerID: "a", modelID: "paid", inputCost: 1, outputCost: 1, status: "active", tools: true, enabled: true },
       { ref: "a/off", providerID: "a", modelID: "off", inputCost: 0, outputCost: 0, status: "active", tools: true, enabled: false },
+      { ref: "a/notext", providerID: "a", modelID: "notext", inputCost: 0, outputCost: 0, status: "active", tools: false, enabled: true },
     ],
   };
   assert.deepEqual(freeModels(catalog).map((m) => m.ref), ["a/free"]);

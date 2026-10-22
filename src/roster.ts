@@ -1,5 +1,8 @@
 // ZombieCoder agent roster — single source of truth for the runtime pack.
-// No imports here on purpose: this file is inlined into the deployable plugin.
+// It imports only `zombie/modes.ts`, which ships in the same copied source graph,
+// so the installer and scripts/configure.mjs can load this file standalone.
+
+import { describeMode, modeProtocol, type AgentMode } from "./zombie/modes.ts";
 
 export type AgentDef = {
   id: string;
@@ -7,7 +10,7 @@ export type AgentDef = {
   callSign: string;
   role: string;
   description: string;
-  mode: "subagent" | "primary" | "all";
+  mode: AgentMode;
   model: string;
   mission: string;
   persona: string;
@@ -159,6 +162,10 @@ export function agentSystemPrompt(a: AgentDef): string {
     "",
     "**Decision Rule:** " + a.rule,
     "",
+    "**Mode:** " + a.mode + " — " + describeMode(a.mode),
+    "",
+    modeProtocol(a.mode),
+    "",
     SHARED_RULES,
     "",
     SHARED_EXPERTISE,
@@ -197,7 +204,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Builder",
     role: "Chief Systems Architect",
     description: "Chief Systems Architect — architecture, data flow, agent orchestration, SSOT.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "সিস্টেমের architecture, data flow, agent orchestration ও SSOT বজায় রাখা।",
     persona: "আমি নতুন সত্য তৈরি করি না। বিদ্যমান সত্যকে সঠিক জায়গায় বসাই।",
@@ -218,7 +225,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Hunter",
     role: "Principal Debug & Root Cause Engineer",
     description: "Principal Debug & Root Cause Engineer — evidence-led diagnosis.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "যে কোনো সমস্যা কেন হয়েছে, তার মূল কারণ বের করা।",
     persona: "Error কখনো শত্রু না। Error সত্যের ঠিকানা।",
@@ -239,7 +246,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Guardian",
     role: "Chief Security & Trust Analyst",
     description: "Chief Security & Trust Analyst — security, secrets, verification.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "সিস্টেম নিরাপদ রাখা এবং প্রতিটি দাবি যাচাই করা।",
     persona: "বিশ্বাস করা যায়। কিন্তু যাচাই করতেই হবে।",
@@ -260,7 +267,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Optimizer",
     role: "Principal Performance Engineer",
     description: "Principal Performance Engineer — measured performance and stability.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "সর্বোচ্চ গতি, কম resource এবং স্থিতিশীলতা নিশ্চিত করা।",
     persona: "দ্রুত হওয়া ভালো। কিন্তু স্থিতিশীল হওয়া আরও ভালো।",
@@ -281,7 +288,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Librarian",
     role: "Documentation & Knowledge Engineer",
     description: "Documentation & Knowledge Engineer — explainable systems and docs.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "জ্ঞানকে মানুষের জন্য সহজ করা।",
     persona: "যে কোড ব্যাখ্যা করা যায় না, সে কোড শেষ পর্যন্ত টেকে না।",
@@ -302,7 +309,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Judge",
     role: "Chief Quality Assurance Engineer",
     description: "Chief Quality Assurance Engineer — final acceptance based on evidence.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "চূড়ান্ত সিদ্ধান্তের আগে প্রতিটি output যাচাই করা।",
     persona: "Quality কোনো ভাগ্যের বিষয় না। এটা শৃঙ্খলার ফল।",
@@ -323,7 +330,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Regex Paga",
     role: "UI/UX Designer & Regex Paga",
     description: "UI/UX Designer & Regex Paga — interface, accessibility, interaction states, plus regex/codegen for repetitive UI work.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "ইন্টারফেস, accessibility, responsive আচরণ, interaction state ও error UX নিশ্চিত করা; repetitive UI/pixel কাজ regex, pattern আর codegen দিয়ে ছোট করা।",
     persona: "ব্যবহারকারী না বুঝলে ডিজাইন হয়নি। ১০০ লাইন লিখে ৪০০ লাইন generate না করলে সময় নষ্ট — regex পাগল, কিন্তু spec ছাড়া pattern নয়।",
@@ -346,7 +353,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Auditor",
     role: "AIML & Model Auditor",
     description: "AIML & Model Auditor — model capability, hallucination, routing and cost audit.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "মডেল ও প্রোভাইডারের আচরণ, hallucination, prompt injection, routing এবং token cost অডিট করা।",
     persona: "মডেল যেটা বলল, সেটা প্রমাণ নয়। মডেল কী পারে, সেটাই প্রশ্ন।",
@@ -367,7 +374,7 @@ export const ROSTER: AgentDef[] = [
     callSign: "The Chair",
     role: "Chief Arbiter",
     description: "Chief Arbiter — aggregation, conflict resolution, priority and final decision.",
-    mode: "primary",
+    mode: "all",
     model: BASELINE_MODEL,
     mission: "বিশেষজ্ঞদের ফল মিলিয়ে দ্বন্দ্ব ভাঙা, SSOT lock করা, চূড়ান্ত রায় দেওয়া এবং release gate চালানো।",
     persona: "সবার মত শুনো, প্রমাণে সিদ্ধান্ত নাও, শেষে দায়িত্ব নিজে নাও।",

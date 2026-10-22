@@ -100,8 +100,8 @@ export function renderRuntime(): string {
   out.push("|---|---|");
   out.push("| `ctx.location` | বর্তমান ডিরেক্টরি — built-in, watcher লাগে না |");
   out.push("| `ctx.storage` (`get`/`set`/`remove`/`scan`) | memory ও state (DB-backed) |");
-  out.push("| `ctx.session.hook` | `context`, `compaction`, `http.request`, `http.response` |");
-  out.push("| `ctx.event.subscribe` + `ctx.session.context` | `session.idle` হলে দৃশ্যমান message text project-local JSONL archive-এ; `reasoning`/`thinking` বাদ |");
+  out.push("| `ctx.session.hook` (`context`/`compaction`) | প্রতি model request-এ session message-এর overflow (>5) project-local JSONL archive-এ; `reasoning`/`thinking` বাদ, message id দিয়ে idempotent |");
+  out.push("| `ctx.event.subscribe` + `ctx.session.context` | `session.idle` হলে snapshot archive-এর চেষ্টা; V2.1.3-এ এই event observed হয়নি, তাই এটি একমাত্র ভরসা নয় |");
   out.push("| `ctx.session.switchAgent` + `ctx.tool.hook` | একই session/agent-এ পরপর ৩টি tool execution error হলে পরের roster agent-এ একবার handoff |");
   out.push("| `ctx.session.switchAgent` + `synthetic` + `prompt` | response gate আটকালে failure record + status message + পরের agent-এ queued handoff; ৩টি agent ব্যর্থ হলে breaker খুলে actionable unresolved message |");
   out.push("| `ctx.skill` (`list`/`add`/`reload`) | workstation-tier skill register; project-tier `.opencode/skills/` OpenCode নিজেই পড়ে |");
@@ -122,7 +122,7 @@ export function renderRuntime(): string {
   out.push("- provider/mcp URL না মিললে কিছুই ভাঙে না — শুধু `NOT_CONFIGURED` লেখা থাকে, আর OpenCode-এর ডিফল্ট মডেল আমাদের agent/persona/meta নিয়ে কাজ চালিয়ে যায়।");
   out.push("- Active project-এর `.environment` থেকে `EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL`, `EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_API_KEY` ও `EXTERNAL_MCP_URL` পড়া হয়; process environment একই key-তে অগ্রাধিকার পায়। Provider key OpenAI-compatible gateway-এর জন্য, MCP auth-এর জন্য নয়। ফাইলটি execute হয় না।");
   out.push("- Installer target `.environment` থেকে provider/MCP URL পড়ে, probe-verified MCP URL OpenCode config-এ register করে। Runtime project `.environment` থেকে MCP URL probe করে; project config-এ নিজে MCP server register করে না। URL ফাঁকা/অনুপস্থিত ও explicit strategy না থাকলে provider `free` fallback হয়।");
-  out.push("- Project খুললে `.zombiecoder/`, SSOT, syllabus ও memory index তৈরি হয়; প্রতি `session.idle`-এ OpenCode context API থেকে দৃশ্যমান message snapshot archive হয়। API অনুপস্থিত হলে setup report-এ skipped; চলাকালীন archive error console/audit-এ থাকে।");
+  out.push("- Project খুললে `.zombiecoder/`, SSOT, syllabus ও memory index তৈরি হয়; প্রতিটি model request-এ (context hook) দৃশ্যমান message-এর শেষ ৫টি RAM-এ, তার আগেরগুলো project-local JSONL archive-এ যায়; compaction hook-ও একই কাজ করে। `session.idle` snapshot শুধু best-effort; event না এলে archive বন্ধ হয় না।");
   out.push("- Handoff শুধু hook-এ ধরা পরপর তিনটি tool execution error-এ কাজ করে; semantic ভুল শনাক্ত করে না। Evidence gate evidence-এর কাঠামো যাচাই করে, দাবির সত্যতা স্বয়ংক্রিয়ভাবে প্রমাণ করে না।");
   out.push("");
   out.push("## ৬. কেন এই ফাইল আগে ছিল না");

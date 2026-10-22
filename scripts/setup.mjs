@@ -122,7 +122,7 @@ function globalSummary(configDir) {
   const expected = EXPECTED_AGENT_IDS;
   const missing = expected.filter((id) => !agents[id]);
   const checked = expected.length > 0 ? expected : ids;
-  const allPrimary = checked.length > 0 && checked.every((id) => agents[id]?.mode === "primary");
+  const allPrimary = checked.length > 0 && checked.every((id) => agents[id]?.mode === "all");
   const canDelegate =
     checked.length > 0 &&
     checked.every(
@@ -195,7 +195,7 @@ function printStatusHuman(report) {
   console.log(`  node     : ${report.node}`);
   console.log(`  target   : ${report.target}`);
   console.log(
-    `  global   : agents=${report.global.agents} mode:primary=${report.global.allPrimary ? "yes" : "no"} delegate=${report.global.canDelegate ? "yes" : "no"}`,
+    `  global   : agents=${report.global.agents} mode:all=${report.global.allPrimary ? "yes" : "no"} delegate=${report.global.canDelegate ? "yes" : "no"}`,
   );
   console.log(`  SSOT.md              : ${fmtFile(p.ssot)}`);
   console.log(`  syllabus.md          : ${fmtFile(p.syllabus)}`);
@@ -215,7 +215,7 @@ function printSetupHuman(report) {
   for (const step of report.steps) console.log(`  [${step.ok ? "ok" : "!!"}] ${step.step}`);
   const p = report.project;
   console.log(`  project  : SSOT=${p.ssot.exists ? p.ssot.bytes + "B" : "missing"} syllabus=${p.syllabus.exists ? p.syllabus.bytes + "B" : "missing"} map=${p.hasProjectMap ? "yes" : "no"} team=${p.hasAgentTeam ? "yes" : "no"}`);
-  console.log(`  global   : agents=${report.global.agents} mode:primary=${report.global.allPrimary ? "yes" : "no"} delegate=${report.global.canDelegate ? "yes" : "no"}`);
+  console.log(`  global   : agents=${report.global.agents} mode:all=${report.global.allPrimary ? "yes" : "no"} delegate=${report.global.canDelegate ? "yes" : "no"}`);
 }
 
 function printHelp() {
@@ -240,7 +240,7 @@ Options:
 
 Steps:
   1. check Node >= 22.6
-  2. install the global pack (${EXPECTED_AGENT_IDS.length} roster agents, mode:primary, subagent allow)
+  2. install the global pack (${EXPECTED_AGENT_IDS.length} roster agents, mode:all, subagent allow)
   3. configure the target project (SSOT.md + syllabus.md, via reload or direct)
   4. verify and report
 

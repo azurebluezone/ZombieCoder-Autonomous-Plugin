@@ -47,7 +47,7 @@ function seedProject(): string {
       "```",
       "",
       "## 7. Agent team (shared persona)",
-      "9 primary agents.",
+      "9 all agents.",
       "",
     ].join("\n"),
   );
@@ -86,6 +86,17 @@ test("context pack merges SSOT, syllabus and memory into a bounded pack", () => 
   assert.match(pack.uiLine, /Context: SSOT OK \(manu\) \| Syllabus OK \(halim\) \| Memory 2 recent/);
   assert.equal(pack.ssot.exists, true);
   assert.equal(pack.syllabus.exists, true);
+  assert.ok(
+    pack.ssotExcerptBytes > 0 && pack.ssotExcerptBytes < pack.ssot.bytes,
+    `SSOT prompt excerpt must be smaller than the file, got ${pack.ssotExcerptBytes}/${pack.ssot.bytes}`,
+  );
+  assert.ok(
+    pack.syllabusExcerptBytes > 0 && pack.syllabusExcerptBytes < pack.syllabus.bytes,
+    `syllabus prompt excerpt must be smaller than the file, got ${pack.syllabusExcerptBytes}/${pack.syllabus.bytes}`,
+  );
+  assert.match(pack.text, /### SSOT excerpt \(\d+B from a \d+B file/);
+  assert.doesNotMatch(pack.text, /## 7\. Agent team/, "manu's focused excerpt must not include unrelated SSOT sections");
+  assert.doesNotMatch(pack.text, /Standing rules for this project/, "only the lessons tail belongs in the prompt");
   assert.equal(pack.allowedRoot, root);
   assert.equal(pack.owners.ssot.agent, "manu");
   assert.equal(pack.owners.syllabus.agent, "halim");
@@ -102,6 +113,8 @@ test("context pack marks missing SSOT instead of inventing content", () => {
   assert.match(pack.text, /Missing: /);
   assert.match(pack.uiLine, /SSOT MISSING/);
   assert.equal(pack.ssot.exists, false);
+  assert.equal(pack.ssotExcerptBytes, 0);
+  assert.equal(pack.syllabusExcerptBytes, 0);
 });
 
 test("resolveAllowedPath denies paths outside the allowed root", () => {
@@ -189,6 +202,10 @@ test("response gate blocks a short success claim instead of treating it as trivi
 
   const shortEnglish = evaluateResponse("Everything works now", { allowedRoot: root });
   assert.equal(shortEnglish.passed, false);
+
+  const shortInstalled = evaluateResponse("ভাইয়া installed", { allowedRoot: root });
+  assert.equal(shortInstalled.passed, false);
+  assert.match(shortInstalled.reason, /short claim without evidence/);
 
   const greeting = evaluateResponse("OK", { allowedRoot: root });
   assert.equal(greeting.passed, true);

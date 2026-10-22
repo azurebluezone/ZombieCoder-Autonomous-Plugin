@@ -18,7 +18,7 @@ runtime state তৈরি করে; প্রজেক্টের ভিত�
 
 প্রধান বৈশিষ্ট্য:
 
-- ৯টি এজেন্ট, প্রত্যেকটি `mode: primary`; কোনো এজেন্ট subagent নয়।
+- ৯টি এজেন্ট, প্রত্যেকটি `mode: all`; কোনো এজেন্ট subagent নয়।
 - OpenCode-এর agent dropdown থেকে প্রত্যেক এজেন্ট সরাসরি নির্বাচন করা যায়।
 - OpenAI-compatible provider-এর `/v1/models` থেকে মডেল তালিকা নেওয়া হয়।
 - Provider unavailable হলে OpenCode-এর free model এবং সর্বশেষে baseline model-এ
@@ -415,7 +415,7 @@ opencode models
 প্রত্যাশিত ফলাফল:
 
 - `debug config` install root-এর `opencode.json` দেখাবে।
-- `debug agents`-এ ৯টি roster agent থাকবে, প্রত্যেকের `mode: primary`।
+- `debug agents`-এ ৯টি roster agent থাকবে, প্রত্যেকের `mode: all`।
 - `plugin list`-এ `zombiecoder` local plugin দেখাবে।
 - `models`-এ provider model এবং প্রয়োজন হলে `opencode/big-pickle` থাকবে।
 
@@ -807,7 +807,7 @@ Persona inject না হলে model generic উত্তর দেবে — �
 
 সব agent:
 
-- `mode: primary`
+- `mode: all`
 - একই shared rules ও cross-domain baseline ব্যবহার করে
 - আলাদা model assignment installer/runtime থেকে পায়
 - agent dropdown-এ সরাসরি selectable
@@ -1002,7 +1002,7 @@ Backup-এ API key থাকতে পারে; permission restrict করু�
 | `Location plugins did not finish activating` | Install root-এ `npm install` হয়নি; installer আবার চালান |
 | Provider 401/403 | `ZOMBIECODER_PROVIDER_KEY` অথবা `config.json`-এর key যাচাই করুন |
 | `/v1/models` empty | Provider-এ model load হয়নি; free fallback active থাকবে |
-| Agent dropdown-এ নেই | `opencode debug agents`; `mode: primary` এবং install root যাচাই করুন |
+| Agent dropdown-এ নেই | `opencode debug agents`; `mode: all` এবং install root যাচাই করুন |
 | Agent tool execute করছে না | Native `tool_calls` নেই; tool-capable model বা gateway template ঠিক করুন |
 | `origin-handshake` step fail | `originUrl`/public `/gateway_url.json` reachable কি দেখুন; fail হলেও configured URL কাজ করবে |
 | `.opencode` অন্য directory-তে পাওয়া যাচ্ছে না | `~/.config/opencode`-এ symlink/pointer দিন |
@@ -1195,8 +1195,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  ed36c0fcc1bf451141c5003ccc49875de7cf1f5d77ff3e26dd711b5eff7c373c  ║
-║  files 57 · bytes 559103 · base b0f6a75 · dirty                          ║
+║  root  34539ba0388bae17a929fa36d2ea84d9fb65f4aff94bb0ab3297a68d156bc8c6  ║
+║  files 59 · bytes 591434 · base f2d2539 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1204,7 +1204,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-22T14:40:11.187Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-22T22:15:28.049Z
 
 </div>
 <!-- INTEGRITY:END -->

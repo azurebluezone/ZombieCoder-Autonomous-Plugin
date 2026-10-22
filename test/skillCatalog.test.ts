@@ -10,6 +10,7 @@ import {
   installSharedSkill,
   listSkillCatalog,
 } from "../src/zombie/skillCatalog.ts";
+import { registerSkills } from "../src/zombie/skills.ts";
 
 function tempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -41,6 +42,41 @@ test("detectProjectSkills picks core plus the project's stack", () => {
       assert.ok(ids.includes(id), `missing detected skill: ${id}`);
     }
     assert.ok(!ids.includes("laravel"), "laravel must not be detected without a marker");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("registerSkills re-discovers shared skills when the skill door reloads", async () => {
+  const root = tempDir("zombiecoder-skill-reload-");
+  try {
+    const dir = path.join(root, "zombiecoder", "skills");
+    write(path.join(dir, "one.md"), "---\nid: one\nname: One\n---\n\nOne.\n");
+
+    const registered: any[] = [];
+    let apply: ((editor: any) => void) | null = null;
+    const door = {
+      transform: async (callback: (editor: any) => void) => {
+        apply = callback;
+        callback({ list: () => registered, add: (skill: any) => registered.push(skill) });
+        return { dispose: async () => undefined };
+      },
+      reload: async () => {
+        apply?.({ list: () => registered, add: (skill: any) => registered.push(skill) });
+      },
+    };
+
+    const registration = registerSkills(door, root);
+    await registration.applied;
+    assert.deepEqual(registered.map((skill) => skill.id), ["zombiecoder.workstation.one"]);
+
+    write(path.join(dir, "two.md"), "---\nid: two\nname: Two\n---\n\nTwo.\n");
+    await door.reload();
+    assert.deepEqual(
+      registered.map((skill) => skill.id).sort(),
+      ["zombiecoder.workstation.one", "zombiecoder.workstation.two"],
+    );
+    await registration.release();
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -87,6 +123,7 @@ test("runtime downloads a missing skill from a git repo and installs it once at 
 
     const installed = await installSharedSkill(installRoot, "node", { repoUrl: repo });
     assert.equal(installed.copied, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(installed, "error"), false);
     assert.ok(fs.existsSync(path.join(installRoot, "zombiecoder", "skills", "node.md")));
     assert.ok(
       !fs.existsSync(path.join(project, ".zombiecoder", "skills")),

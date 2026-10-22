@@ -255,11 +255,21 @@ export function stableHash(input: string): number {
   return h >>> 0;
 }
 
+export function shuffle<T>(pool: readonly T[], random: () => number = Math.random): T[] {
+  const out = [...pool];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 export function assignModels(
   agents: AgentDef[],
   candidates: string[],
   randomize = false,
   baseline = BASELINE_MODEL,
+  random: () => number = Math.random,
 ): Record<string, string> {
   const assignment: Record<string, string> = {};
   if (candidates.length === 0) {
@@ -270,17 +280,19 @@ export function assignModels(
   // catalog, and it spreads agents across different models instead of letting
   // hash collisions put half the team on one model. Parallel agents on distinct
   // models do not queue behind each other.
-  const pool = [...candidates].sort();
+  //
+  // `randomize` shuffles once and then walks the same pool, so random means
+  // "random order", not "independent dice per agent": every free model is used
+  // before any model repeats. Independent picks left models unused and mapped
+  // 9 agents onto 2-3 refs, which is exactly the bug this replaces.
+  const sorted = [...new Set(candidates)].sort();
+  const pool = randomize ? shuffle(sorted, random) : sorted;
   let cursor = 0;
   for (const a of agents) {
     // A roster entry pinned by hand wins; otherwise the mapping is stable by
     // default, and intentionally random only when the owner asks for it.
     if (a.model && a.model !== baseline && pool.includes(a.model)) {
       assignment[a.id] = a.model;
-      continue;
-    }
-    if (randomize) {
-      assignment[a.id] = pool[Math.floor(Math.random() * pool.length)];
       continue;
     }
     assignment[a.id] = pool[cursor % pool.length];
@@ -437,8 +449,8 @@ export async function resolveModels(
   const assignment = assignModels(agents, candidates, randomize, baselineModel);
   notes.push(
     randomize
-      ? `random mapping over ${candidates.length} candidate(s) (modelStrategy: random)`
-      : `deterministic FNV-1a mapping over ${candidates.length} candidate(s)`,
+      ? `random (shuffled round-robin) mapping over ${candidates.length} candidate(s) — every candidate used before a repeat`
+      : `stable round-robin mapping over ${candidates.length} candidate(s)`,
   );
 
   return {

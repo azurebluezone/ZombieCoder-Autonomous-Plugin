@@ -63,7 +63,7 @@ export function renderAgents(): string {
   out.push("");
   out.push("সাত, আট ও নয় নম্বর নতুন — আগের খসড়ায় UI/UX, model audit এবং চূড়ান্ত সিদ্ধান্তকারী কেউ ছিল না। নাম সাময়িক, মালিকের নিশ্চিতকরণ সাপেক্ষে।");
   out.push("");
-  out.push("সব ৯টি agent `mode: primary` — প্রত্যেকটি main agent, agent dropdown-এ সরাসরি selectable; roster-এ কোনো subagent mode নেই।");
+  out.push("সব ৯টি agent `mode: all` — প্রত্যেকটি main agent, agent dropdown-এ সরাসরি selectable; roster-এ কোনো subagent mode নেই।");
   out.push("");
   out.push("## ২. Role Definitions");
   out.push("");

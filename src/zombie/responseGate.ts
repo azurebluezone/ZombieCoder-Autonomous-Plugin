@@ -54,6 +54,9 @@ const EVIDENCE_PATTERNS: RegExp[] = [
 ];
 
 const CLAIM_MARKERS: RegExp[] = [
+  // A one-word success report is still a claim. "OK" remains a conversational
+  // acknowledgement; "installed", "fixed", "done" need evidence in the text.
+  /^(?:ভাইয়া[\s,:-]*)?(?:done|fixed|installed|configured|updated|created|added|removed|solved|completed|complete|success|passed|deployed|committed|pushed)\b/i,
   /\b(i|we)\s+(fixed|changed|added|removed|updated|implemented|created|deleted|refactored|moved|renamed|replaced|rewrote|wrote|built|installed|configured|enabled|disabled|patched|solved|resolved)\b/i,
   /\b(the|a)\s+(bug|root cause|issue|problem)\s+(is|was|lies|exists)\b/i,
   /\b(root cause|the problem is|the issue is|i found|i discovered|i located)\b/i,

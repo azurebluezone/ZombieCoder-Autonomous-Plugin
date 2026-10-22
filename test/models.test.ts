@@ -60,6 +60,43 @@ test("assignModels pins to baseline when there are no candidates", () => {
   assert.equal(assigned.manu, "opencode/big-pickle");
 });
 
+test("random assignment shuffles the pool and uses every candidate before repeating", () => {
+  const candidates = ["a/1", "b/2", "c/3"];
+  const first = assignModels(ROSTER, candidates, true, undefined, () => 0);
+  const second = assignModels(ROSTER, candidates, true, undefined, () => 0);
+  assert.deepEqual(first, second, "an injected random source must be reproducible");
+  assert.equal(new Set(Object.values(first)).size, candidates.length, "every candidate must be used");
+  for (const model of Object.values(first)) assert.ok(candidates.includes(model));
+
+  const three = assignModels(ROSTER.slice(0, 3), candidates, true, undefined, () => 0.5);
+  assert.deepEqual(new Set(Object.values(three)), new Set(candidates));
+  assert.equal(Object.keys(three).length, 3);
+});
+
+test("free strategy spreads every free model across the roster instead of pinning one", async () => {
+  const free = Array.from({ length: 9 }, (_, index) => ({
+    providerID: "opencode",
+    modelID: `free-${index}`,
+    cost: [{ input: 0, output: 0 }],
+    status: "active",
+    capabilities: { tools: true },
+    enabled: true,
+  }));
+  const plan = await resolveModels(
+    {
+      provider: { list: async () => ({ data: [] }) },
+      model: { list: async () => ({ data: free }) },
+    },
+    ROSTER,
+    { customProviderUrl: "", strategy: "free" },
+  );
+  assert.equal(plan.strategy, "free-fallback");
+  assert.equal(plan.candidates.length, 9);
+  const used = new Set(Object.values(plan.assignment));
+  assert.equal(used.size, 9, "nine agents must land on nine distinct free models");
+  assert.ok(!used.has("opencode/big-pickle"), "the baseline placeholder must not survive a free plan");
+});
+
 test("freeModels keeps only cost 0/0 active models", () => {
   const catalog: Catalog = {
     providers: [],

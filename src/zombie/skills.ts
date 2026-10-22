@@ -90,19 +90,23 @@ export function registerSkills(skill: SkillLike | undefined, installRoot: string
   // Project-tier skills in <project>/.opencode/skills are discovered by OpenCode
   // itself. Register only the shared install-root store, or every project skill
   // appears twice (once native, once namespaced) in ctx.skill.list().
-  const discovered = discoverSkills(installRoot);
   if (!skill || typeof skill.transform !== "function") {
     return {
       registered: [],
       applied: Promise.resolve({
         registered: [],
-        skipped: discovered.map((s) => s.id),
+        skipped: discoverSkills(installRoot).map((s) => s.id),
         error: "ctx.skill not available",
       }),
       release: async () => undefined,
     };
   }
+  // Re-discover on every transform invocation. OpenCode re-runs the transform
+  // when ctx.skill.reload() is called; a skill copied into the shared store
+  // after setup must be registered by that reload, not only after a full
+  // plugin/location restart.
   const kept = keepTransform<any, string[]>(skill, (editor: any) => {
+    const discovered = discoverSkills(installRoot);
     const added: string[] = [];
     const existing = new Set<string>((editor.list?.() ?? []).map((entry: any) => entry?.id).filter(Boolean));
     for (const s of discovered) {
@@ -138,6 +142,7 @@ export function registerSkills(skill: SkillLike | undefined, installRoot: string
       }
     }
     const registeredSet = new Set(registered);
+    const discovered = discoverSkills(installRoot);
     return {
       registered,
       skipped: discovered.map((s) => s.id).filter((id) => !registeredSet.has(id)),

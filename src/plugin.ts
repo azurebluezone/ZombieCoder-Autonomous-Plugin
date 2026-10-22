@@ -57,6 +57,7 @@ import {
   DEFAULT_SSOT_REFRESH_MS,
 } from "./zombie/defaults.ts";
 import { fetchOriginHandshake } from "./zombie/origin.ts";
+import { applyModeOverrides } from "./zombie/modes.ts";
 import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
 import { ensureSharedSkills, DEFAULT_SKILL_REPO } from "./zombie/skillCatalog.ts";
@@ -98,6 +99,9 @@ export type ZombieConfig = {
   autoSkills: boolean;
   // Git source for the runtime skill catalog.
   skillRepo: string;
+  // Owner-requested OpenCode agent modes: { "<agentID>": "primary" | "subagent" | "all" }.
+  // Validated by modes.ts; a typo is rejected in the setup report, never guessed.
+  agentModes: Record<string, string>;
 };
 
 export const DEFAULT_CONFIG: ZombieConfig = {
@@ -113,6 +117,7 @@ export const DEFAULT_CONFIG: ZombieConfig = {
   responseGate: true,
   autoSkills: true,
   skillRepo: DEFAULT_SKILL_REPO,
+  agentModes: {},
 };
 
 // Where the plugin itself lives decides where OpenCode-owned files belong.
@@ -687,7 +692,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   // Explicit `modelStrategy: "free"` is an owner choice and wins in global mode.
   // A plain `auto` fallback (provider disabled) still must not rewrite the
   // installer-owned global agents.
-  const explicitFree = String(config.modelStrategy ?? "").toLowerCase() === "free";
+  const explicitFree = ["free", "random"].includes(String(config.modelStrategy ?? "").toLowerCase());
   const runtimePlanWins =
     plan?.strategy === "custom-provider" ||
     (plan?.strategy === "free-fallback" && (Boolean(plan?.customProviderUrl) || explicitFree));
@@ -749,12 +754,23 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   //   <install>/opencode.json agents V2 config (model + permissions + system)
   // The editor transform sees no IDs at this point, so pretending it bound them
   // would be a lie in the report.
+  //
+  // Agent modes are config-level. `agentModes` in zombiecoder/config.json is the
+  // switch door: validated here, written to both files, and reloaded below.
+  const modePlan = step("agent-modes", () => {
+    const result = applyModeOverrides(ROSTER, config.agentModes);
+    report.outputs.agentModes = result.applied;
+    if (result.rejected.length > 0) report.outputs.agentModeRejections = result.rejected;
+    return result;
+  });
+  const effectiveRoster: AgentDef[] = modePlan?.agents ?? ROSTER;
+
   const agentsDir = path.join(layout.dir, "agents");
-  const folder = step("agent-folder", () => ensureAgentFolderAt(agentsDir, ROSTER, agentAssignment));
+  const folder = step("agent-folder", () => ensureAgentFolderAt(agentsDir, effectiveRoster, agentAssignment));
   report.outputs.agentFolder = folder;
 
   const agentConfig = step("agent-config", () =>
-    syncAgentConfig(layout.configFile, ROSTER, agentAssignment),
+    syncAgentConfig(layout.configFile, effectiveRoster, agentAssignment),
   );
   report.outputs.agentConfig = agentConfig;
 
@@ -764,12 +780,12 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   });
 
   const bound = step("agent-bind", () => {
-    const missing = verifyAgentMarkdownAt(agentsDir, ROSTER, agentAssignment);
-    if (!agentConfig?.skipped) missing.push(...verifyAgentConfig(layout.configFile, ROSTER, agentAssignment));
+    const missing = verifyAgentMarkdownAt(agentsDir, effectiveRoster, agentAssignment);
+    if (!agentConfig?.skipped) missing.push(...verifyAgentConfig(layout.configFile, effectiveRoster, agentAssignment));
     if (missing.length > 0) {
       throw new Error(`agent binding incomplete: ${missing.join(", ")}`);
     }
-    return `${ROSTER.length} agents carry ${layout.global ? "global" : "project"} model + shared rules (markdown + config)`;
+    return `${effectiveRoster.length} agents carry ${layout.global ? "global" : "project"} model + shared rules (markdown + config)`;
   });
   report.outputs.bound = bound;
 
@@ -867,6 +883,25 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             ? `${event.model.providerID}/${modelID}`
             : undefined;
 
+        // `session.idle` is not a dependable archive trigger in this runtime: the
+        // event stream is subscribed, yet no idle snapshot has ever landed in the
+        // audit (both projects had time_idle set and zero session.archive rows).
+        // The `context` hook fires on every model request and carries the full
+        // message list, so archive the overflow here. Idempotent by message id.
+        const messages = Array.isArray(event?.messages) ? event.messages : [];
+        if (messages.length > 0) {
+          const memory = await keepRecent(ctx.storage, projectRoot, sessionID, messages);
+          if (memory.archived > 0) {
+            audit(projectRoot, agentID, {
+              kind: "memory.keep",
+              sessionID,
+              kept: memory.kept,
+              archived: memory.archived,
+              archiveFile: memory.archiveFile,
+            });
+          }
+        }
+
         const recent = await readRecent(ctx.storage, sessionID);
         const pack = buildContextPack(projectRoot, agentID, recent);
         if (Array.isArray(event?.system) && typeof event.system.push === "function") {
@@ -896,6 +931,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           contextPackBytes: pack.bytes,
           ssotBytes: pack.ssot.bytes,
           syllabusBytes: pack.syllabus.bytes,
+          ssotExcerptBytes: pack.ssotExcerptBytes,
+          syllabusExcerptBytes: pack.syllabusExcerptBytes,
           memoryArchives: pack.memory.archives,
           uiLine: pack.uiLine,
         });

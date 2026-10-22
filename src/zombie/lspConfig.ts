@@ -140,7 +140,11 @@ export function resolveLspServers(
  * Existing entries win; a boolean `lsp: true` (built-in servers) is never
  * rewritten. Returns `updated: false` when nothing changed.
  */
-export function syncLspConfig(configFile: string, installRoot: string): SyncLspResult {
+export function syncLspConfig(
+  configFile: string,
+  installRoot: string,
+  options: { env?: NodeJS.ProcessEnv; home?: string; dirs?: string[] } = {},
+): SyncLspResult {
   let raw: string;
   try {
     raw = fs.readFileSync(configFile, "utf8");
@@ -169,7 +173,7 @@ export function syncLspConfig(configFile: string, installRoot: string): SyncLspR
     };
   }
 
-  const resolved = resolveLspServers(installRoot);
+  const resolved = resolveLspServers(installRoot, options);
   const existing =
     config.lsp && typeof config.lsp === "object" && !Array.isArray(config.lsp) ? config.lsp : {};
   const nextLsp: Record<string, any> = { ...existing };

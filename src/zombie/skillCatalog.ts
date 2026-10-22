@@ -425,7 +425,8 @@ export async function installSharedSkill(
     return { id, file: target, copied: false };
   }
   const copied = copySkill(source, target);
-  return { id, file: target, copied, error: copied ? undefined : "copy failed" };
+  const result = { id, file: target, copied };
+  return copied ? result : { ...result, error: "copy failed" };
 }
 
 export type SharedSkillInstallSummary = {

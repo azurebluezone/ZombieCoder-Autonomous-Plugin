@@ -42,6 +42,7 @@ test("syncLspConfig writes lsp entries, preserves existing ones, and is idempote
   try {
     const bins = path.join(root, "lsp", "node_modules", ".bin");
     fakeBin(bins, "typescript-language-server");
+    const lspOptions = { dirs: [bins], env: {} as NodeJS.ProcessEnv };
     const configFile = path.join(root, "opencode.json");
     fs.writeFileSync(
       configFile,
@@ -49,7 +50,7 @@ test("syncLspConfig writes lsp entries, preserves existing ones, and is idempote
       "utf8",
     );
 
-    const first = syncLspConfig(configFile, root);
+    const first = syncLspConfig(configFile, root, lspOptions);
     assert.equal(first.updated, true);
     assert.deepEqual(first.servers, ["typescript"]);
     assert.ok(first.missing.includes("python"));
@@ -59,7 +60,7 @@ test("syncLspConfig writes lsp entries, preserves existing ones, and is idempote
     assert.equal(config.lsp.typescript.command[0], path.join(bins, "typescript-language-server"));
     assert.deepEqual(config.agents, { manu: {} });
 
-    const second = syncLspConfig(configFile, root);
+    const second = syncLspConfig(configFile, root, lspOptions);
     assert.equal(second.updated, false, "a second sync must not rewrite the file");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

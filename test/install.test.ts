@@ -182,7 +182,7 @@ test("installer --config-dir creates a complete self-contained config root", asy
         assert.ok(!fs.existsSync(path.join(parent, "opencode.json")));
         const config = JSON.parse(fs.readFileSync(path.join(configDir, "opencode.json"), "utf8"));
         assert.equal(config.model, BASELINE);
-        assert.equal(config.agents.manu.mode, "primary");
+        assert.equal(config.agents.manu.mode, "all");
         const state = JSON.parse(
           fs.readFileSync(path.join(configDir, "zombiecoder", "config.json"), "utf8"),
         );
@@ -516,7 +516,7 @@ test("a slow provider is saved but not selected, and stale models are removed", 
         const zombiecoder = JSON.parse(
           fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"),
         );
-        assert.equal(zombiecoder.modelStrategy, "baseline");
+        assert.equal(zombiecoder.modelStrategy, "free");
         const plan = JSON.parse(
           fs.readFileSync(path.join(root, ".zombiecoder", "models.json"), "utf8"),
         );

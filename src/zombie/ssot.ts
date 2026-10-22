@@ -152,7 +152,7 @@ export function renderSsot(fp: Fingerprint): string {
   lines.push(`## 7. Agent team (shared persona)`);
   lines.push("");
   lines.push(
-    `All ${ROSTER.length} agents are main agents (\`mode: primary\`): select any of them directly from the agent dropdown.`,
+    `All ${ROSTER.length} agents are main agents (\`mode: all\`): select any of them directly from the agent dropdown.`,
   );
   lines.push("");
   for (const a of ROSTER) {

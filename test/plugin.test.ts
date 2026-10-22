@@ -167,15 +167,19 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.match(manu, /SAP/);
   assert.match(manu, /Dependency minimalism/);
   assert.match(manu, /^permissions:$/m);
+  assert.match(manu, /Mode protocol \(OpenCode V2\)/);
+  assert.match(manu, /current mode: `all`/);
+  assert.match(manu, /V2-তে `scout` নেই/);
+  assert.match(manu, /নিজের mode নিজে বদলাতে পারো না/);
 
   // V2 config is the second agent door: provider, agents, models, permissions.
   const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
   assert.equal(config.$schema, "https://opencode.ai/config.json");
-  assert.equal(config.agents.zombiecoder.mode, "primary");
+  assert.equal(config.agents.zombiecoder.mode, "all");
   assert.equal(config.agents.zombiecoder.model, "opencode/big-pickle");
-  assert.equal(config.agents.manu.mode, "primary");
+  assert.equal(config.agents.manu.mode, "all");
   for (const agent of Object.values(config.agents) as any[]) {
-    assert.equal(agent.mode, "primary", "every agent must be a main agent, not a subagent");
+    assert.equal(agent.mode, "all", "every agent must be a main agent, not a subagent");
     assert.ok(
       Array.isArray(agent.permissions) &&
         agent.permissions.some((rule: any) => rule.action === "subagent" && rule.effect === "allow"),
@@ -198,12 +202,24 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(ssot, /^## .*Model plan/m);
   assert.doesNotMatch(ssot, /^## .*MCP/m);
 
-  assert.equal(fake.tools.length, 10);
+  assert.equal(fake.tools.length, 11);
   assert.ok(fake.tools.every((tool) => tool.output), "every tool must declare an output schema");
   assert.ok(fake.tools.some((tool) => tool.name === "memory_archive"));
   assert.ok(fake.tools.some((tool) => tool.name === "evidence_gate"), "evidence_gate tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "syntax_check"), "syntax_check tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "skill_catalog"), "skill_catalog tool missing");
+  const modesTool = fake.tools.find((tool) => tool.name === "agent_modes");
+  assert.ok(modesTool, "agent_modes tool missing");
+  const modesOutput = (await modesTool.execute({ agent: "manu", next: "subagent" })).output;
+  assert.equal(modesOutput.agent.mode, "all");
+  assert.equal(modesOutput.plan.ok, true);
+  assert.equal(modesOutput.plan.patch.mode, "subagent");
+  assert.equal(modesOutput.plan.after.asPrimary, false);
+  assert.ok(modesOutput.builtins.some((builtin: any) => builtin.id === "explore"));
+  assert.deepEqual(
+    modesOutput.modes.map((mode: any) => mode.id),
+    ["primary", "subagent", "all"],
+  );
   const contextTool = fake.tools.find((tool) => tool.name === "context_status");
   assert.ok(contextTool, "context_status tool missing");
   const contextOutput = (await contextTool.execute({ agent: "manu" })).output;
@@ -255,10 +271,56 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
   const toolStep = report.steps.find((step: any) => step.step === "register-tools");
   assert.equal(toolStep.ok, true);
-  assert.equal(toolStep.detail, "10 registered");
+  assert.equal(toolStep.detail, "11 registered");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
 
   await cleanup();
+});
+
+test("agentModes config switches a valid mode and rejects unknown ones", async () => {
+  const root = tempProject();
+  fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".environment"),
+    "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL=\n",
+  );
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "config.json"),
+    JSON.stringify({
+      version: "0.0.0-test",
+      customProviderUrl: "",
+      customProviderID: "missionbarisal",
+      mcpUrl: "",
+      opencodeApiUrl: "",
+      ssotRefreshMs: 300000,
+      modelStrategy: "free",
+      agentModes: { manu: "subagent", jarin: "wizard", kobir: "all" },
+    }),
+  );
+  const fake: Fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    const manu = fs.readFileSync(path.join(root, ".opencode", "agents", "manu.md"), "utf8");
+    assert.match(manu, /^mode: subagent$/m, "valid override must reach the markdown frontmatter");
+    assert.match(manu, /current mode: `subagent`/);
+
+    const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+    assert.equal(config.agents.manu.mode, "subagent");
+    assert.equal(config.agents.jarin.mode, "all", "an invalid mode must leave the agent untouched");
+
+    const report = JSON.parse(
+      fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"),
+    );
+    assert.equal(report.outputs.agentModes.manu, "subagent");
+    const rejected = report.outputs.agentModeRejections ?? [];
+    assert.ok(rejected.some((item: any) => item.agent === "jarin"), "invalid mode must be reported");
+    assert.ok(rejected.some((item: any) => item.agent === "kobir"), "unknown agent must be reported");
+    assert.equal(report.steps.find((item: any) => item.step === "agent-modes")?.ok, true);
+  } finally {
+    await cleanup();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("three consecutive tool errors hand the session to the next roster agent once", async () => {
@@ -350,6 +412,60 @@ test("session.idle archives the complete OpenCode session context", async () => 
   assert.equal(controllerSignal.current?.aborted, true);
 });
 
+test("context hook archives overflow without waiting for session.idle", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const hook = fake.sessionHooks["context"];
+  assert.equal(typeof hook, "function", "context hook was not registered");
+
+  const message = (index: number) => ({
+    id: `ctx-${index}`,
+    role: index % 2 ? "assistant" : "user",
+    text: `message ${index}`,
+  });
+  const first = Array.from({ length: 8 }, (_, index) => message(index));
+  const firstEvent = {
+    agent: "manu",
+    sessionID: "ses_ctx",
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    messages: first,
+    system: [] as Array<{ type: string; text: string }>,
+  };
+  await hook(firstEvent);
+
+  // The bounded pack and the agent contract must reach the provider through
+  // event.system, not just sit in the audit log.
+  assert.ok(firstEvent.system.length > 0, "context hook did not inject a system part");
+  const injected = firstEvent.system.map((part) => part.text).join("\n");
+  assert.match(injected, /Context: SSOT OK \(manu\)/);
+  assert.match(injected, /Pack \d+B/);
+  assert.match(injected, /Decision rule:/);
+  assert.match(injected, /Start every response with "ভাইয়া"/);
+
+  const { readArchive, readIndex } = await import("../src/zombie/memory.ts");
+  const archivedTexts = () =>
+    readArchive(root, "ses_ctx").flatMap((row: any) => row.archived.map((m: any) => m.text));
+  assert.deepEqual(archivedTexts(), ["message 0", "message 1", "message 2"]);
+  let entry = readIndex(root).sessions.ses_ctx;
+  assert.equal(entry.kept, 5);
+  assert.equal(entry.archivedTotal, 3);
+
+  await hook({
+    agent: "manu",
+    sessionID: "ses_ctx",
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    messages: [...first, message(8)],
+    system: [],
+  });
+  assert.deepEqual(archivedTexts(), ["message 0", "message 1", "message 2", "message 3"]);
+  entry = readIndex(root).sessions.ses_ctx;
+  assert.equal(entry.kept, 5);
+  assert.equal(entry.archivedTotal, 4);
+
+  await cleanup();
+});
+
 test("global install writes agents/config at the global root and leaves the working directory .opencode-free", async () => {
   const root = tempProject();
   const globalDir = tempProject();
@@ -392,7 +508,7 @@ test("global install writes agents/config at the global root and leaves the work
     assert.ok(fs.existsSync(path.join(globalDir, "agents", "zombiecoder.md")));
     assert.ok(fs.existsSync(path.join(globalDir, "opencode.json")));
     const config = JSON.parse(fs.readFileSync(path.join(globalDir, "opencode.json"), "utf8"));
-    assert.equal(config.agents.zombiecoder.mode, "primary");
+    assert.equal(config.agents.zombiecoder.mode, "all");
     assert.ok(Array.isArray(config.agents.zombiecoder.permissions));
 
     const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
@@ -631,7 +747,7 @@ test("syncProviderBaseUrl touches only settings.baseURL", () => {
             models: { m1: { name: "m1" } },
           },
         },
-        agents: { manu: { mode: "primary" } },
+        agents: { manu: { mode: "all" } },
       },
       null,
       2,
@@ -645,7 +761,7 @@ test("syncProviderBaseUrl touches only settings.baseURL", () => {
   assert.equal(after.providers.missionbarisal.settings.baseURL, "https://new.example/v1");
   assert.equal(after.providers.missionbarisal.settings.apiKey, "zc-test-key");
   assert.deepEqual(after.providers.missionbarisal.models, { m1: { name: "m1" } });
-  assert.equal(after.agents.manu.mode, "primary");
+  assert.equal(after.agents.manu.mode, "all");
   assert.equal(fs.statSync(file).mode & 0o777, 0o600, "provider config mode must be preserved");
   fs.rmSync(root, { recursive: true, force: true });
 });

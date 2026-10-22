@@ -78,6 +78,10 @@ export type ContextPack = {
   allowedRoot: string;
   ssot: ContextFileStatus;
   syllabus: ContextFileStatus;
+  /** Bytes of the SSOT excerpt actually prepared for the prompt, not the file. */
+  ssotExcerptBytes: number;
+  /** Bytes of the syllabus excerpt actually prepared for the prompt, not the file. */
+  syllabusExcerptBytes: number;
   memory: MemoryStatus;
   owners: ContextOwners;
 };
@@ -174,6 +178,15 @@ export function buildContextPack(
     recent: recent.length,
   };
 
+  const ssotBody = ssot.exists
+    ? ssotExcerpt(ssotText ?? "", agentID)
+    : `Missing: ${ssotPath}. Run the plugin setup before making claims.`;
+  const syllabusBody = syllabus.exists
+    ? syllabusExcerpt(syllabusText ?? "")
+    : `Missing: ${syllabusPath}. Run the plugin setup before making claims.`;
+  const ssotExcerptBytes = ssot.exists ? Buffer.byteLength(ssotBody, "utf8") : 0;
+  const syllabusExcerptBytes = syllabus.exists ? Buffer.byteLength(syllabusBody, "utf8") : 0;
+
   const lines = [
     "## ZombieCoder Compact Context Pack",
     "",
@@ -181,15 +194,15 @@ export function buildContextPack(
     `Allowed root: ${projectRoot}`,
     `Path policy: paths outside the allowed root are denied; a claim with no path/test evidence is UNVERIFIED.`,
     "",
-    `### SSOT (${ssot.exists ? `${ssot.bytes}B, ${ssot.lines} lines` : "missing"})`,
     ssot.exists
-      ? ssotExcerpt(ssotText ?? "", agentID)
-      : `Missing: ${ssotPath}. Run the plugin setup before making claims.`,
+      ? `### SSOT excerpt (${ssotExcerptBytes}B from a ${ssot.bytes}B file, ${ssot.lines} lines)`
+      : "### SSOT (missing)",
+    ssotBody,
     "",
-    `### Syllabus (${syllabus.exists ? `${syllabus.bytes}B, ${syllabus.lines} lines` : "missing"})`,
     syllabus.exists
-      ? syllabusExcerpt(syllabusText ?? "")
-      : `Missing: ${syllabusPath}. Run the plugin setup before making claims.`,
+      ? `### Syllabus excerpt (${syllabusExcerptBytes}B from a ${syllabus.bytes}B file)`
+      : "### Syllabus (missing)",
+    syllabusBody,
     "",
     `### Session memory (${memory.recent} recent, ${memory.archives} archives) — owner: ${CONTEXT_OWNERS.memory.agent}`,
     memorySummary(recent),
@@ -214,6 +227,8 @@ export function buildContextPack(
     allowedRoot: projectRoot,
     ssot,
     syllabus,
+    ssotExcerptBytes,
+    syllabusExcerptBytes,
     memory,
     owners: CONTEXT_OWNERS,
   };

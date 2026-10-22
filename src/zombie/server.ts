@@ -25,6 +25,7 @@ import {
   listSkillCatalog,
 } from "./skillCatalog.ts";
 import { ROSTER } from "../roster.ts";
+import { AGENT_MODES, BUILTIN_AGENTS, MODE_REGISTRY, planModeSwitch, type AgentMode } from "./modes.ts";
 
 export const RPC_ID = "zombiecoder";
 export const TOOL_NAMESPACE = { name: "zombiecoder", description: "ZombieCoder project control surface" };
@@ -138,6 +139,8 @@ export function rpcDefinition() {
           allowedRoot: { type: "string" },
           ssot: { type: "object" },
           syllabus: { type: "object" },
+          ssotExcerptBytes: { type: "number" },
+          syllabusExcerptBytes: { type: "number" },
           memory: { type: "object" },
           owners: { type: "object" },
         }),
@@ -218,6 +221,8 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
           allowedRoot: pack.allowedRoot,
           ssot: pack.ssot,
           syllabus: pack.syllabus,
+          ssotExcerptBytes: pack.ssotExcerptBytes,
+          syllabusExcerptBytes: pack.syllabusExcerptBytes,
           memory: pack.memory,
           owners: pack.owners,
         };
@@ -482,6 +487,33 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         return result;
       },
     },
+    {
+      name: "agent_modes",
+      description:
+        "OpenCode V2 agent modes. Lists the real modes (primary | subagent | all), the builtin agents, the caller's current mode, and plans a validated switch. Read-only: it writes nothing — apply the returned patch through zombiecoder/config.json agentModes and reload.",
+      input: {
+        type: "object" as const,
+        properties: {
+          agent: { type: "string", description: "Agent id to inspect, e.g. manu." },
+          next: { type: "string", enum: ["primary", "subagent", "all"], description: "Requested mode for a switch plan." },
+        },
+        additionalProperties: false,
+      },
+      run: (input: any) => {
+        const agent = ROSTER.find((entry) => entry.id === String(input?.agent ?? ""));
+        const next = String(input?.next ?? "").trim();
+        return {
+          modes: AGENT_MODES.map((id) => MODE_REGISTRY[id]),
+          builtins: BUILTIN_AGENTS,
+          agent: agent ? { id: agent.id, mode: agent.mode } : null,
+          plan:
+            agent && next
+              ? planModeSwitch({ agent: { id: agent.id, mode: agent.mode }, next: next as AgentMode })
+              : null,
+          note: "Mode is config-level. Apply the patch, then reload/restart; without reload the switch is UNVERIFIED.",
+        };
+      },
+    },
   ];
 }
 
@@ -521,10 +553,16 @@ export function registerTools(tool: ToolLike | undefined, deps: SurfaceDeps): To
         input: spec.input,
         output,
         options: { namespace: TOOL_NAMESPACE.name },
-        execute: async (input: any) => ({
-          output: await spec.run(input),
-          metadata: { source: "zombiecoder", tool: spec.name },
-        }),
+        execute: async (input: any) => {
+          // JSON has no `undefined`. A result such as
+          // { id, file, copied, error: undefined } is a valid JS object but an
+          // invalid JSON value; OpenCode's output-schema check rejects it.
+          const result = await spec.run(input);
+          return {
+            output: JSON.parse(JSON.stringify(result ?? {})),
+            metadata: { source: "zombiecoder", tool: spec.name },
+          };
+        },
       });
       added.push(spec.name);
     }

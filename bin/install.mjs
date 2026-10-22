@@ -1057,11 +1057,10 @@ await step("probe provider + assign models", async () => {
     installAssignment = assignModels(roster.ROSTER, candidates, false, BASELINE_MODEL);
   }
 
-  const strategy = freeMode
-    ? "free-fallback"
-    : providerReachable
-      ? "custom-provider"
-      : "baseline";
+  // A dead or slow provider must not be recorded as a deliberate baseline pin.
+  // "free-fallback" tells the runtime resolver to spread the OpenCode free
+  // catalog across the roster at first setup instead of freezing one model.
+  const strategy = freeMode || !providerReachable ? "free-fallback" : "custom-provider";
   const plan = {
     generatedAt: new Date().toISOString(),
     strategy,
@@ -1081,7 +1080,7 @@ await step("probe provider + assign models", async () => {
   // installer just proved unusable. `--model-strategy` always wins.
   const configStrategy =
     MODEL_STRATEGY_FLAG ??
-    (freeMode ? "free" : providerReachable ? "auto" : "baseline");
+    (freeMode ? "free" : providerReachable ? "auto" : "free");
   try {
     const seeded = JSON.parse(fs.readFileSync(ZOMBIE_CONFIG, "utf8"));
     if (seeded.modelStrategy !== configStrategy) {
@@ -1104,10 +1103,10 @@ await step("probe provider + assign models", async () => {
       : providerSlow
         ? `provider not usable (slow prompt processing${
             chatProbe?.tokensPerSecond ? `: ${chatProbe.tokensPerSecond} tok/s < 20` : ""
-          }); using ${BASELINE_MODEL}`
+          }); free-model mapping resolved at first setup`
         : `provider not usable: ${
             chatProbe?.error ?? toolProbe?.error ?? providerProbe?.error ?? "not probed"
-          }; using ${BASELINE_MODEL}`;
+          }; free-model mapping resolved at first setup`;
   return `${summary}; ${new Set(Object.values(installAssignment)).size} model(s) assigned`;
 });
 
@@ -1161,6 +1160,27 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
       settings,
       models,
     };
+  }
+
+  // The runtime resolves the free catalog at setup and may already have written a
+  // spread of free models into opencode.json. A dead provider probe only yields
+  // baseline placeholders, so re-read the file and keep every model ref that does
+  // not belong to the dead provider. Without this, every reinstall flattens the
+  // whole team back onto one model — the observed bug.
+  if (!providerReachable) {
+    const kept = { ...installAssignment };
+    try {
+      const current = JSON.parse(fs.readFileSync(OPENCODE_JSON, "utf8"));
+      for (const agent of roster.ROSTER) {
+        const ref = current?.agents?.[agent.id]?.model;
+        if (typeof ref === "string" && ref.length > 0 && !ref.startsWith(`${providerID}/`)) {
+          kept[agent.id] = ref;
+        }
+      }
+    } catch {
+      /* no readable opencode.json; keep the placeholder plan */
+    }
+    installAssignment = kept;
   }
 
   // V2 agents: description, mode, model, system prompt, ordered permission rules.

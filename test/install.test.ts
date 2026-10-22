@@ -157,6 +157,11 @@ test("installer --config-dir creates a complete self-contained config root", asy
             fs.statSync(path.join(configDir, "zombiecoder", "config.json")).mode & 0o777,
             0o600,
           );
+          assert.equal(
+            fs.statSync(path.join(configDir, "plugins", "zombiecoder", "plugin.ts")).mode & 0o777,
+            0o644,
+            "installed runtime files must not stay world-writable",
+          );
         }
       } finally {
         fs.rmSync(parent, { recursive: true, force: true });
@@ -178,7 +183,9 @@ test("installer links a self-contained home to OpenCode's canonical loader", asy
     assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
     for (const item of ["opencode.json", "agents", "plugins", "zombiecoder", "node_modules", "package.json"]) {
       const link = path.join(canonical, item);
-      assert.equal(fs.lstatSync(link).isSymbolicLink(), true, `${item} should link into the self-contained root`);
+      if (process.platform !== "win32") {
+        assert.equal(fs.lstatSync(link).isSymbolicLink(), true, `${item} should link into the self-contained root`);
+      }
       assert.equal(fs.realpathSync(link), fs.realpathSync(path.join(selfRoot, item)));
     }
     assert.match(result.stdout, /link self-contained root to global loader/);

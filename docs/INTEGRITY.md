@@ -7,21 +7,21 @@
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  9ea676d6f7f54a28114559a825491cdc3d3c0d3e608ad31df687538917556fa5  ║
-║  files 55 · bytes 535927 · base 4b0a4c9 · dirty                          ║
+║  root  a0f9a4ab913dd951fc7fa90bef2052014c053bc70e16c6759c6f54c9900d5849  ║
+║  files 55 · bytes 540279 · base 34bef15 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-10-22T13:30:21.441Z` |
-| Base commit | `4b0a4c9` |
+| Generated (UTC) | `2026-10-22T13:41:37.373Z` |
+| Base commit | `34bef15` |
 | Branch | `main` |
 | Code tree | `dirty` |
 | Files | 55 |
-| Bytes | 535927 |
-| Root SHA-256 | `9ea676d6f7f54a28114559a825491cdc3d3c0d3e608ad31df687538917556fa5` |
+| Bytes | 540279 |
+| Root SHA-256 | `a0f9a4ab913dd951fc7fa90bef2052014c053bc70e16c6759c6f54c9900d5849` |
 
 ## Scope
 
@@ -45,7 +45,7 @@ npm run integrity:check
 
 | Path | Bytes | SHA-256 |
 |---|---:|---|
-| `bin/install.mjs` | 48003 | `797745be6e7323d6b6cab59a8a07e7dbedf6c359ba71e6859c4bf6f271a1e376` |
+| `bin/install.mjs` | 52080 | `811722379706c312f26c283856eae9ec25e664642c53b4cdba6de90e68a5288a` |
 | `bin/quick-install.mjs` | 5685 | `fa97c3318d7630421e4f596044aa61da60c0f0d8b7533035f1013f462cedc078` |
 | `docs/skills/cpanel.md` | 1867 | `f056fa581f9a0fa268556d8769fc2c5389a864fbd552e90b1692efde0c003537` |
 | `docs/skills/evidence-before-confidence.md` | 1825 | `087195382d983591c2d2d5619ac0b36ee695ba3a0d9ef25bb5c7777911b034c3` |
@@ -90,7 +90,7 @@ npm run integrity:check
 | `src/zombie/transform.ts` | 3964 | `1c25f3eb1f6ecc9c8ed68b9894f2dfcffb75e233540be06b81f8bda78cc11ba2` |
 | `test/circuitBreaker.test.ts` | 3676 | `08d6ece5d464358a6fe2837bbf7b2b091770fd7c14fa0e29a9f25fe5180922fc` |
 | `test/context.test.ts` | 21022 | `bac9a9dc417df41d0c7be8533855df5999c1a5622441ab39b484df67346fbfbb` |
-| `test/install.test.ts` | 20056 | `991cfc76a11da10c6ee34bb7b4b5bb761a89a809927aaf11d83d63fa12666f38` |
+| `test/install.test.ts` | 20331 | `710e391bb6d738cfd22ad40c1f1ae3a9b1912f67201e700563d33ba26f79e06c` |
 | `test/io.test.ts` | 959 | `c483a9c9f9a4ca51e595df125fb36a8a23627a331ac9fbe871f1c404f858fe4a` |
 | `test/lsp.test.ts` | 2276 | `e6808cbdb5df0d78dd645b1b5a0e73ce64029eb2aa0e09516e585e523b673a6a` |
 | `test/mcp.test.ts` | 2352 | `b4ccdef6695d1b05082cd6ea7a1003f692daf606913e9456be1eca2c61e98fb7` |

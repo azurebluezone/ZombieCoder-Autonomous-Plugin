@@ -57,6 +57,27 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(HERE, "..");
 const PKG = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
 
+// Fail early and in plain language: this file imports .ts modules below, and old
+// Node versions otherwise die with ERR_UNKNOWN_FILE_EXTENSION.
+if (!nodeVersionAtLeast(process.versions.node, "22.6.0")) {
+  console.error(
+    `ZombieCoder needs Node.js 22.6 or newer (found ${process.version}). ` +
+      "Install the LTS build from https://nodejs.org and run the installer again.",
+  );
+  process.exit(1);
+}
+function nodeVersionAtLeast(current, minimum) {
+  const a = current.split(".").map(Number);
+  const b = minimum.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const left = a[i] ?? 0;
+    const right = b[i] ?? 0;
+    if (left > right) return true;
+    if (left < right) return false;
+  }
+  return true;
+}
+
 // Import the runtime's own defaults instead of copying provider URLs, IDs,
 // baseline model or API URL into this installer.
 const defaults = await import(
@@ -155,6 +176,15 @@ const ENTRY = path.join(PLUGINS_DIR, "zombiecoder.ts");
 const OPENCODE_JSON = path.join(TARGET, "opencode.json");
 const OPENCODE_JSONC = path.join(TARGET, "opencode.jsonc");
 const ZOMBIE_CONFIG = path.join(ZOMBIE_DIR, "config.json");
+
+// sudo installs create root-owned files that the normal user cannot update
+// later. Warn instead of failing: containers legitimately run as root.
+if (typeof process.getuid === "function" && process.getuid() === 0 && !process.env.ZOMBIECODER_ALLOW_ROOT) {
+  console.warn(
+    `[zc] WARN running as root; ${TARGET} will be owned by root. ` +
+      "Run the installer as your normal user instead (set ZOMBIECODER_ALLOW_ROOT=1 to silence).",
+  );
+}
 
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
@@ -351,7 +381,17 @@ async function step(name, fn) {
 }
 
 function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (error) {
+    if (error?.code === "EACCES" || error?.code === "EPERM") {
+      throw new Error(
+        `cannot write ${dir} (${error.code}). If an earlier sudo install created it, ` +
+          `fix ownership first: sudo chown -R "$USER" "${dir}" — then run the installer as your normal user.`,
+      );
+    }
+    throw error;
+  }
 }
 
 function writeIfChanged(file, content) {
@@ -390,6 +430,34 @@ function mergeJson(file, patch) {
   return merged;
 }
 
+// A git checkout may carry executable bits from the author's machine (or an
+// umask 000 shell). Installed runtime files are read-only data, so normalize
+// them: 0644 files, 0755 directories. Best effort on Windows.
+function normalizeModes(dir, fileMode = 0o644, dirMode = 0o755) {
+  let files = 0;
+  const walk = (current) => {
+    try {
+      fs.chmodSync(current, dirMode);
+    } catch {
+      /* best effort */
+    }
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile()) {
+        try {
+          fs.chmodSync(full, fileMode);
+          files += 1;
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+  };
+  walk(dir);
+  return files;
+}
+
 function listFiles(dir, rel = "") {
   const out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -403,6 +471,41 @@ function listFiles(dir, rel = "") {
 // A self-contained ~/.opencode install still needs the global loader at
 // ~/.config/opencode. Make that loader point at one copy instead of leaving
 // stale regular files behind. Only the documented default root is linked.
+// Windows symlinks need Developer Mode/Administrator; a junction needs neither.
+// If even a junction is denied, copy instead so the install still completes.
+// Linux/macOS keep real symlinks. The step detail reports any copies so a stale
+// copy after an update is visible instead of silently wrong.
+function linkEntry(source, link) {
+  const isDir = fs.statSync(source).isDirectory();
+  try {
+    fs.symlinkSync(
+      source,
+      link,
+      isDir ? (process.platform === "win32" ? "junction" : "dir") : "file",
+    );
+    return "symlink";
+  } catch {
+    if (isDir) {
+      try {
+        fs.symlinkSync(source, link, "junction");
+        return "junction";
+      } catch {
+        /* fall through to copy */
+      }
+    }
+    try {
+      fs.cpSync(source, link, { recursive: true, force: true });
+      return "copy";
+    } catch (copyError) {
+      throw new Error(
+        `cannot link or copy ${source} -> ${link}: ${copyError?.message ?? copyError}. ` +
+          `Check ownership of ${path.dirname(link)} (sudo chown -R "$USER" ...), ` +
+          "or enable symlinks with Windows Developer Mode.",
+      );
+    }
+  }
+}
+
 function linkSelfContainedGlobal() {
   if (!SELF_MODE) return "skipped (not --config-dir)";
   const selfRoot = path.resolve(TARGET);
@@ -414,6 +517,7 @@ function linkSelfContainedGlobal() {
   ensureDir(globalDir);
   const items = ["opencode.json", "agents", "plugins", "zombiecoder", "node_modules", "package.json"];
   const linked = [];
+  const modes = [];
   const backups = path.join(globalDir, ".backups");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   for (const item of items) {
@@ -428,16 +532,21 @@ function linkSelfContainedGlobal() {
     }
     if (current && path.resolve(path.dirname(link), current) === source) {
       linked.push(item);
+      modes.push("symlink");
       continue;
     }
     if (fs.existsSync(link) || current) {
       ensureDir(backups);
       fs.renameSync(link, path.join(backups, `${item}-${stamp}`));
     }
-    fs.symlinkSync(source, link, fs.statSync(source).isDirectory() ? "dir" : "file");
+    modes.push(linkEntry(source, link));
     linked.push(item);
   }
-  return `${linked.length} linked: ${linked.sort().join(", ")}`;
+  const copied = modes.filter((mode) => mode === "copy").length;
+  const suffix = copied
+    ? ` (${copied} copied: symlink not permitted — enable Developer Mode, or re-run the installer after every update)`
+    : "";
+  return `${linked.length} linked: ${linked.sort().join(", ")}${suffix}`;
 }
 
 // OpenAI-compatible gateways disagree about the envelope. A `data` array of ids is
@@ -657,8 +766,9 @@ await step("copy plugin source graph", () => {
     if (!fs.existsSync(from)) throw new Error(`missing source entry: src/${entry}`);
     fs.cpSync(from, path.join(pluginFolder, entry), { recursive: true, force: true });
   }
+  const normalized = normalizeModes(pluginFolder);
   const files = listFiles(pluginFolder);
-  return `${files.length} files: ${files.sort().join(", ")}`;
+  return `${files.length} files: ${files.sort().join(", ")} (${normalized} modes normalized to 0644)`;
 });
 
 // ---- 2b. runtime assets ------------------------------------------------------
@@ -738,10 +848,14 @@ await step("declare @opencode/plugin dependency", () => {
 // ---- 4. npm install ----------------------------------------------------------
 if (DO_INSTALL) {
   await step("npm install", () => {
-    const result = spawnSync("npm", ["install", "--no-audit", "--no-fund"], {
+    // Windows resolves npm through npm.cmd, and spawning a .cmd file needs a
+    // shell. Without this, a fresh Windows install fails here.
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    const result = spawnSync(npm, ["install", "--no-audit", "--no-fund"], {
       cwd: CONFIG_DIR,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8",
+      shell: process.platform === "win32",
     });
     if (result.status !== 0) {
       throw new Error(`npm exited ${result.status}: ${(result.stderr || "").trim().split("\n").slice(-4).join(" ")}`);

@@ -188,6 +188,7 @@ evidence presence যাচাই করে, বাস্তব সত্য ন
 | npm | Node-এর সাথে bundled |
 | Git | যেকোনো সাম্প্রতিক version |
 | OpenCode | 2.0.32 বা তার বেশি |
+| Python 3 | `evidence_gate` ও `syntax_check` helper-এর জন্য (core chat এর জন্য নয়) |
 | Internet | Provider/MCP probe-এর সময়; না থাকলে free fallback |
 
 Node version যাচাই:
@@ -295,7 +296,10 @@ npm.cmd run install-pack -- --yes
 
 Self-contained `.opencode` install ব্যবহার করলে OpenCode-এর global loader-এর
 জন্য pointer প্রয়োজন। `--config-dir "$HOME/.opencode"` installer এখন এই ছয়টি
-entry নিজেই symlink করে; নিচের manual command শুধু fallback বা repair-এর জন্য।
+entry নিজেই link করে: Linux/macOS-এ symlink, Windows-এ junction (admin/Developer
+Mode ছাড়াই), আর সেটাও না পারলে copy করে দেয় যাতে install আটকে না যায়। Copy হলে
+পরের update-এর পর installer আবার চালাতে হবে। নিচের manual command শুধু repair-এর জন্য।
+
 Linux:
 
 ```bash
@@ -305,14 +309,14 @@ for item in opencode.json agents plugins zombiecoder node_modules package.json; 
 done
 ```
 
-Windows PowerShell (Developer Mode অথবা Administrator প্রয়োজন):
+Windows PowerShell (repair; junction-এর জন্য admin লাগে না):
 
 ```powershell
 $source = "$env:USERPROFILE\.opencode"
 $target = "$env:USERPROFILE\.config\opencode"
 New-Item -ItemType Directory -Force $target | Out-Null
 foreach ($item in @("opencode.json","agents","plugins","zombiecoder","node_modules","package.json")) {
-  New-Item -ItemType SymbolicLink -Force `
+  New-Item -ItemType Junction -Force `
     -Path (Join-Path $target $item) `
     -Target (Join-Path $source $item) | Out-Null
 }
@@ -321,12 +325,25 @@ foreach ($item in @("opencode.json","agents","plugins","zombiecoder","node_modul
 > Symlink না দিলে `.opencode` config শুধু home directory-এর অধীনস্থ প্রজেক্টে
 > পাওয়া যাবে। Standard global install ব্যবহার করলে symlink প্রয়োজন নেই।
 
+### ৪.৩.১ ইনস্টল-সমস্যার সহজ সমাধান
+
+| সমস্যা | কারণ | সমাধান |
+|---|---|---|
+| `EACCES` / `permission denied` | আগে `sudo` দিয়ে ইনস্টল হয়েছে, ফাইল root-owned | `sudo chown -R "$USER" "$HOME/.opencode" "$HOME/.config/opencode"` — তারপর installer normal user হিসেবে চালান। `sudo` দিয়ে installer চালাবেন না (container ছাড়া)। |
+| `Node.js ... too old` | Node < 22.6 | [nodejs.org](https://nodejs.org) থেকে LTS ইনস্টল করুন, `node --version` দিয়ে যাচাই করুন। |
+| Windows-এ symlink error | symlink privilege নেই | নতুন installer junction/copy fallback ব্যবহার করে; Developer Mode বাধ্যতামূলক নয়। Copy হলে update-এর পর installer আবার চালান। |
+| `python3: not found` | Python 3 নেই | Python 3 ইনস্টল করুন (`evidence_gate`, `syntax_check` helper ব্যবহার করবে)। |
+| `npm: not found` | Node-এর bundled npm PATH-এ নেই | Node LTS ইনস্টল/repair করুন, নতুন terminal খুলুন। |
+
+Installer প্রতিটি step-এর শেষে `OK`/`FAIL` লাইন দেখায় এবং `installed: N/M steps ok`
+প্রিন্ট করে; কোনো FAIL থাকলে exit code `1`।
+
 ### ৪.৪ ইনস্টলের পর কী হবে
 
 Installer নিচের কাজগুলো ধাপে ধাপে সম্পন্ন করে:
 
 1. Install root তৈরি করে।
-2. Plugin runtime graph copy করে।
+2. Plugin runtime graph copy করে (files `0644`, dirs `0755`; checked-out mode যাই হোক)।
 3. `zombiecoder/{docs,tools,tls,model.mjs,skills-catalog}` runtime asset copy করে।
 4. `@opencode/plugin` dependency যোগ করে।
 5. `npm install` চালায় (অথবা `--no-install` দিলে skip করে)।
@@ -339,8 +356,8 @@ Installer নিচের কাজগুলো ধাপে ধাপে সম
 10. ৯টি agent markdown লেখে এবং পুরনো legacy agent prune করে।
 11. Project-local legacy install-এ `.zombiecoder` seed করে।
 12. `--config-dir ~/.opencode` হলে `~/.config/opencode`-এর ছয়টি entry-কে
-    একটি self-contained root-এ symlink করে; পুরনো regular file/directory
-    `~/.config/opencode/.backups/`-এ সরিয়ে রাখে।
+    একটি self-contained root-এ link করে (symlink; Windows-এ junction, না পারলে
+    copy); পুরনো regular file/directory `~/.config/opencode/.backups/`-এ সরিয়ে রাখে।
 
 Install শেষ হলে কোথায় কী থাকবে:
 
@@ -1162,8 +1179,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  9ea676d6f7f54a28114559a825491cdc3d3c0d3e608ad31df687538917556fa5  ║
-║  files 55 · bytes 535927 · base 4b0a4c9 · dirty                          ║
+║  root  a0f9a4ab913dd951fc7fa90bef2052014c053bc70e16c6759c6f54c9900d5849  ║
+║  files 55 · bytes 540279 · base 34bef15 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1171,7 +1188,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-22T13:30:21.441Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-22T13:41:37.373Z
 
 </div>
 <!-- INTEGRITY:END -->

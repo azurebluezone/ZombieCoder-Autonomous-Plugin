@@ -80,10 +80,13 @@ test("context pack merges SSOT, syllabus and memory into a bounded pack", () => 
   assert.match(pack.text, /ZombieCoder Compact Context Pack/);
   assert.match(pack.text, /### SSOT/);
   assert.match(pack.text, /### Syllabus/);
-  assert.match(pack.text, /### Session memory \(2 recent, 0 archives\)/);
+  assert.match(pack.text, /### Session memory \(2 recent, 0 archive files, 0 archived messages\)/);
   assert.match(pack.text, /Allowed root: /);
   assert.ok(pack.bytes > 0 && pack.bytes <= CONTEXT_LIMITS.total, `pack must stay bounded, got ${pack.bytes}`);
-  assert.match(pack.uiLine, /Context: SSOT OK \(manu\) \| Syllabus OK \(halim\) \| Memory 2 recent/);
+  assert.match(
+    pack.uiLine,
+    /Context: SSOT OK \(manu\) \| Syllabus OK \(halim\) \| Memory 2 recent \/ 0 archive files \/ 0 archived messages/,
+  );
   assert.equal(pack.ssot.exists, true);
   assert.equal(pack.syllabus.exists, true);
   assert.ok(
@@ -104,6 +107,48 @@ test("context pack merges SSOT, syllabus and memory into a bounded pack", () => 
   assert.match(pack.uiLine, /SSOT OK \(manu\)/);
   assert.match(pack.uiLine, /Syllabus OK \(halim\)/);
   assert.match(pack.text, /### Context ownership/);
+});
+
+test("context pack separates archive-file count from archived-message count", () => {
+  const root = seedProject();
+  const now = new Date().toISOString();
+  const archive = path.join(root, ".zombiecoder", "memory", "ses_count.jsonl");
+  fs.writeFileSync(
+    archive,
+    JSON.stringify({
+      ts: now,
+      sessionID: "ses_count",
+      archived: [
+        { role: "user", text: "first archived message", at: now },
+        { role: "assistant", text: "second archived message", at: now },
+      ],
+    }) + "\n",
+  );
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "memory", "index.json"),
+    JSON.stringify({
+      projectRoot: root,
+      updatedAt: now,
+      sessions: {},
+      archives: [
+        {
+          sessionID: "ses_count",
+          file: archive,
+          archived: 2,
+          bytes: fs.statSync(archive).size,
+          firstAt: now,
+          lastAt: now,
+          updatedAt: now,
+        },
+      ],
+    }),
+  );
+
+  const pack = buildContextPack(root, "manu", []);
+  assert.equal(pack.memory.archives, 1);
+  assert.equal(pack.memory.archivedMessages, 2);
+  assert.match(pack.text, /### Session memory \(0 recent, 1 archive file, 2 archived messages\)/);
+  assert.match(pack.uiLine, /Memory 0 recent \/ 1 archive file \/ 2 archived messages/);
 });
 
 test("context pack marks missing SSOT instead of inventing content", () => {

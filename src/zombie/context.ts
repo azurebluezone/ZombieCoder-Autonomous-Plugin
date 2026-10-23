@@ -67,7 +67,10 @@ export type ContextFileStatus = {
 export type MemoryStatus = {
   indexFile: string;
   sessions: number;
+  /** Number of session archive files, not the number of archived messages. */
   archives: number;
+  /** Total archived messages across every archive file. */
+  archivedMessages: number;
   recent: number;
 };
 
@@ -85,6 +88,10 @@ export type ContextPack = {
   memory: MemoryStatus;
   owners: ContextOwners;
 };
+
+function countLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
 
 function clip(text: string, limit: number, from: "head" | "tail" = "head"): string {
   const value = String(text ?? "").trim();
@@ -171,10 +178,15 @@ export function buildContextPack(
   const index = readIndex(projectRoot);
   const ssot = fileStatus(ssotPath, ssotText);
   const syllabus = fileStatus(syllabusPath, syllabusText);
+  const archiveFiles = Array.isArray(index.archives) ? index.archives : [];
   const memory: MemoryStatus = {
     indexFile: memoryIndexFile(projectRoot),
     sessions: Object.keys(index.sessions).length,
-    archives: Array.isArray(index.archives) ? index.archives.length : 0,
+    archives: archiveFiles.length,
+    archivedMessages: archiveFiles.reduce(
+      (total, entry) => total + (typeof entry.archived === "number" ? entry.archived : 0),
+      0,
+    ),
     recent: recent.length,
   };
 
@@ -204,7 +216,7 @@ export function buildContextPack(
       : "### Syllabus (missing)",
     syllabusBody,
     "",
-    `### Session memory (${memory.recent} recent, ${memory.archives} archives) — owner: ${CONTEXT_OWNERS.memory.agent}`,
+    `### Session memory (${memory.recent} recent, ${countLabel(memory.archives, "archive file")}, ${countLabel(memory.archivedMessages, "archived message")}) — owner: ${CONTEXT_OWNERS.memory.agent}`,
     memorySummary(recent),
     "",
     "### Context ownership (visible in the UI)",
@@ -217,7 +229,7 @@ export function buildContextPack(
   const text = clip(lines.join("\n"), CONTEXT_LIMITS.total);
   const uiLine = `Context: SSOT ${ssot.exists ? "OK" : "MISSING"} (${CONTEXT_OWNERS.ssot.agent}) | Syllabus ${
     syllabus.exists ? "OK" : "MISSING"
-  } (${CONTEXT_OWNERS.syllabus.agent}) | Memory ${memory.recent} recent / ${memory.archives} archives (${
+  } (${CONTEXT_OWNERS.syllabus.agent}) | Memory ${memory.recent} recent / ${countLabel(memory.archives, "archive file")} / ${countLabel(memory.archivedMessages, "archived message")} (${
     CONTEXT_OWNERS.memory.agent
   }) | Pack ${Buffer.byteLength(text, "utf8")}B`;
   return {

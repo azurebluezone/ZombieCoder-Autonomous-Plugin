@@ -990,6 +990,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           ssotExcerptBytes: pack.ssotExcerptBytes,
           syllabusExcerptBytes: pack.syllabusExcerptBytes,
           memoryArchives: pack.memory.archives,
+          memoryArchivedMessages: pack.memory.archivedMessages,
           uiLine: pack.uiLine,
         });
       }),

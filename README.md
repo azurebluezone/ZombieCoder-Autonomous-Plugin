@@ -144,7 +144,7 @@ evidence presence যাচাই করে, বাস্তব সত্য ন
   history পায় না। Plugin `SSOT.md` + `syllabus.md` + recent memory মিলিয়ে একটি
   bounded pack inject করে (`src/zombie/context.ts`)।
 - **`context_status` tool** — agent substantive কাজ শুরুর আগে এই tool call করে
-  UI-তে এক লাইন দেখায়: `Context: SSOT OK | Syllabus OK | Memory N recent / M archives | Pack NB`।
+  UI-তে এক লাইন দেখায়: `Context: SSOT OK | Syllabus OK | Memory N recent / M archive files / K archived messages | Pack NB`।
   তাই SSOT, syllabus ও memory manage হচ্ছে কিনা user সরাসরি দেখতে পায়।
 - **Hard response gate** — `http.response` hook primary answer যাচাই করে।
   `path:line`, test output বা exit code ছাড়া completed/successful claim পেলে
@@ -1195,8 +1195,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  4af149c5ed63c4553d940e49034eaec82fe0f25e871d3fb5d17b9fd18a0c0817  ║
-║  files 59 · bytes 599032 · base a0b5b99 · dirty                          ║
+║  root  ff64f0374a61b97a42e52768b8377e4a22aa5457732d24f5b4db103bc3751cf0  ║
+║  files 59 · bytes 601124 · base 1510ca2 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1204,7 +1204,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-23T02:01:52.813Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-23T02:31:07.827Z
 
 </div>
 <!-- INTEGRITY:END -->

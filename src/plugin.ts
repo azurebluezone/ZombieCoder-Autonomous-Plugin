@@ -538,7 +538,52 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   const startedAt = new Date().toISOString();
   let root = ctx?.location?.directory;
   if (!root || typeof root !== "string") root = process.cwd();
+  root = path.resolve(root);
   const layout = detectInstallLayout(root);
+
+  // A global plugin instance is loaded once, but sessions can live in other
+  // project directories. Setup-time `ctx.location` is therefore only the
+  // fallback: resolve the real root from the session on first use.
+  const resolvedSessionRoots = new Map<string, string>();
+  const scaffoldedRoots = new Set<string>();
+  const projectRoots = new Set<string>([root]);
+
+  const normalizeProjectRoot = (value: string): string => path.resolve(String(value));
+
+  const scaffoldProject = (projectRoot: string): string => {
+    const normalized = normalizeProjectRoot(projectRoot);
+    if (scaffoldedRoots.has(normalized)) return normalized;
+    ensureZombieDirs(normalized);
+    writeIndex(normalized, readIndex(normalized));
+    const fingerprint = scanProject(normalized);
+    writeSsot(normalized, fingerprint);
+    ensureSyllabus(normalized, fingerprint, ROSTER.map((a) => a.id));
+    scaffoldedRoots.add(normalized);
+    projectRoots.add(normalized);
+    return normalized;
+  };
+
+  const resolveSessionRoot = async (sessionID: string): Promise<string> => {
+    const id = String(sessionID ?? "").trim();
+    if (!id || id === "unknown") return root!;
+    const cached = resolvedSessionRoots.get(id);
+    if (cached) return cached;
+    let resolved = root!;
+    try {
+      const info = await (ctx.session as any)?.get?.({ sessionID: id });
+      const directory = info?.location?.directory;
+      if (typeof directory === "string" && directory.trim().length > 0) {
+        resolved = normalizeProjectRoot(directory);
+      }
+    } catch (error: any) {
+      // The session door is optional on older builds; the setup root remains
+      // the safe fallback and the failure is visible in the audit below.
+      console.error(`[zombiecoder] session root lookup failed for ${id}: ${String(error?.message ?? error)}`);
+    }
+    resolvedSessionRoots.set(id, resolved);
+    projectRoots.add(resolved);
+    return resolved;
+  };
 
   const report: Report = {
     plugin: PLUGIN_ID,
@@ -746,6 +791,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     ensureSyllabus(root!, fingerprint ?? scanProject(root!), ROSTER.map((a) => a.id)),
   );
   report.outputs.syllabus = syllabus;
+  scaffoldedRoots.add(root);
 
   // ---- §1 agent doors + model binding --------------------------------------
   // Two documented doors, both written at the install root (never in an
@@ -833,7 +879,10 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
 
   // ---- §6/§7 control surface ------------------------------------------------
   const deps = {
-    projectRoot: () => root!,
+    projectRoot: (sessionID?: string) => {
+      const id = String(sessionID ?? "").trim();
+      return (id && resolvedSessionRoots.get(id)) || root!;
+    },
     installRoot: () => layout.dir,
     storage: ctx.storage,
     refreshSsot: writeSsotNow,
@@ -873,9 +922,16 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   if (ctx.session?.hook) {
     const contextHook = await stepAsync("hook-context", () =>
       ctx.session!.hook!("context", async (event: any) => {
-        const projectRoot = root!;
         const agentID = String(event?.agent ?? "unknown");
         const sessionID = String(event?.sessionID ?? "unknown");
+        const projectRoot = await resolveSessionRoot(sessionID);
+        try {
+          scaffoldProject(projectRoot);
+        } catch (error: any) {
+          console.error(
+            `[zombiecoder] project scaffold failed for ${projectRoot}: ${String(error?.message ?? error)}`,
+          );
+        }
         const def = ROSTER.find((a) => a.id === agentID);
         const modelID = event?.model?.modelID ?? event?.model?.id;
         const model =
@@ -942,9 +998,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
 
     const compactionHook = await stepAsync("hook-compaction", () =>
       ctx.session!.hook!("compaction", async (event: any) => {
-        const projectRoot = root!;
         const agentID = String(event?.agent ?? "unknown");
         const sessionID = String(event?.sessionID ?? "unknown");
+        const projectRoot = await resolveSessionRoot(sessionID);
         const messages = Array.isArray(event?.messages) ? event.messages : [];
         const result = await keepRecent(ctx.storage, projectRoot, sessionID, messages);
         audit(projectRoot, agentID, {
@@ -969,10 +1025,11 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             if (event?.type !== "session.idle") continue;
             const sessionID = String(event?.data?.sessionID ?? "").trim();
             if (!sessionID) continue;
+            const projectRoot = await resolveSessionRoot(sessionID);
             try {
               const messages = await ctx.session!.context!({ sessionID });
-              const result = await archiveSessionSnapshot(ctx.storage, root!, sessionID, messages);
-              audit(root!, "plugin", {
+              const result = await archiveSessionSnapshot(ctx.storage, projectRoot, sessionID, messages);
+              audit(projectRoot, "plugin", {
                 kind: "session.archive",
                 sessionID,
                 kept: result.kept,
@@ -982,7 +1039,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
               });
             } catch (error: any) {
               const message = redact(String(error?.message ?? error));
-              audit(root!, "plugin", {
+              audit(projectRoot, "plugin", {
                 kind: "session.archive",
                 sessionID,
                 ok: false,
@@ -1007,8 +1064,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     });
 
     const modelHook = await stepAsync("hook-model-request", () =>
-      ctx.session!.hook!("model.request", (event: any) => {
-        audit(root!, String(event?.agent ?? "unknown"), {
+      ctx.session!.hook!("model.request", async (event: any) => {
+        const projectRoot = await resolveSessionRoot(String(event?.sessionID ?? "unknown"));
+        audit(projectRoot, String(event?.agent ?? "unknown"), {
           kind: "model.request",
           sessionID: event?.sessionID,
           model:
@@ -1023,11 +1081,19 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
 
     // Session index bookkeeping: the first time we see a session, record it.
     const sessionHook = await stepAsync("hook-session-index", () =>
-      ctx.session!.hook!("prompt", (event: any) => {
+      ctx.session!.hook!("prompt", async (event: any) => {
         const sessionID = String(event?.sessionID ?? "unknown");
+        const projectRoot = await resolveSessionRoot(sessionID);
+        try {
+          scaffoldProject(projectRoot);
+        } catch (error: any) {
+          console.error(
+            `[zombiecoder] project scaffold failed for ${projectRoot}: ${String(error?.message ?? error)}`,
+          );
+        }
         // An empty patch only refreshes updatedAt; it must not reset the kept
         // count written by the compaction hook.
-        touchIndex(root!, sessionID, {});
+        touchIndex(projectRoot, sessionID, {});
       }),
     );
     if (sessionHook) cleanups.push(() => sessionHook.dispose());
@@ -1048,6 +1114,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       const { sessionID, agentID, model } = input;
       if (!sessionID || sessionID === "unknown") return;
       if (breakerInflight.has(sessionID)) return;
+      const projectRoot = await resolveSessionRoot(sessionID);
       const session = ctx.session as any;
       const available = Boolean(session?.synthetic && session?.prompt && session?.switchAgent);
       const failure = {
@@ -1066,7 +1133,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         const state = readBreakerState(await ctx.storage.get(key), sessionID);
         const { state: nextState, decision } = decideBreaker(state, ROSTER, failure, BREAKER_LIMIT);
         await ctx.storage.set(key, nextState);
-        audit(root!, "plugin", {
+        audit(projectRoot, "plugin", {
           kind: "agent.failure",
           sessionID,
           agent: agentID,
@@ -1078,7 +1145,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           limit: BREAKER_LIMIT,
         });
         if (!available) {
-          audit(root!, "plugin", {
+          audit(projectRoot, "plugin", {
             kind: "agent.escalation",
             sessionID,
             from: agentID,
@@ -1093,7 +1160,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             text: unresolvedMessage(nextState, decision.limit),
             description: "zombiecoder circuit breaker",
           });
-          audit(root!, "plugin", {
+          audit(projectRoot, "plugin", {
             kind: "agent.breaker.open",
             sessionID,
             agent: agentID,
@@ -1109,7 +1176,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           await session.switchAgent({ sessionID, agent: decision.next });
         } catch (switchError: any) {
           switched = false;
-          audit(root!, "plugin", {
+          audit(projectRoot, "plugin", {
             kind: "agent.escalation.switch",
             sessionID,
             from: agentID,
@@ -1128,7 +1195,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           text: fallbackPrompt(failure, input.blockedText, decision),
           delivery: "queue",
         });
-        audit(root!, "plugin", {
+        audit(projectRoot, "plugin", {
           kind: "agent.escalation",
           sessionID,
           from: agentID,
@@ -1139,7 +1206,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           reason: failure.reason,
         });
       } catch (error: any) {
-        audit(root!, "plugin", {
+        audit(projectRoot, "plugin", {
           kind: "agent.escalation",
           sessionID,
           from: agentID,
@@ -1164,9 +1231,17 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             event?.model?.providerID && modelID
               ? `${event.model.providerID}/${modelID}`
               : undefined;
+          const projectRoot = await resolveSessionRoot(String(event?.sessionID ?? "unknown"));
           try {
-            const result = await applyResponseGate(event.response, { allowedRoot: root! });
-            audit(root!, String(event?.agent ?? "unknown"), {
+            scaffoldProject(projectRoot);
+          } catch (error: any) {
+            console.error(
+              `[zombiecoder] project scaffold failed for ${projectRoot}: ${String(error?.message ?? error)}`,
+            );
+          }
+          try {
+            const result = await applyResponseGate(event.response, { allowedRoot: projectRoot });
+            audit(projectRoot, String(event?.agent ?? "unknown"), {
               kind: "response.gate",
               sessionID: event?.sessionID,
               model,
@@ -1202,7 +1277,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
                   agents: [],
                   failures: [],
                 });
-                audit(root!, "plugin", {
+                audit(projectRoot, "plugin", {
                   kind: "agent.breaker.reset",
                   sessionID: previous.sessionID,
                   failures: previous.failures.length,
@@ -1210,7 +1285,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
               }
             }
           } catch (error: any) {
-            audit(root!, String(event?.agent ?? "unknown"), {
+            audit(projectRoot, String(event?.agent ?? "unknown"), {
               kind: "response.gate.error",
               sessionID: event?.sessionID,
               model,
@@ -1231,6 +1306,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       ctx.tool!.hook!("execute.after", async (event: any) => {
         const agentID = String(event?.agent ?? "unknown");
         const sessionID = String(event?.sessionID ?? "unknown");
+        const projectRoot = await resolveSessionRoot(sessionID);
         const failureKey = `agent/failures/${sessionID}/${agentID}`;
         const previous = (await ctx.storage.get(failureKey)) as
           | { count?: number; escalated?: boolean }
@@ -1240,7 +1316,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         if (failed || previous) {
           await ctx.storage.set(failureKey, { count, escalated: previous?.escalated ?? false });
         }
-        audit(root!, String(event?.agent ?? "unknown"), {
+        audit(projectRoot, String(event?.agent ?? "unknown"), {
           kind: "tool",
           sessionID,
           tool: event?.tool,
@@ -1254,7 +1330,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         const next = index >= 0 ? ROSTER[(index + 1) % ROSTER.length] : ROSTER[0];
         await ctx.storage.set(failureKey, { count, escalated: true });
         if (!ctx.session?.switchAgent) {
-          audit(root!, "plugin", {
+          audit(projectRoot, "plugin", {
             kind: "agent.escalation",
             sessionID,
             from: agentID,
@@ -1267,7 +1343,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         }
         try {
           await ctx.session.switchAgent({ sessionID, agent: next.id });
-          audit(root!, "plugin", {
+          audit(projectRoot, "plugin", {
             kind: "agent.escalation",
             sessionID,
             from: agentID,
@@ -1276,7 +1352,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             reason: "three consecutive tool execution errors",
           });
         } catch (error: any) {
-          audit(root!, "plugin", {
+          audit(projectRoot, "plugin", {
             kind: "agent.escalation",
             sessionID,
             from: agentID,
@@ -1295,11 +1371,19 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   // Their door (config.watcher) has no interval knob — only an ignore list. So the
   // timer lives in our own process, and we say so rather than pretending it is theirs.
   const timer = setInterval(() => {
-    try {
-      const written = writeSsotNow();
-      audit(root!, "plugin", { kind: "ssot.refresh", sha256: written.sha256, bytes: written.bytes });
-    } catch (error: any) {
-      console.error(`[zombiecoder] ssot refresh failed: ${String(error?.message ?? error)}`);
+    for (const projectRoot of projectRoots) {
+      try {
+        const written = writeSsot(projectRoot, scanProject(projectRoot));
+        audit(projectRoot, "plugin", {
+          kind: "ssot.refresh",
+          sha256: written.sha256,
+          bytes: written.bytes,
+        });
+      } catch (error: any) {
+        console.error(
+          `[zombiecoder] ssot refresh failed for ${projectRoot}: ${String(error?.message ?? error)}`,
+        );
+      }
     }
   }, config.ssotRefreshMs || DEFAULT_SSOT_REFRESH_MS);
   if (typeof (timer as any).unref === "function") (timer as any).unref();

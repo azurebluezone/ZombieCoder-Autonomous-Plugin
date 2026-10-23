@@ -28,6 +28,7 @@ function makeContext(root: string) {
   const synthetics: Array<{ sessionID: string; text: string; description?: string }> = [];
   const prompts: Array<{ sessionID: string; text: string; delivery?: string }> = [];
   const storage = new Map<string, unknown>();
+  const sessionLocations = new Map<string, string>();
   const deferred = (fn: () => void) => setTimeout(fn, 5);
   const registration = { dispose: async () => undefined };
   const ctx = {
@@ -88,6 +89,9 @@ function makeContext(root: string) {
       },
     },
     session: {
+      get: async (input: { sessionID: string }) => ({
+        location: { directory: sessionLocations.get(input.sessionID) ?? root },
+      }),
       hook: async (name: string, fn: (event: any) => any) => {
         hooks.push(name);
         sessionHooks[name] = fn;
@@ -105,7 +109,20 @@ function makeContext(root: string) {
       },
     },
   };
-  return { ctx, tools, skills, hooks, toolHooks, sessionHooks, agentSwitches, synthetics, prompts, storage, switchState };
+  return {
+    ctx,
+    tools,
+    skills,
+    hooks,
+    toolHooks,
+    sessionHooks,
+    agentSwitches,
+    synthetics,
+    prompts,
+    storage,
+    switchState,
+    sessionLocations,
+  };
 }
 
 function tempProject(): string {
@@ -273,6 +290,78 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(toolStep.ok, true);
   assert.equal(toolStep.detail, "11 registered");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
+
+  await cleanup();
+});
+
+test("context hook resolves a session's own project root and scaffolds it", async () => {
+  const setupRoot = tempProject();
+  fs.mkdirSync(path.join(setupRoot, ".zombiecoder"), { recursive: true });
+  fs.writeFileSync(path.join(setupRoot, ".environment"), "EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL=\n");
+  fs.writeFileSync(
+    path.join(setupRoot, ".zombiecoder", "config.json"),
+    JSON.stringify({
+      version: "0.0.0-test",
+      customProviderUrl: "",
+      customProviderID: "missionbarisal",
+      mcpUrl: "",
+      opencodeApiUrl: "",
+      ssotRefreshMs: 300000,
+      modelStrategy: "auto",
+    }),
+  );
+
+  const fake: Fake = makeContext(setupRoot);
+  const cleanup = await setup(fake.ctx);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const secondRoot = tempProject();
+  const sessionID = "ses_other_project";
+  fake.sessionLocations.set(sessionID, secondRoot);
+
+  const system: any[] = [];
+  await fake.sessionHooks.context({
+    agent: "manu",
+    sessionID,
+    system,
+    messages: [],
+  });
+
+  for (const file of ["SSOT.md", "syllabus.md"]) {
+    assert.ok(
+      fs.existsSync(path.join(secondRoot, ".zombiecoder", file)),
+      `${file} must be scaffolded in the session project`,
+    );
+  }
+  assert.ok(
+    fs.existsSync(path.join(secondRoot, ".zombiecoder", "memory", "index.json")),
+    "memory index must be scaffolded in the session project",
+  );
+  assert.ok(
+    system.some((part: any) => String(part?.text ?? "").includes("### Agent contract")),
+    "the context hook must push the session project pack",
+  );
+
+  const contextTool = fake.tools.find((tool) => tool.name === "context_status");
+  const contextOutput = (
+    await contextTool.execute({ agent: "manu", sessionID }, { sessionID })
+  ).output;
+  assert.equal(contextOutput.allowedRoot, secondRoot, "context tools must use the session root");
+
+  const workdirTool = fake.tools.find((tool) => tool.name === "get_working_directory");
+  const workdirOutput = (await workdirTool.execute({}, { sessionID })).output;
+  assert.equal(workdirOutput.root, secondRoot);
+
+  const ssotTool = fake.tools.find((tool) => tool.name === "read_ssot");
+  const ssotOutput = (await ssotTool.execute({}, { sessionID })).output;
+  assert.equal(ssotOutput.file, path.join(secondRoot, ".zombiecoder", "SSOT.md"));
+  assert.doesNotMatch(ssotOutput.markdown, /\(not generated\)/);
+
+  const audit = fs.readFileSync(
+    path.join(secondRoot, ".zombiecoder", ".state", "audit.jsonl"),
+    "utf8",
+  );
+  assert.match(audit, /"kind":"context"/);
+  assert.match(audit, /"sessionID":"ses_other_project"/);
 
   await cleanup();
 });

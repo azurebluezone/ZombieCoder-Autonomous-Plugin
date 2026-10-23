@@ -40,7 +40,8 @@ export type ToolLike = {
 };
 
 export type SurfaceDeps = {
-  projectRoot: () => string;
+  /** Session-aware project root. Falls back to the setup root when no session is cached. */
+  projectRoot: (sessionID?: string) => string;
   /** OpenCode config directory: the shared skill store lives under it. */
   installRoot: () => string;
   storage: StorageLike;
@@ -193,7 +194,7 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
         const sessionID = input?.sessionID ?? "unknown";
         return {
           recent: await readRecent(deps.storage, sessionID),
-          summary: archiveSummary(deps.projectRoot(), sessionID),
+          summary: archiveSummary(deps.projectRoot(sessionID), sessionID),
         };
       },
 
@@ -213,8 +214,9 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
 
       context_status: async (input: { agent?: string; sessionID?: string }) => {
         const sessionID = String(input?.sessionID ?? "").trim();
+        const projectRoot = deps.projectRoot(sessionID);
         const recent = sessionID ? await readRecent(deps.storage, sessionID) : [];
-        const pack = buildContextPack(deps.projectRoot(), String(input?.agent ?? "unknown"), recent);
+        const pack = buildContextPack(projectRoot, String(input?.agent ?? "unknown"), recent);
         return {
           uiLine: pack.uiLine,
           packBytes: pack.bytes,
@@ -250,39 +252,57 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
 
 // ---- agent-callable tools (spec names `get_working_directory` explicitly) ----
 
+type ToolContextLike = { sessionID?: string };
+
 type ToolSpec = {
   name: string;
   description: string;
   input: Record<string, unknown>;
-  run: (input: any) => any;
+  run: (input: any, context?: ToolContextLike) => any;
 };
 
 export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
   const empty = { type: "object" as const, properties: {}, additionalProperties: false };
+  const rootFor = (context?: ToolContextLike) => deps.projectRoot(context?.sessionID);
   return [
     {
       name: "get_working_directory",
       description: "Return the working directory the ZombieCoder plugin is bound to, plus the .zombiecoder layout.",
       input: empty,
-      run: () => ({
-        root: deps.projectRoot(),
-        zombiecoder: deps.projectRoot() + "/.zombiecoder",
-        ssot: ssotFile(deps.projectRoot()),
-        syllabus: syllabusFile(deps.projectRoot()),
-        memory: memoryDir(deps.projectRoot()),
-      }),
+      run: (_input: any, context?: ToolContextLike) => {
+        const projectRoot = rootFor(context);
+        return {
+          root: projectRoot,
+          zombiecoder: projectRoot + "/.zombiecoder",
+          ssot: ssotFile(projectRoot),
+          syllabus: syllabusFile(projectRoot),
+          memory: memoryDir(projectRoot),
+        };
+      },
     },
     {
       name: "read_ssot",
       description: "Read the generated Single Source of Truth for this project.",
       input: empty,
-      run: () => ({ file: ssotFile(deps.projectRoot()), markdown: readText(ssotFile(deps.projectRoot())) ?? "(not generated)" }),
+      run: (_input: any, context?: ToolContextLike) => {
+        const projectRoot = rootFor(context);
+        return {
+          file: ssotFile(projectRoot),
+          markdown: readText(ssotFile(projectRoot)) ?? "(not generated)",
+        };
+      },
     },
     {
       name: "read_syllabus",
       description: "Read the append-only syllabus for this project.",
       input: empty,
-      run: () => ({ file: syllabusFile(deps.projectRoot()), markdown: readSyllabus(deps.projectRoot()) ?? "(not seeded)" }),
+      run: (_input: any, context?: ToolContextLike) => {
+        const projectRoot = rootFor(context);
+        return {
+          file: syllabusFile(projectRoot),
+          markdown: readSyllabus(projectRoot) ?? "(not seeded)",
+        };
+      },
     },
     {
       name: "append_syllabus",
@@ -293,16 +313,17 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         required: ["topic", "summary"],
         additionalProperties: false,
       },
-      run: (input: any) => {
+      run: (input: any, context?: ToolContextLike) => {
         if (!input?.topic || !input?.summary) throw new Error("topic and summary are required");
-        return appendSyllabus(deps.projectRoot(), input.topic, input.summary, auditFile(deps.projectRoot()));
+        const projectRoot = rootFor(context);
+        return appendSyllabus(projectRoot, input.topic, input.summary, auditFile(projectRoot));
       },
     },
     {
       name: "project_fingerprint",
       description: "Scan the project live and return its machine-readable fingerprint. No fingerprint file is created.",
       input: empty,
-      run: () => scanProject(deps.projectRoot()),
+      run: (_input: any, context?: ToolContextLike) => scanProject(rootFor(context)),
     },
     {
       name: "context_status",
@@ -316,10 +337,11 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         },
         additionalProperties: false,
       },
-      run: async (input: any) => {
-        const sessionID = String(input?.sessionID ?? "").trim();
+      run: async (input: any, context?: ToolContextLike) => {
+        const sessionID = String(input?.sessionID ?? context?.sessionID ?? "").trim();
+        const projectRoot = deps.projectRoot(context?.sessionID || sessionID);
         const recent = sessionID ? await readRecent(deps.storage, sessionID) : [];
-        const pack = buildContextPack(deps.projectRoot(), String(input?.agent ?? "unknown"), recent);
+        const pack = buildContextPack(projectRoot, String(input?.agent ?? "unknown"), recent);
         return {
           uiLine: pack.uiLine,
           packBytes: pack.bytes,
@@ -352,8 +374,9 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         required: [],
         additionalProperties: false,
       },
-      run: (input: any) => {
-        const script = evidenceGateScript(deps.projectRoot());
+      run: (input: any, context?: ToolContextLike) => {
+        const projectRoot = rootFor(context);
+        const script = evidenceGateScript(projectRoot);
         if (!script) {
           throw new Error(
             "evidence_gate.py is not installed; run the ZombieCoder installer to copy runtime assets",
@@ -365,9 +388,9 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         if (requested) {
           file = path.isAbsolute(requested)
             ? requested
-            : path.resolve(deps.projectRoot(), requested);
+            : path.resolve(projectRoot, requested);
         } else if (String(input?.claim ?? "").trim()) {
-          const dir = path.join(deps.projectRoot(), ".zombiecoder", ".state");
+          const dir = path.join(projectRoot, ".zombiecoder", ".state");
           fs.mkdirSync(dir, { recursive: true });
           file = path.join(dir, `evidence-gate-${process.pid}-${Date.now()}.json`);
           fs.writeFileSync(
@@ -387,7 +410,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const kind = String(input?.kind ?? (ephemeral ? "claim" : "auto"));
           const result = spawnSync(
             "python3",
-            [script, "--kind", kind, "--file", file, "--root", deps.projectRoot()],
+            [script, "--kind", kind, "--file", file, "--root", projectRoot],
             {
               encoding: "utf8",
               timeout: 30000,
@@ -428,9 +451,13 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         required: ["sessionID"],
         additionalProperties: false,
       },
-      run: (input: any) => ({
+      run: (input: any, context?: ToolContextLike) => ({
         sessionID: input?.sessionID,
-        entries: readArchive(deps.projectRoot(), String(input?.sessionID ?? ""), input?.limit ?? 50),
+        entries: readArchive(
+          rootFor(context),
+          String(input?.sessionID ?? ""),
+          input?.limit ?? 50,
+        ),
       }),
     },
     {
@@ -468,7 +495,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         },
         additionalProperties: false,
       },
-      run: async (input: any) => {
+      run: async (input: any, context?: ToolContextLike) => {
         const action = String(input?.action ?? "list");
         const installRoot = deps.installRoot();
         if (action === "list") return listSkillCatalog(installRoot);
@@ -476,7 +503,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const ids = Array.isArray(input?.ids)
             ? input.ids.map((value: any) => String(value)).filter(Boolean)
             : undefined;
-          const result = await autoInstallSkills(installRoot, deps.projectRoot(), { ids, download: true });
+          const result = await autoInstallSkills(installRoot, rootFor(context), { ids, download: true });
           await deps.reloadSkills?.();
           return result;
         }
@@ -553,11 +580,11 @@ export function registerTools(tool: ToolLike | undefined, deps: SurfaceDeps): To
         input: spec.input,
         output,
         options: { namespace: TOOL_NAMESPACE.name },
-        execute: async (input: any) => {
+        execute: async (input: any, context?: ToolContextLike) => {
           // JSON has no `undefined`. A result such as
           // { id, file, copied, error: undefined } is a valid JS object but an
           // invalid JSON value; OpenCode's output-schema check rejects it.
-          const result = await spec.run(input);
+          const result = await spec.run(input, context);
           return {
             output: JSON.parse(JSON.stringify(result ?? {})),
             metadata: { source: "zombiecoder", tool: spec.name },

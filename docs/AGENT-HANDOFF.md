@@ -175,8 +175,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  34539ba0388bae17a929fa36d2ea84d9fb65f4aff94bb0ab3297a68d156bc8c6  ║
-║  files 59 · bytes 591434 · base f2d2539 · dirty                          ║
+║  root  4af149c5ed63c4553d940e49034eaec82fe0f25e871d3fb5d17b9fd18a0c0817  ║
+║  files 59 · bytes 599032 · base a0b5b99 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -184,7 +184,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-22T22:15:28.049Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-23T02:01:52.813Z
 
 </div>
 <!-- INTEGRITY:END -->

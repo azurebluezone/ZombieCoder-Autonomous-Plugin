@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-10-22T22:15:28.049Z",
+  "generated_at": "2026-10-23T02:01:52.813Z",
   "scope": [
     "src",
     "bin",
@@ -10,12 +10,12 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "34539ba0388bae17a929fa36d2ea84d9fb65f4aff94bb0ab3297a68d156bc8c6",
+  "root_sha256": "4af149c5ed63c4553d940e49034eaec82fe0f25e871d3fb5d17b9fd18a0c0817",
   "file_count": 59,
-  "total_bytes": 591434,
+  "total_bytes": 599032,
   "git": {
-    "commit": "f2d2539",
-    "branch": "HEAD",
+    "commit": "a0b5b99",
+    "branch": "main",
     "dirty": true
   },
   "files": [
@@ -131,8 +131,8 @@
     },
     {
       "path": "src/plugin.ts",
-      "bytes": 55659,
-      "sha256": "e88ea97aeaa964f5614bc30a083bfda5e7d88e600cc0f9a4478e16442555680f"
+      "bytes": 59328,
+      "sha256": "1690b9ed788350252e2000ff0cbe1a6735016cd999bc346a526af4336101b91d"
     },
     {
       "path": "src/roster.ts",
@@ -216,8 +216,8 @@
     },
     {
       "path": "src/zombie/server.ts",
-      "bytes": 23466,
-      "sha256": "518f697732f01e71f88e4e6e9032a40b6b4d242a615691e734563aaab120cf7f"
+      "bytes": 24517,
+      "sha256": "025912e18d4207e3da8031ef112da1380b46fb2ffc58c84c2810d3e88400c05e"
     },
     {
       "path": "src/zombie/skillCatalog.ts",
@@ -301,8 +301,8 @@
     },
     {
       "path": "test/plugin.test.ts",
-      "bytes": 37782,
-      "sha256": "0fd49f1fe3b2df1c42f387a37ed68ffd85c9742a86cb6d5c9d685a48631b0163"
+      "bytes": 40660,
+      "sha256": "1ad20565f8ac36ca62247a8b99a8b337eb0dd4b7e542c6cac72e67f44a8504bb"
     },
     {
       "path": "test/repo.test.ts",

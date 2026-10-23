@@ -9,6 +9,7 @@ import {
   ensureSkillCatalog,
   installSharedSkill,
   listSkillCatalog,
+  SKILL_CATALOG,
 } from "../src/zombie/skillCatalog.ts";
 import { registerSkills } from "../src/zombie/skills.ts";
 
@@ -42,6 +43,33 @@ test("detectProjectSkills picks core plus the project's stack", () => {
       assert.ok(ids.includes(id), `missing detected skill: ${id}`);
     }
     assert.ok(!ids.includes("laravel"), "laravel must not be detected without a marker");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("every catalog entry ships a real skill file with matching frontmatter", () => {
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  for (const spec of SKILL_CATALOG) {
+    const file = path.join(root, "docs", "skills", spec.file);
+    assert.ok(fs.existsSync(file), `catalog entry ${spec.id} has no file: ${spec.file}`);
+    const text = fs.readFileSync(file, "utf8");
+    assert.match(text, /^---\n/, `${spec.id} must start with YAML frontmatter`);
+    assert.match(text, new RegExp(`^id:\\s*${spec.id}$`, "m"), `${spec.id} frontmatter id mismatch`);
+    assert.match(text, new RegExp(`^name:\\s*.+$`, "m"), `${spec.id} frontmatter has no name`);
+    assert.match(text, new RegExp(`^description:\\s*.+$`, "m"), `${spec.id} frontmatter has no description`);
+  }
+});
+
+test("detectProjectSkills adds UI/UX, delivery and regex skills for their stacks", () => {
+  const root = tempDir("zombiecoder-detect-new-");
+  try {
+    write(path.join(root, "package.json"), JSON.stringify({ dependencies: {} }));
+    write(path.join(root, "requirements.txt"), "playwright==1.48.0\n");
+    const ids = detectProjectSkills(root);
+    for (const id of ["uiux-delivery", "web-delivery", "python-regex", "scrape-verify"]) {
+      assert.ok(ids.includes(id), `missing new skill for this stack: ${id}`);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

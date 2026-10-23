@@ -134,6 +134,38 @@ export const SKILL_CATALOG: SkillSpec[] = [
     file: "evidence-before-confidence.md",
     tags: ["evidence", "verification", "quality"],
   },
+  {
+    id: "uiux-delivery",
+    name: "UI/UX Delivery",
+    description:
+      "Ship a client-ready interface with a deliberate direction, every interaction state, WCAG 2.2 AA and Core Web Vitals budgets; use for landing pages, dashboards and design review.",
+    file: "uiux-delivery.md",
+    tags: ["ui", "ux", "accessibility", "performance", "design"],
+  },
+  {
+    id: "python-regex",
+    name: "Python Regex",
+    description:
+      "Build and performance-check Python regex with fixtures first, named groups, ReDoS limits and linear-time fallbacks; use for parsing, validation and bulk extraction.",
+    file: "python-regex.md",
+    tags: ["python", "regex", "redos", "performance", "codegen"],
+  },
+  {
+    id: "web-delivery",
+    name: "Website Delivery Pipeline",
+    description:
+      "Deliver a branded website end to end inside a time box: collect assets in parallel, model content, build pages, upload and verify; use for client site builds and redesigns.",
+    file: "web-delivery.md",
+    tags: ["web", "delivery", "workflow", "branding", "planning"],
+  },
+  {
+    id: "scrape-verify",
+    name: "Scrape and Verify",
+    description:
+      "Collect images and data with provenance, licensing, deduplication and schema validation while treating scraped bytes as untrusted data; use for asset gathering and catalog extraction.",
+    file: "scrape-verify.md",
+    tags: ["scraping", "playwright", "provenance", "validation", "security"],
+  },
 ];
 
 const CORE_IDS = ["first-principles", "evidence-before-confidence", "resource-optimization", "server"];
@@ -209,12 +241,19 @@ export function detectProjectSkills(projectRoot: string): string[] {
 
   if (fs.existsSync(packageJson)) {
     picked.add("node");
+    picked.add("uiux-delivery");
+    picked.add("web-delivery");
     if (hasDependency(packageJson, ["next"])) picked.add("next");
   }
   if (fs.existsSync(composerJson) || fs.existsSync(path.join(projectRoot, "artisan"))) {
     picked.add("laravel");
+    picked.add("uiux-delivery");
+    picked.add("web-delivery");
   }
-  if (fs.existsSync(path.join(projectRoot, "public_html"))) picked.add("cpanel");
+  if (fs.existsSync(path.join(projectRoot, "public_html"))) {
+    picked.add("cpanel");
+    picked.add("web-delivery");
+  }
 
   const pythonMarker =
     fs.existsSync(requirements) || fs.existsSync(pyproject) || fs.existsSync(setupPy);
@@ -228,11 +267,18 @@ export function detectProjectSkills(projectRoot: string): string[] {
   }
   if (pythonMarker || pythonFiles) {
     picked.add("python");
+    picked.add("python-regex");
     if (
       (fs.existsSync(requirements) && fileContains(requirements, ["fastapi"])) ||
       (fs.existsSync(pyproject) && fileContains(pyproject, ["fastapi"]))
     ) {
       picked.add("fastapi");
+    }
+    if (
+      (fs.existsSync(requirements) && fileContains(requirements, ["playwright", "beautifulsoup", "scrapy", "requests"])) ||
+      (fs.existsSync(pyproject) && fileContains(pyproject, ["playwright", "beautifulsoup", "scrapy", "requests"]))
+    ) {
+      picked.add("scrape-verify");
     }
   }
 

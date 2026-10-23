@@ -31,7 +31,7 @@ files on demand. A new domain gets the same treatment before it enters a prompt.
 
 ## Runtime skill catalog (`docs/skills`)
 
-The 10 files below are shared from the install root by
+The 14 files below are shared from the install root by
 `src/zombie/skillCatalog.ts`, not copied into every project:
 
 ```text
@@ -56,6 +56,23 @@ registered. A working directory never gets its own `skills/` tree.
 | `python` | `requirements.txt`, `pyproject.toml`, `setup.py`, root `*.py` | Majnu, Halim |
 | `fastapi` | `fastapi` in requirements/pyproject | Majnu, Halim |
 | `cpanel` | `public_html` or cPanel deployment | Rashed, Tuhin |
+| `uiux-delivery` | `package.json`, `composer.json`/`artisan`; any client-facing page | Nila, Majnu |
+| `web-delivery` | `package.json`, `composer.json`/`artisan`, `public_html`; client site build | Manu, ZombieCoder, Nila |
+| `python-regex` | `requirements.txt`, `pyproject.toml`, `setup.py`, root `*.py` | Nila, Rashed |
+| `scrape-verify` | `playwright`/`beautifulsoup`/`scrapy`/`requests` in requirements or pyproject | Brishti, Jarin |
+
+### Research basis for the four delivery skills (websearch, 2026-10-23)
+
+| Skill | Sources fetched |
+|---|---|
+| `uiux-delivery` | anthropics/skills `frontend-design` (SKILL.md), addyosmani/web-quality-skills (Lighthouse + Core Web Vitals budgets), Raze-Systems/wcag-ai-skill (WCAG 2.2), W3C WCAG 2.2 target size 2.5.8 |
+| `python-regex` | OWASP ReDoS, ReDoSHunter (USENIX Sec21), RegexScalpel (USENIX Sec22), PyPI `redos` / `real-regex` (linear-time engine, 2026) |
+| `web-delivery` | VoltAgent/awesome-agent-skills and ComposioHQ/awesome-claude-skills catalog structure (skill = workflow + guardrails, not a tool), anthropics/skills frontend-design |
+| `scrape-verify` | Playwright scraping guidance (oxylabs/playwright-web-scraping, agentskillexchange playwright-visual-regression-suite), OWASP LLM/Agentic injection guidance |
+
+Marketplace repos were used as an index only. Every skill body is written from
+first principles for this roster; no third-party skill text was copied, so no
+external license applies.
 
 ---
 

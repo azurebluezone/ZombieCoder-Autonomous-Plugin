@@ -1241,31 +1241,11 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           }
           try {
             const result = await applyResponseGate(event.response, { allowedRoot: projectRoot });
-            audit(projectRoot, String(event?.agent ?? "unknown"), {
-              kind: "response.gate",
-              sessionID: event?.sessionID,
-              model,
-              passed: result.verdict.passed,
-              supported: result.verdict.supported,
-              protocol: result.parsed.protocol,
-              toolCalls: result.parsed.toolCalls,
-              reason: result.verdict.reason,
-              matched: result.verdict.matched,
-              violations: result.verdict.violations,
-            });
-            if (!result.verdict.passed) {
-              event.response = result.response;
-              await escalateGateBlock({
-                sessionID: String(event?.sessionID ?? "unknown"),
-                agentID: String(event?.agent ?? "unknown"),
-                model,
-                protocol: result.parsed.protocol,
-                blockedText: result.parsed.text,
-                verdict: result.verdict,
-              });
-            } else if (!result.parsed.toolCalls) {
-              // A passing final answer closes the incident: the next user
-              // question must not inherit an old failure count.
+            event.response = result.response;
+
+            // A passing final answer closes the incident: the next user question
+            // must not inherit an old failure count.
+            const resetBreaker = async () => {
               const breakerKey = `agent/breaker/${String(event?.sessionID ?? "unknown")}`;
               const previous = readBreakerState(
                 await ctx.storage.get(breakerKey),
@@ -1283,6 +1263,74 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
                   failures: previous.failures.length,
                 });
               }
+            };
+
+            // Streamed answers are never buffered and never replaced: the text
+            // already reached the user. The verdict is only known when the body
+            // ends, so audit and escalate there instead of delaying the stream.
+            if (result.streamed) {
+              const settlement = result.settled.then(async ({ verdict, parsed }) => {
+                audit(projectRoot, String(event?.agent ?? "unknown"), {
+                  kind: "response.gate",
+                  sessionID: event?.sessionID,
+                  model,
+                  passed: verdict.passed,
+                  supported: verdict.supported,
+                  protocol: parsed.protocol,
+                  toolCalls: parsed.toolCalls,
+                  reason: verdict.reason,
+                  matched: verdict.matched,
+                  violations: verdict.violations,
+                  streamed: true,
+                });
+                if (!verdict.passed) {
+                  await escalateGateBlock({
+                    sessionID: String(event?.sessionID ?? "unknown"),
+                    agentID: String(event?.agent ?? "unknown"),
+                    model,
+                    protocol: parsed.protocol,
+                    blockedText: parsed.text,
+                    verdict,
+                  });
+                } else if (!parsed.toolCalls) {
+                  await resetBreaker();
+                }
+              });
+              settlement.catch((error: any) => {
+                audit(projectRoot, "plugin", {
+                  kind: "response.gate.error",
+                  sessionID: event?.sessionID,
+                  error: String(error?.message ?? error),
+                });
+              });
+              // Exposed so callers (and tests) can await the deferred work.
+              (event as any).zombiecoderSettled = settlement;
+              return;
+            }
+
+            audit(projectRoot, String(event?.agent ?? "unknown"), {
+              kind: "response.gate",
+              sessionID: event?.sessionID,
+              model,
+              passed: result.verdict.passed,
+              supported: result.verdict.supported,
+              protocol: result.parsed.protocol,
+              toolCalls: result.parsed.toolCalls,
+              reason: result.verdict.reason,
+              matched: result.verdict.matched,
+              violations: result.verdict.violations,
+            });
+            if (!result.verdict.passed) {
+              await escalateGateBlock({
+                sessionID: String(event?.sessionID ?? "unknown"),
+                agentID: String(event?.agent ?? "unknown"),
+                model,
+                protocol: result.parsed.protocol,
+                blockedText: result.parsed.text,
+                verdict: result.verdict,
+              });
+            } else if (!result.parsed.toolCalls) {
+              await resetBreaker();
             }
           } catch (error: any) {
             audit(projectRoot, String(event?.agent ?? "unknown"), {

@@ -184,6 +184,47 @@ test("response gate lets a Bengali explanation through", () => {
   assert.equal(ok.passed, true);
 });
 
+test("response gate treats a diagnosis as an explanation, not a success claim", () => {
+  const root = seedProject();
+  // Regression: these ordinary diagnostic sentences were classified as
+  // unproven success claims and replaced by the UNVERIFIED message.
+  const cases = [
+    "ভাইয়া, সমস্যা হলো মেমোরি ফাইল প্রতিবার পুরোটা আবার লেখা হচ্ছে।",
+    "The problem is the context hook runs on every request.",
+    "The root cause is that the gate buffers the whole response body.",
+  ];
+  for (const text of cases) {
+    const verdict = evaluateResponse(text, { allowedRoot: root });
+    assert.equal(verdict.passed, true, `diagnosis must pass: ${text}`);
+  }
+});
+
+test("response gate still blocks real action claims after narrowing the markers", () => {
+  const root = seedProject();
+  const claims = [
+    "আমি ঠিক করেছি, এখন কনফিগারেশন ঠিকভাবে লোড হবে।",
+    "I fixed it and deployed the build.",
+    "The bug is fixed now.",
+  ];
+  for (const text of claims) {
+    const verdict = evaluateResponse(text, { allowedRoot: root });
+    assert.equal(verdict.passed, false, `claim must block: ${text}`);
+  }
+});
+
+test("context pack reuses the cached SSOT snapshot until the file changes", () => {
+  const root = seedProject();
+  const first = buildContextPack(root, "manu");
+  const second = buildContextPack(root, "manu");
+  assert.equal(second.ssot.sha256, first.ssot.sha256);
+  assert.equal(second.ssot, first.ssot, "unchanged file must reuse the cached status");
+
+  fs.appendFileSync(path.join(root, ".zombiecoder", "SSOT.md"), "\n## 3. Structure\nchanged\n");
+  const third = buildContextPack(root, "manu");
+  assert.notEqual(third.ssot.sha256, first.ssot.sha256);
+  assert.notEqual(third.ssot, first.ssot);
+});
+
 test("response gate rejects a file path that does not exist", () => {
   const root = seedProject();
   const fake = evaluateResponse(
@@ -293,7 +334,7 @@ test("applyResponseGate rewrites an unproven JSON answer and passes a proven one
   assert.equal((await passed.response.text()).includes("root cause"), true);
 });
 
-test("applyResponseGate rewrites an unproven SSE stream into a truthful stream", async () => {
+test("applyResponseGate streams an unproven answer through and annotates it", async () => {
   const root = seedProject();
   const claim = "I fixed the bug in the login flow, the issue was the poll timer and the stale HTML.";
   const sse = [
@@ -306,14 +347,68 @@ test("applyResponseGate rewrites an unproven SSE stream into a truthful stream",
     headers: { "content-type": "text/event-stream" },
   });
   const result = await applyResponseGate(response, { allowedRoot: root });
-  assert.equal(result.verdict.passed, false);
+  assert.equal(result.streamed, true, "SSE body must not be buffered");
+  assert.equal(result.verdict.passed, true, "provisional verdict is pending, not a block");
+
   const body = await result.response.text();
+  // The real answer is preserved; the correction is appended, not substituted.
+  assert.match(body, /I fixed the bug in the login flow/);
   assert.match(body, /UNVERIFIED/);
   assert.match(body, /এজেন্টকে থামানো হয়েছে/);
   assert.match(body, /কাজ তো এই সমস্যা হয়েছে/);
   assert.match(body, /এখন কী করব/);
-  assert.match(body, /"finish_reason":"stop"/);
   assert.match(body, /^data: /m);
+  // The advisory lands before the terminal marker.
+  assert.ok(body.indexOf("UNVERIFIED") < body.indexOf("[DONE]"));
+
+  const final = await result.settled;
+  assert.equal(final.verdict.passed, false);
+  assert.match(final.verdict.reason, /claim without evidence/);
+});
+
+test("applyResponseGate does not buffer a live stream", async () => {
+  const root = seedProject();
+  let push!: (text: string) => void;
+  let close!: () => void;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      push = (text) => controller.enqueue(new TextEncoder().encode(text));
+      close = () => controller.close();
+    },
+  });
+  const response = new Response(stream, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+
+  const result = await applyResponseGate(response, { allowedRoot: root });
+  const reader = result.response.body!.getReader();
+  const decoder = new TextDecoder();
+
+  push(`data: ${JSON.stringify({ choices: [{ delta: { content: "প্রথম টোকেন" } }] })}\n\n`);
+
+  // If the gate buffered the body this read would hang until close(). A timeout
+  // turns that regression into a failed assertion instead of a stuck test.
+  const first = await Promise.race([
+    reader.read(),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("stream was buffered")), 1000)),
+  ]);
+  assert.match(decoder.decode(first.value), /প্রথম টোকেন/);
+
+  push(`data: ${JSON.stringify({ choices: [{ delta: { content: " I fixed the parser" } }] })}\n\n`);
+  push("data: [DONE]\n\n");
+  close();
+
+  let rest = "";
+  for (;;) {
+    const next = await reader.read();
+    if (next.done) break;
+    rest += decoder.decode(next.value);
+  }
+  assert.match(rest, /I fixed the parser/);
+  assert.match(rest, /UNVERIFIED/);
+  const final = await result.settled;
+  assert.equal(final.verdict.passed, false);
 });
 
 test("response gate skips an intermediate tool-call turn instead of killing the chain", async () => {
@@ -336,9 +431,12 @@ test("response gate skips an intermediate tool-call turn instead of killing the 
 
   const sseResult = await applyResponseGate(sseResponse, { allowedRoot: root });
   assert.equal(sseResult.verdict.passed, true);
-  assert.match(sseResult.verdict.reason, /tool-call turn/);
-  assert.equal(sseResult.response, sseResponse, "tool turn must pass through untouched");
-  assert.equal((await sseResult.response.text()).includes("finish_reason\":\"stop"), false);
+  assert.match(sseResult.verdict.reason, /streaming|tool-call turn/);
+  assert.equal(sseResult.streamed, true);
+  const toolBody = await sseResult.response.text();
+  assert.match(toolBody, /finish_reason":"tool_calls/);
+  assert.equal(toolBody.includes("UNVERIFIED"), false, "a tool turn must not be annotated");
+  assert.equal((await sseResult.settled).verdict.passed, true);
 
   const jsonResponse = new Response(
     JSON.stringify({
@@ -369,7 +467,9 @@ test("response gate skips an intermediate tool-call turn instead of killing the 
     new Response(finalSse, { status: 200, headers: { "content-type": "text/event-stream" } }),
     { allowedRoot: root },
   );
-  assert.equal(finalResult.verdict.passed, false);
+  // The body must be consumed: a streamed verdict settles when the stream ends.
+  await finalResult.response.text();
+  assert.equal((await finalResult.settled).verdict.passed, false);
 
   // Prose that merely mentions a tool-call field is not a tool call.
   const prose = parseResponseBody(

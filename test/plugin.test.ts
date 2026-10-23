@@ -889,6 +889,8 @@ test("a gate-blocked answer escalates through three agents and then opens the br
   // An intermediate tool turn must never trip the breaker.
   const toolEvent = event("manu", toolTurn, "ses_tool");
   await hook(toolEvent);
+  await toolEvent.response.text();
+  await (toolEvent as any).zombiecoderSettled;
   assert.deepEqual(fake.agentSwitches, []);
   assert.equal(fake.prompts.length, 0);
   assert.equal(fake.synthetics.length, 0);
@@ -896,6 +898,7 @@ test("a gate-blocked answer escalates through three agents and then opens the br
   const first = event("manu", unproven);
   await hook(first);
   assert.match(await first.response.text(), /UNVERIFIED/, "the blocked answer must stay truthful");
+  await (first as any).zombiecoderSettled;
   assert.deepEqual(fake.agentSwitches, [{ sessionID: "ses_gate", agent: "jarin" }]);
   assert.equal(fake.prompts.length, 1);
   assert.equal(fake.prompts[0].delivery, "queue");
@@ -904,12 +907,17 @@ test("a gate-blocked answer escalates through three agents and then opens the br
   assert.match(fake.synthetics[0].text, /Circuit breaker/);
   assert.match(fake.synthetics[0].text, /1\/3/);
 
-  await hook(event("jarin", unproven));
+  const second = event("jarin", unproven);
+  await hook(second);
+  await second.response.text();
+  await (second as any).zombiecoderSettled;
   assert.deepEqual(fake.agentSwitches.at(-1), { sessionID: "ses_gate", agent: "brishti" });
   assert.match(fake.synthetics.at(-1)!.text, /2\/3/);
 
   const third = event("brishti", unproven);
   await hook(third);
+  await third.response.text();
+  await (third as any).zombiecoderSettled;
   assert.equal(fake.agentSwitches.length, 2, "the third failure must not switch agent again");
   assert.equal(fake.prompts.length, 2, "the third failure must not queue another attempt");
   const last = fake.synthetics.at(-1)!;
@@ -950,12 +958,16 @@ test("a passing final answer resets the breaker for the next question", async ()
     response: new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
   });
 
-  await hook(event("manu", blocked));
+  const blockedEvent = event("manu", blocked);
+  await hook(blockedEvent);
+  await blockedEvent.response.text();
+  await (blockedEvent as any).zombiecoderSettled;
   assert.equal((fake.storage.get("agent/breaker/ses_reset") as any).failures.length, 1);
 
   const good = event("jarin", proven);
   await hook(good);
   assert.match(await good.response.text(), /78\/78 pass/, "a passing answer must not be rewritten");
+  await (good as any).zombiecoderSettled;
   const state = fake.storage.get("agent/breaker/ses_reset") as any;
   assert.equal(state.failures.length, 0, "a completed task must clear the failure count");
   assert.deepEqual(state.agents, []);
@@ -976,13 +988,16 @@ test("a failed agent switch still keeps the task moving on the current agent", a
     "data: [DONE]",
     "",
   ].join("\n");
-  await hook({
+  const switchEvent: any = {
     kind: "primary",
     sessionID: "ses_switch_fail",
     agent: "manu",
     model: { providerID: "opencode", modelID: "big-pickle" },
     response: new Response(blocked, { status: 200, headers: { "content-type": "text/event-stream" } }),
-  });
+  };
+  await hook(switchEvent);
+  await switchEvent.response.text();
+  await switchEvent.zombiecoderSettled;
 
   assert.equal(fake.agentSwitches.length, 0, "the failed switch must not be reported as applied");
   assert.equal(fake.synthetics.length, 1, "the user still gets a status message");

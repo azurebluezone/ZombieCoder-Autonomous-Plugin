@@ -113,6 +113,37 @@ function fileStatus(file: string, text: string | undefined): ContextFileStatus {
   };
 }
 
+// The `context` hook fires on every model request, so re-reading and re-hashing
+// a 26 KB SSOT file each time is pure latency. Cache by (path, mtime, size):
+// the file is re-read only when it actually changes on disk.
+type Snapshot = { mtimeMs: number; size: number; text: string | undefined; status: ContextFileStatus };
+const snapshotCache = new Map<string, Snapshot>();
+
+function statKey(file: string): { mtimeMs: number; size: number } | null {
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return null;
+    return { mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch {
+    return null;
+  }
+}
+
+function snapshot(file: string, read: () => string | undefined): Snapshot {
+  const key = statKey(file);
+  const cached = snapshotCache.get(file);
+  if (key && cached && cached.mtimeMs === key.mtimeMs && cached.size === key.size) return cached;
+  const text = read();
+  const value: Snapshot = {
+    mtimeMs: key?.mtimeMs ?? 0,
+    size: key?.size ?? -1,
+    text,
+    status: fileStatus(file, text),
+  };
+  snapshotCache.set(file, value);
+  return value;
+}
+
 function section(text: string, prefix: string, limit: number): string {
   const start = text.indexOf(prefix);
   if (start < 0) return "";
@@ -166,11 +197,13 @@ export function buildContextPack(
 ): ContextPack {
   const ssotPath = ssotFile(projectRoot);
   const syllabusPath = syllabusFile(projectRoot);
-  const ssotText = readText(ssotPath);
-  const syllabusText = readSyllabus(projectRoot);
+  const ssotSnap = snapshot(ssotPath, () => readText(ssotPath));
+  const syllabusSnap = snapshot(syllabusPath, () => readSyllabus(projectRoot));
+  const ssotText = ssotSnap.text;
+  const syllabusText = syllabusSnap.text;
   const index = readIndex(projectRoot);
-  const ssot = fileStatus(ssotPath, ssotText);
-  const syllabus = fileStatus(syllabusPath, syllabusText);
+  const ssot = ssotSnap.status;
+  const syllabus = syllabusSnap.status;
   const memory: MemoryStatus = {
     indexFile: memoryIndexFile(projectRoot),
     sessions: Object.keys(index.sessions).length,

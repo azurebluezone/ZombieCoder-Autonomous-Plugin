@@ -54,15 +54,17 @@ const EVIDENCE_PATTERNS: RegExp[] = [
 ];
 
 const CLAIM_MARKERS: RegExp[] = [
+  // Only *action / success* claims are gated. A diagnosis ("the problem is X",
+  // "সমস্যা হলো Y") is not a success claim and must not be replaced by the
+  // UNVERIFIED message: that turned ordinary explanations into wrong answers.
   // A one-word success report is still a claim. "OK" remains a conversational
   // acknowledgement; "installed", "fixed", "done" need evidence in the text.
   /^(?:ভাইয়া[\s,:-]*)?(?:done|fixed|installed|configured|updated|created|added|removed|solved|completed|complete|success|passed|deployed|committed|pushed)\b/i,
   /\b(i|we)\s+(fixed|changed|added|removed|updated|implemented|created|deleted|refactored|moved|renamed|replaced|rewrote|wrote|built|installed|configured|enabled|disabled|patched|solved|resolved)\b/i,
-  /\b(the|a)\s+(bug|root cause|issue|problem)\s+(is|was|lies|exists)\b/i,
-  /\b(root cause|the problem is|the issue is|i found|i discovered|i located)\b/i,
-  /\b(cause|caused|causing|breaks|broke|fixes|fixed|patched)\b/i,
+  // Passive success: "the bug is fixed", "it has been resolved". The bare verb
+  // ("fixes", "broke") stays conversational and is deliberately not matched.
+  /\b(?:is|are|was|were|has\s+been|have\s+been)\s+(?:fixed|patched|resolved|solved|installed|configured|updated|deployed)\b/i,
   /(?:আমি|আমরা)\s+(?:ঠিক|বদল|যোগ|মুছে|আপডেট|তৈরি|ইনস্টল|কনফিগার|সমাধান|লিখ|শেষ)\S*/,
-  /(?:বাগ|সমস্যা|কারণ)\s+(?:হলো|হচ্ছে|এই|ওই)/,
   /(?:সব|সবকিছু)\s+(?:ঠিক|ভালো|ঠিকঠাক|কাজ\s+করছে)/,
   /(?:ফিক্স|ঠিক|সমাধান|শেষ|পাস|ইনস্টল|কনফিগার|আপডেট|তৈরি|বদল|যোগ|মুছে)\S*\s*(?:করেছি|করে\s+ফেলেছি|হয়ে\s+গেছে|হয়েছে|সম্পন্ন\s+হয়েছে)/,
   /(?:টেস্ট|বিল্ড|কাজ|সেটআপ)\S*\s*(?:পাস\s+করেছে|শেষ\s+হয়েছে|সম্পন্ন\s+হয়েছে|সফল\s+হয়েছে)/,
@@ -511,24 +513,6 @@ export function truthMessage(originalLength: number): string {
   ].join("\n");
 }
 
-function sseBody(truth: string): string {
-  const base = {
-    id: "zombiecoder-response-gate",
-    object: "chat.completion.chunk",
-    created: Math.floor(Date.now() / 1000),
-    model: "zombiecoder-response-gate",
-  };
-  const first = {
-    ...base,
-    choices: [{ index: 0, delta: { role: "assistant", content: truth }, finish_reason: null }],
-  };
-  const last = {
-    ...base,
-    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-  };
-  return `data: ${JSON.stringify(first)}\n\ndata: ${JSON.stringify(last)}\n\ndata: [DONE]\n\n`;
-}
-
 function rewriteJson(raw: string, truth: string): string | null {
   let body: any;
   try {
@@ -558,48 +542,169 @@ function rewriteJson(raw: string, truth: string): string | null {
   return JSON.stringify(body);
 }
 
+export type GateSettlement = { verdict: ResponseVerdict; parsed: ParsedResponse };
+
+export type GateOutcome = {
+  response: Response;
+  verdict: ResponseVerdict;
+  parsed: ParsedResponse;
+  /** True when the body streams through live instead of being buffered first. */
+  streamed: boolean;
+  /**
+   * Final verdict. Resolves immediately for a buffered body, and when the
+   * stream ends for a streamed body. A streamed body must be consumed (or
+   * cancelled) or this never settles.
+   */
+  settled: Promise<GateSettlement>;
+};
+
+/** Terminal markers: the only bytes a streamed response may hold back. */
+const STREAM_TERMINAL = /(?:\[DONE\]|"message_stop"|"response\.completed")/;
+
+function pendingVerdict(reason: string): ResponseVerdict {
+  return {
+    passed: true,
+    supported: true,
+    matched: [],
+    violations: [],
+    reason,
+    truth: truthMessage(0),
+  };
+}
+
+// A streamed answer is already on the wire when the gate learns its verdict, so
+// it cannot be retracted. It is annotated instead: the user keeps the real
+// answer and still sees the explicit UNVERIFIED correction.
+function sseAdvisory(verdict: ResponseVerdict): string {
+  const chunk = {
+    id: "zombiecoder-response-gate",
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model: "zombiecoder-response-gate",
+    choices: [
+      {
+        index: 0,
+        delta: { role: "assistant", content: `\n\n---\n\n${verdict.truth}` },
+        finish_reason: null,
+      },
+    ],
+  };
+  return `data: ${JSON.stringify(chunk)}\n\n`;
+}
+
+// Streaming path: forward every content chunk immediately and only retain the
+// terminal marker, so latency stays at the provider's speed instead of the
+// gate's. The old `await response.clone().text()` drained the whole body before
+// the caller saw a single token, which is what made every answer feel slow.
+function gateStream(
+  response: Response,
+  options: { allowedRoot: string; minLength?: number },
+): GateOutcome {
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  headers.delete("transfer-encoding");
+  if (!headers.get("content-type")) headers.set("content-type", "text/event-stream; charset=utf-8");
+
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let raw = "";
+  let held = "";
+  let settle!: (value: GateSettlement) => void;
+  const settled = new Promise<GateSettlement>((resolve) => {
+    settle = resolve;
+  });
+
+  const body = response.body!.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        const text = decoder.decode(chunk, { stream: true });
+        if (STREAM_TERMINAL.test(text)) {
+          held += text;
+          return;
+        }
+        raw += text;
+        controller.enqueue(chunk);
+      },
+      flush(controller) {
+        const tail = held + decoder.decode();
+        raw += tail;
+        const parsed = parseResponseBody(raw, "text/event-stream");
+        const verdict = parsed.toolCalls
+          ? pendingVerdict("tool-call turn (intermediate); not user-facing, gate skipped")
+          : evaluateResponse(parsed.text, options);
+        if (!verdict.passed && parsed.protocol === "openai-sse") {
+          controller.enqueue(encoder.encode(sseAdvisory(verdict)));
+        }
+        if (tail) controller.enqueue(encoder.encode(tail));
+        settle({ verdict, parsed });
+      },
+    }),
+  );
+
+  return {
+    response: new Response(body, { status: response.status, statusText: response.statusText, headers }),
+    verdict: pendingVerdict("streaming: verdict settles when the body ends"),
+    parsed: { protocol: "openai-sse", supported: true, toolCalls: false, text: "" },
+    streamed: true,
+    settled,
+  };
+}
+
+// Buffered SSE fallback: a body that looks like SSE but was not declared as
+// `text/event-stream` cannot be streamed, so it is rewritten as a complete
+// truthful event stream.
+function sseBody(truth: string): string {
+  const base = {
+    id: "zombiecoder-response-gate",
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model: "zombiecoder-response-gate",
+  };
+  const first = {
+    ...base,
+    choices: [{ index: 0, delta: { role: "assistant", content: truth }, finish_reason: null }],
+  };
+  const last = { ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] };
+  return `data: ${JSON.stringify(first)}\n\ndata: ${JSON.stringify(last)}\n\ndata: [DONE]\n\n`;
+}
+
 export async function applyResponseGate(
   response: Response,
   options: { allowedRoot: string; minLength?: number },
-): Promise<{ response: Response; verdict: ResponseVerdict; parsed: ParsedResponse }> {
+): Promise<GateOutcome> {
   const contentType = response.headers.get("content-type") ?? "";
+  if (/text\/event-stream/i.test(contentType) && response.body !== null) {
+    return gateStream(response, options);
+  }
+
   const raw = await response.clone().text();
   const parsed = parseResponseBody(raw, contentType);
   if (!parsed.supported) {
-    return {
-      response,
-      parsed,
-      verdict: {
-        passed: true,
-        supported: false,
-        matched: [],
-        violations: [],
-        reason: `unsupported protocol (${parsed.protocol}); marked NOT_TESTED`,
-        truth: truthMessage(parsed.text.length),
-      },
+    const verdict: ResponseVerdict = {
+      passed: true,
+      supported: false,
+      matched: [],
+      violations: [],
+      reason: `unsupported protocol (${parsed.protocol}); marked NOT_TESTED`,
+      truth: truthMessage(parsed.text.length),
     };
+    return { response, parsed, verdict, streamed: false, settled: Promise.resolve({ verdict, parsed }) };
   }
 
   // Intermediate tool-call turn: the agent is still working, so there is no
   // user-facing claim to gate yet. Blocking it replaced finish_reason with
   // "stop" and terminated the tool chain mid-task.
   if (parsed.toolCalls) {
-    return {
-      response,
-      parsed,
-      verdict: {
-        passed: true,
-        supported: true,
-        matched: [],
-        violations: [],
-        reason: "tool-call turn (intermediate); not user-facing, gate skipped",
-        truth: truthMessage(parsed.text.length),
-      },
-    };
+    const verdict = pendingVerdict(
+      "tool-call turn (intermediate); not user-facing, gate skipped",
+    );
+    return { response, parsed, verdict, streamed: false, settled: Promise.resolve({ verdict, parsed }) };
   }
 
   const verdict = evaluateResponse(parsed.text, options);
-  if (verdict.passed) return { response, verdict, parsed };
+  const settled = Promise.resolve({ verdict, parsed });
+  if (verdict.passed) return { response, verdict, parsed, streamed: false, settled };
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
@@ -612,6 +717,8 @@ export async function applyResponseGate(
       response: new Response(sseBody(verdict.truth), { status: response.status, headers }),
       verdict,
       parsed,
+      streamed: false,
+      settled,
     };
   }
 
@@ -623,6 +730,8 @@ export async function applyResponseGate(
         response: new Response(body, { status: response.status, headers }),
         verdict,
         parsed,
+        streamed: false,
+        settled,
       };
     }
   }
@@ -632,5 +741,7 @@ export async function applyResponseGate(
     response: new Response(verdict.truth, { status: response.status, headers }),
     verdict,
     parsed,
+    streamed: false,
+    settled,
   };
 }

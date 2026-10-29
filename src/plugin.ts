@@ -37,16 +37,23 @@ import {
 } from "./zombie/io.ts";
 import { scanProject } from "./zombie/scan.ts";
 import { writeSsot } from "./zombie/ssot.ts";
-import { ensureSyllabus } from "./zombie/syllabus.ts";
+import { ensureSyllabus, recordProjectFootprint } from "./zombie/syllabus.ts";
 import {
   archiveSessionSnapshot,
   keepRecent,
   readIndex,
   readRecent,
+  roleOf,
+  textOf,
   touchIndex,
   writeIndex,
 } from "./zombie/memory.ts";
-import { resolveModels, type CatalogDoors, type ModelStrategy } from "./zombie/models.ts";
+import {
+  resolveModels,
+  normalizeModelRef,
+  type CatalogDoors,
+  type ModelStrategy,
+} from "./zombie/models.ts";
 import {
   DEFAULT_CUSTOM_PROVIDER_ID,
   DEFAULT_CUSTOM_PROVIDER_KEY,
@@ -102,6 +109,10 @@ export type ZombieConfig = {
   // Owner-requested OpenCode agent modes: { "<agentID>": "primary" | "subagent" | "all" }.
   // Validated by modes.ts; a typo is rejected in the setup report, never guessed.
   agentModes: Record<string, string>;
+  // Per-agent model pins. false (default) leaves agent entries without `model`,
+  // so the model selected in /models governs the session and subagents inherit
+  // it. true restores the fixed agent -> model mapping for a multi-model gateway.
+  agentModelPins: boolean;
 };
 
 export const DEFAULT_CONFIG: ZombieConfig = {
@@ -118,6 +129,7 @@ export const DEFAULT_CONFIG: ZombieConfig = {
   autoSkills: true,
   skillRepo: DEFAULT_SKILL_REPO,
   agentModes: {},
+  agentModelPins: false,
 };
 
 // Where the plugin itself lives decides where OpenCode-owned files belong.
@@ -197,6 +209,16 @@ type Ctx = {
   session?: {
     context?: (input: { sessionID: string }) => Promise<any[]>;
     switchAgent?: (input: { sessionID: string; agent: string }) => Promise<void>;
+    // V2 exposes a session model switch ("Switch the model used by subsequent
+    // provider turns"). Switching an agent alone never changes the model.
+    // Wire shape is Model.Ref: { id, providerID, variant? } — verified against
+    // @opencode/plugin/dist/promise/session.d.ts:143 and @opencode/schema
+    // model.d.ts (Ref). `model` is NOT the model-id field; sending it returns
+    // InvalidRequestError.
+    switchModel?: (input: {
+      sessionID: string;
+      model: { id: string; providerID: string; variant?: string };
+    }) => Promise<void>;
     hook?: (name: string, cb: (event: any) => any) => Promise<{ dispose: () => Promise<void> }>;
   };
   tool?: {
@@ -371,13 +393,14 @@ export function ensureAgentFolderAt(
   dir: string,
   roster: AgentDef[],
   assignment: Record<string, string> = {},
+  pins = true,
 ): { dir: string; written: string[]; unchanged: string[] } {
   ensureDir(dir);
   const written: string[] = [];
   const unchanged: string[] = [];
   for (const a of roster) {
     const file = path.join(dir, a.id + ".md");
-    const content = agentMarkdown(a, assignment[a.id]);
+    const content = agentMarkdown(a, assignment[a.id], pins);
     const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
     if (current === content) {
       unchanged.push(file);
@@ -404,13 +427,18 @@ export function verifyAgentMarkdownAt(
   dir: string,
   roster: AgentDef[],
   assignment: Record<string, string> = {},
+  pins = true,
 ): string[] {
   const missing: string[] = [];
   for (const a of roster) {
     const file = path.join(dir, a.id + ".md");
     const raw = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-    const expected = assignment[a.id] ?? a.model;
-    if (!raw.includes(`model: ${expected}`)) missing.push(`${a.id}=${expected}`);
+    if (pins) {
+      const expected = assignment[a.id] ?? a.model;
+      if (!raw.includes(`model: ${expected}`)) missing.push(`${a.id}=${expected}`);
+    } else if (/^model:/m.test(raw)) {
+      missing.push(`${a.id}=pinned-model`);
+    }
     if (!raw.includes("ZombieCoder Shared Rules")) missing.push(`${a.id}=rules`);
   }
   return missing;
@@ -420,8 +448,9 @@ export function verifyAgentMarkdown(
   projectRoot: string,
   roster: AgentDef[],
   assignment: Record<string, string> = {},
+  pins = true,
 ): string[] {
-  return verifyAgentMarkdownAt(path.join(projectRoot, ".opencode", "agents"), roster, assignment);
+  return verifyAgentMarkdownAt(path.join(projectRoot, ".opencode", "agents"), roster, assignment, pins);
 }
 
 // V2 config agents are the second door. The installer seeds them; the runtime
@@ -431,6 +460,8 @@ export function syncAgentConfig(
   file: string,
   roster: AgentDef[],
   assignment: Record<string, string> = {},
+  pins = true,
+  defaultModel?: string,
 ): { file: string; updated: string[]; skipped?: string } {
   const jsonc = file.replace(/\.json$/, ".jsonc");
   const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
@@ -454,7 +485,7 @@ export function syncAgentConfig(
   ];
 
   const agents: Record<string, any> = { ...(config.agents ?? {}) };
-  const wanted = renderAgentsConfig(roster, assignment);
+  const wanted = renderAgentsConfig(roster, assignment, pins);
   const updated: string[] = [];
 
   // Renamed agent: never leave the old persona behind to compete with the new one.
@@ -464,10 +495,16 @@ export function syncAgentConfig(
   for (const [id, entry] of Object.entries(wanted)) {
     const before = JSON.stringify(agents[id] ?? null);
     agents[id] = { ...(agents[id] ?? {}), ...entry };
+    // Pins off: an older install may still carry `model` on the agent. Leaving it
+    // would silently override the owner's /models choice, so drop it here.
+    if (!pins) delete agents[id].model;
     if (JSON.stringify(agents[id]) !== before) updated.push(id);
   }
 
-  const next = { ...config, agents };
+  const next: Record<string, any> = { ...config, agents };
+  // With no pins, the root `model` is the only default. A session that picked a
+  // model still wins (OpenCode docs), and subagents inherit the session model.
+  if (!pins && defaultModel) next.model = defaultModel;
   const serialized = JSON.stringify(next, null, 2) + "\n";
   if (serialized !== current) writeAtomic(file, serialized);
   return { file, updated };
@@ -477,6 +514,7 @@ export function verifyAgentConfig(
   file: string,
   roster: AgentDef[],
   assignment: Record<string, string> = {},
+  pins = true,
 ): string[] {
   const config = readJson<Record<string, any>>(file);
   if (!config || !config.agents) return ["opencode.json=agents"];
@@ -485,7 +523,8 @@ export function verifyAgentConfig(
     const expected = assignment[a.id] ?? a.model;
     const entry = config.agents[a.id];
     if (!entry) missing.push(`${a.id}=missing`);
-    else if (entry.model !== expected) missing.push(`${a.id}=model`);
+    else if (pins && entry.model !== expected) missing.push(`${a.id}=model`);
+    else if (!pins && entry.model !== undefined) missing.push(`${a.id}=pinned-model`);
     else if (!Array.isArray(entry.permissions) || entry.permissions.length === 0) missing.push(`${a.id}=permissions`);
   }
   for (const id of LEGACY_AGENT_IDS) {
@@ -558,6 +597,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     const fingerprint = scanProject(normalized);
     writeSsot(normalized, fingerprint);
     ensureSyllabus(normalized, fingerprint, ROSTER.map((a) => a.id));
+    // New directory (or changed tree): leave one lesson with the footprint and the
+    // failures carried over from the previous audit trail. Deduped by marker.
+    recordProjectFootprint(normalized, fingerprint);
     scaffoldedRoots.add(normalized);
     projectRoots.add(normalized);
     return normalized;
@@ -812,11 +854,17 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   const effectiveRoster: AgentDef[] = modePlan?.agents ?? ROSTER;
 
   const agentsDir = path.join(layout.dir, "agents");
-  const folder = step("agent-folder", () => ensureAgentFolderAt(agentsDir, effectiveRoster, agentAssignment));
+  const modelPins = config.agentModelPins === true;
+  // Never write a non-reference ("inherit", "") as the root model.
+  const defaultModel =
+    normalizeModelRef(plan?.defaultModel) ?? normalizeModelRef(config.baselineModel) ?? BASELINE_MODEL;
+  const folder = step("agent-folder", () =>
+    ensureAgentFolderAt(agentsDir, effectiveRoster, agentAssignment, modelPins),
+  );
   report.outputs.agentFolder = folder;
 
   const agentConfig = step("agent-config", () =>
-    syncAgentConfig(layout.configFile, effectiveRoster, agentAssignment),
+    syncAgentConfig(layout.configFile, effectiveRoster, agentAssignment, modelPins, defaultModel),
   );
   report.outputs.agentConfig = agentConfig;
 
@@ -826,12 +874,16 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   });
 
   const bound = step("agent-bind", () => {
-    const missing = verifyAgentMarkdownAt(agentsDir, effectiveRoster, agentAssignment);
-    if (!agentConfig?.skipped) missing.push(...verifyAgentConfig(layout.configFile, effectiveRoster, agentAssignment));
+    const missing = verifyAgentMarkdownAt(agentsDir, effectiveRoster, agentAssignment, modelPins);
+    if (!agentConfig?.skipped) {
+      missing.push(...verifyAgentConfig(layout.configFile, effectiveRoster, agentAssignment, modelPins));
+    }
     if (missing.length > 0) {
       throw new Error(`agent binding incomplete: ${missing.join(", ")}`);
     }
-    return `${effectiveRoster.length} agents carry ${layout.global ? "global" : "project"} model + shared rules (markdown + config)`;
+    return modelPins
+      ? `${effectiveRoster.length} agents carry ${layout.global ? "global" : "project"} model + shared rules (markdown + config)`
+      : `${effectiveRoster.length} agents inherit the session model + shared rules (no per-agent pin)`;
   });
   report.outputs.bound = bound;
 
@@ -924,6 +976,68 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
   report.outputs.tools = tools;
 
   // ---- §5 memory + per-agent footprint -------------------------------------
+  // Agent switch != model switch. OpenCode V2 keeps the session model when the
+  // primary agent changes ("Selecting a primary agent by ID does not change
+  // that model"), so a session that picked MiMo in /models still runs MiMo after
+  // the breaker moves manu -> jarin. The only honest ways to change the model
+  // are (a) an explicit session.switchModel call, owned here, or (b) a subagent
+  // child session with its own configured model.
+  //
+  // Policy: move the model ONLY when the owner opted into per-agent pins
+  // (agentModelPins=true) and the next agent has a different resolved model.
+  // Never pick a random model as a failure response — an unreproducible fallback
+  // is not evidence.
+  const modelRefOf = (ref?: string): { providerID: string; id: string } | null => {
+    if (typeof ref !== "string") return null;
+    const slash = ref.indexOf("/");
+    if (slash <= 0 || slash === ref.length - 1) return null;
+    return { providerID: ref.slice(0, slash), id: ref.slice(slash + 1) };
+  };
+  const switchAgentModel = async (args: {
+    sessionID: string;
+    from: string;
+    to: string;
+    current?: string;
+    projectRoot: string;
+  }): Promise<{ switched: boolean; model?: string; reason?: string }> => {
+    const { sessionID, from, to, current, projectRoot } = args;
+    if (config.agentModelPins !== true) {
+      return { switched: false, reason: "agentModelPins=false (session model governs)" };
+    }
+    const target = agentAssignment[to];
+    const ref = modelRefOf(target);
+    if (!ref) return { switched: false, reason: `no pinned model for ${to}` };
+    if (current && current === target) return { switched: false, reason: "model already selected" };
+    const door = (ctx.session as any)?.switchModel;
+    if (typeof door !== "function") {
+      return { switched: false, reason: "session.switchModel unavailable" };
+    }
+    try {
+      await door({ sessionID, model: ref });
+      audit(projectRoot, "plugin", {
+        kind: "agent.model.switch",
+        sessionID,
+        from,
+        to,
+        model: target,
+        ok: true,
+      });
+      return { switched: true, model: target };
+    } catch (error: any) {
+      const reason = redact(String(error?.message ?? error));
+      audit(projectRoot, "plugin", {
+        kind: "agent.model.switch",
+        sessionID,
+        from,
+        to,
+        model: target,
+        ok: false,
+        error: reason,
+      });
+      return { switched: false, reason };
+    }
+  };
+
   if (ctx.session?.hook) {
     const contextHook = await stepAsync("hook-context", () =>
       ctx.session!.hook!("context", async (event: any) => {
@@ -964,7 +1078,15 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         }
 
         const recent = await readRecent(ctx.storage, sessionID);
-        const pack = buildContextPack(projectRoot, agentID, recent);
+        // The focus resolver needs the sentence the user just wrote, not the whole
+        // transcript. Walk backwards to the last user turn in the hook payload.
+        let userMessage = "";
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+          if (String(roleOf(messages[i]) ?? "").toLowerCase() !== "user") continue;
+          userMessage = textOf(messages[i]);
+          break;
+        }
+        const pack = buildContextPack(projectRoot, agentID, recent, userMessage);
         if (Array.isArray(event?.system) && typeof event.system.push === "function") {
           event.system.push({
             type: "text",
@@ -1108,6 +1230,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     // to the next roster agent (queued prompt) up to BREAKER_LIMIT times, then
     // the breaker opens with an actionable message instead of silently stopping.
     const breakerInflight = new Set<string>();
+
     const escalateGateBlock = async (input: {
       sessionID: string;
       agentID: string;
@@ -1190,6 +1313,16 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             error: redact(String(switchError?.message ?? switchError)),
           });
         }
+        // The persona changed; the model did not unless the owner pinned models.
+        const modelSwitch = switched
+          ? await switchAgentModel({
+              sessionID,
+              from: agentID,
+              to: decision.next,
+              current: model,
+              projectRoot,
+            })
+          : { switched: false, reason: "agent switch failed" };
         await session.synthetic({
           sessionID,
           text: statusMessage(failure, decision),
@@ -1209,6 +1342,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           limit: decision.limit,
           ok: switched,
           reason: failure.reason,
+          model: modelSwitch.switched ? modelSwitch.model : model,
+          modelSwitch: modelSwitch.switched ? "switched" : modelSwitch.reason,
         });
       } catch (error: any) {
         audit(projectRoot, "plugin", {
@@ -1396,6 +1531,12 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         }
         try {
           await ctx.session.switchAgent({ sessionID, agent: next.id });
+          const modelSwitch = await switchAgentModel({
+            sessionID,
+            from: agentID,
+            to: next.id,
+            projectRoot,
+          });
           audit(projectRoot, "plugin", {
             kind: "agent.escalation",
             sessionID,
@@ -1403,6 +1544,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             to: next.id,
             ok: true,
             reason: "three consecutive tool execution errors",
+            model: modelSwitch.switched ? modelSwitch.model : undefined,
+            modelSwitch: modelSwitch.switched ? "switched" : modelSwitch.reason,
           });
         } catch (error: any) {
           audit(projectRoot, "plugin", {

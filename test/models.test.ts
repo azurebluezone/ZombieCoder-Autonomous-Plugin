@@ -8,6 +8,7 @@ import {
   modelRef,
   modelsUrl,
   probeOpenAiCompatible,
+  normalizeModelRef,
   readCatalog,
   resolveModels,
   stableHash,
@@ -221,6 +222,33 @@ test("resolveModels falls back to free models when no custom provider is configu
   );
   assert.equal(plan.strategy, "free-fallback");
   assert.deepEqual(plan.candidates, ["opencode/big-pickle"]);
+});
+
+test("a non-reference baselineModel never turns the roster baseline into a pin", async () => {
+  const plan = await resolveModels(
+    {
+      provider: { list: async () => ({ data: [] }) },
+      model: {
+        list: async () => ({
+          data: [
+            { providerID: "opencode", modelID: "big-pickle", cost: [{ input: 0, output: 0 }], status: "active", enabled: true },
+            { providerID: "opencode", modelID: "second-free", cost: [{ input: 0, output: 0 }], status: "active", enabled: true },
+          ],
+        }),
+        default: async () => ({ data: { providerID: "opencode", modelID: "big-pickle" } }),
+      },
+    },
+    ROSTER,
+    { customProviderUrl: "", strategy: "free", baselineModel: "inherit" },
+  );
+  assert.equal(plan.strategy, "free-fallback");
+  assert.deepEqual(plan.candidates, ["opencode/big-pickle", "opencode/second-free"]);
+  const used = new Set(Object.values(plan.assignment));
+  assert.equal(used.size, 2, "both free models must be used, not one baseline pin");
+  assert.equal(normalizeModelRef("inherit"), null);
+  assert.equal(normalizeModelRef("opencode/big-pickle"), "opencode/big-pickle");
+  assert.equal(normalizeModelRef("/model"), null);
+  assert.equal(normalizeModelRef("provider/"), null);
 });
 
 test("resolveModels respects modelStrategy: free without probing the custom provider", async () => {

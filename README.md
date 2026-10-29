@@ -691,23 +691,23 @@ src/roster.ts
 
 - `id`, `name`, `callSign`
 - `role`, `description`
-- `mode` — অবশ্যই `primary`
+- `mode` — `all` (প্রতিটি agent primary হিসেবে selectable, আবার parent চাইলে subagent-ও)
 - `model` — installer/runtime resolve করে
 - `mission`, `persona`, `duties`, `rule`
 
-সব agent-এর shared rules:
+সব agent-এর shared rules (দুটো ব্লক — behaviour ও execution doctrine):
 
 ```text
-SHARED_RULES
+SHARED_RULES + SHARED_EXECUTION
 ```
 
-`SHARED_RULES` পরিবর্তন করলে সব agent-এর prompt পরিবর্তিত হয়।
+`SHARED_RULES` বা `SHARED_EXECUTION` পরিবর্তন করলে সব agent-এর prompt পরিবর্তিত হয়। `SHARED_EXECUTION`-এ আছে: কম planning, target-file focus, full-slice (create/edit/delete/view), no mock/watermark, shortcut/codegen, training-cutoff websearch আর বরিশাল টোন।
 
 ### ৮.২ Persona পরিবর্তনের ধাপ
 
 1. `src/roster.ts` খুলুন।
 2. নির্দিষ্ট agent-এর `mission`, `persona`, `duties` অথবা `rule` edit করুন।
-3. `mode: "primary"` রাখুন।
+3. `mode: "all"` রাখুন (roster-এর সব agent `all`; `primary` শুধু নির্বাচনযোগ্যতার জন্য, subagent হিসেবে ডাকা যাবে না)।
 4. Validation চালান:
 
 ```bash
@@ -756,7 +756,7 @@ opencode reload
 ### ৮.৪ নতুন agent যোগ করা
 
 1. `src/roster.ts`-এর `ROSTER`-এ নতুন unique `id` দিয়ে entry যোগ করুন।
-2. `mode: "primary"` দিন।
+2. `mode: "all"` দিন।
 3. `npm run typecheck && npm test` চালান।
 4. `npm run generate` চালান।
 5. Installer আবার চালান।
@@ -1195,8 +1195,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  2f0a0b323030d5c6accd83eaff0e6d42700a3d5a6c5b2a62c45e345446b71a38  ║
-║  files 63 · bytes 655737 · base 0917a2d · dirty                          ║
+║  root  d6bcf02f74d50ac1dd1c54edd8690b4513d497d93c641d96d3c82f2f360fb9a0  ║
+║  files 71 · bytes 719941 · base 88f8252 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1204,7 +1204,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-29T18:43:06.423Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-29T22:13:18.198Z
 
 </div>
 <!-- INTEGRITY:END -->

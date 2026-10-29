@@ -4,8 +4,8 @@
 // APPEND-ONLY: nothing in this module ever truncates it. If it is missing the
 // agent seeds it from the SSOT fingerprint rather than asking the user.
 
-import { appendJsonl, docWithSignature, readText, writeAtomic } from "./io.ts";
-import { syllabusFile } from "./paths.ts";
+import { appendJsonl, docWithSignature, readJsonl, readText, writeAtomic } from "./io.ts";
+import { auditFile, syllabusFile } from "./paths.ts";
 import type { Fingerprint } from "./scan.ts";
 import { LEGACY_AGENT_IDS } from "../roster.ts";
 
@@ -166,8 +166,7 @@ export function ensureSyllabus(projectRoot: string, fp: Fingerprint, agentIds: s
 }
 
 // Append-only lesson. Mirrored into footprint so the change is auditable.
-export function appendSyllabus(
-  projectRoot: string,
+export function appendSyllabus(  projectRoot: string,
   topic: string,
   summary: string,
   footprint?: string,
@@ -195,4 +194,58 @@ export function appendSyllabus(
     });
   }
   return { file, bytes: Buffer.byteLength(next, "utf8") };
+}
+
+// A new working directory must leave a trace, but a restart must not append the
+// same lesson again. The marker line is the dedupe key: it is derived from the
+// live fingerprint, so a changed tree produces a new lesson and an unchanged tree
+// stays silent.
+export type FootprintRecord = { appended: boolean; file: string; marker: string };
+
+function auditSummary(projectRoot: string): string[] {
+  const rows = readJsonl<any>(auditFile(projectRoot), 500);
+  if (rows.length === 0) return ["- No previous audit trail in `.zombiecoder/.state/audit.jsonl`."];
+  const failures = new Map<string, number>();
+  let escalations = 0;
+  let gateBlocks = 0;
+  for (const row of rows) {
+    if (row?.kind === "tool" && row?.status === "error") {
+      const tool = String(row?.tool ?? "unknown");
+      failures.set(tool, (failures.get(tool) ?? 0) + 1);
+    }
+    if (row?.kind === "agent.escalation") escalations += 1;
+    if (row?.kind === "gate") gateBlocks += 1;
+  }
+  const top = [...failures.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  return [
+    `- Audit rows read: ${rows.length}`,
+    top.length > 0 ? `- Tool failures: ${top.map(([tool, n]) => `${tool}×${n}`).join(", ")}` : "- Tool failures: none recorded",
+    `- Agent escalations: ${escalations}`,
+    `- Gate blocks: ${gateBlocks}`,
+  ];
+}
+
+export function recordProjectFootprint(projectRoot: string, fp: Fingerprint): FootprintRecord {
+  const file = syllabusFile(projectRoot);
+  const marker = `fp:${fp.totalFiles}/${fp.totalBytes}/${fp.languages.slice(0, 3).map((l) => l.name).join("+") || "unknown"}`;
+  const existing = readText(file) ?? "";
+  if (existing.includes(marker)) return { appended: false, file, marker };
+  const langs = fp.languages.slice(0, 6).map((l) => `${l.name}(${l.files})`).join(", ") || "unknown";
+  const dirs = fp.topLevel.slice(0, 8).map((t) => "`" + t.name + (t.kind === "dir" ? "/" : "") + "`").join(", ") || "none";
+  const summary = [
+    `\`${marker}\``,
+    "",
+    `- Files / dirs / bytes: ${fp.totalFiles} / ${fp.totalDirs} / ${fp.totalBytes}`,
+    `- Languages: ${langs}`,
+    `- Top level: ${dirs}`,
+    `- Markers: ${fp.markers.join(", ") || "none"}`,
+    "",
+    "Carried from the previous audit trail:",
+    "",
+    ...auditSummary(projectRoot),
+    "",
+    "Next action: read SSOT section 3 before opening files; do not re-scan the tree unless the fingerprint is stale.",
+  ].join("\n");
+  appendSyllabus(projectRoot, "Project footprint (auto)", summary, auditFile(projectRoot));
+  return { appended: true, file, marker };
 }

@@ -252,9 +252,11 @@ test("installer uses free agent assignments when the project environment URL is 
   try {
     assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
     const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
-    assert.equal(config.model, undefined);
+    // Pins off (default): one root default, no per-agent model. The agent models
+    // the fixture wrote are removed so they cannot override a /models choice.
+    assert.equal(config.model, BASELINE);
     for (const agent of roster.ROSTER) {
-      assert.equal(config.agents[agent.id].model, assignment[agent.id]);
+      assert.equal(config.agents[agent.id].model, undefined);
     }
     const state = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"));
     assert.equal(state.customProviderUrl, "");
@@ -262,6 +264,55 @@ test("installer uses free agent assignments when the project environment URL is 
     const plan = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", "models.json"), "utf8"));
     assert.equal(plan.strategy, "free-fallback");
     assert.match(result.stdout, /modelStrategy: free/);
+    const markdown = fs.readFileSync(path.join(root, ".opencode", "agents", "manu.md"), "utf8");
+    assert.doesNotMatch(markdown, /^model:/m, "pins off: markdown must not pin a model");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("installer keeps per-agent model pins when agentModelPins is true", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-pins-"));
+  const roster = await import("../src/roster.ts");
+  const assignment = Object.fromEntries(
+    roster.ROSTER.map((agent, index) => [agent.id, `opencode/free-model-${index + 1}`]),
+  );
+  fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "config.json"),
+    JSON.stringify({
+      version: "0.0.0-test",
+      customProviderUrl: "",
+      customProviderID: "missionbarisal",
+      mcpUrl: "",
+      opencodeApiUrl: "",
+      ssotRefreshMs: 300000,
+      modelStrategy: "free",
+      agentModelPins: true,
+    }),
+  );
+  fs.writeFileSync(
+    path.join(root, "opencode.json"),
+    JSON.stringify({ agents: roster.renderAgentsConfig(roster.ROSTER, assignment, true) }, null, 2),
+  );
+  const result = await runInstaller(
+    ["--dir", root, "--yes", "--no-install"],
+    {
+      EXTERNAL_MCP_EXTERNAL_OPENAI_COMPATIBLE_URL: null,
+      EXTERNAL_MCP_URL: null,
+      ZOMBIECODER_PROVIDER_URL: null,
+    },
+  );
+  try {
+    assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
+    const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+    // Pins on: the agent -> model mapping is authoritative, so no root model.
+    assert.equal(config.model, undefined);
+    for (const agent of roster.ROSTER) {
+      assert.equal(config.agents[agent.id].model, assignment[agent.id]);
+    }
+    const markdown = fs.readFileSync(path.join(root, ".opencode", "agents", "manu.md"), "utf8");
+    assert.match(markdown, /^model: opencode\/free-model-1$/m);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -290,7 +341,7 @@ test("installer reads the compatible URL from the project .environment file", as
         const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
         assert.equal(config.providers.missionbarisal.settings.baseURL, base);
         assert.equal(config.providers.missionbarisal.settings.apiKey, apiKey);
-        assert.equal(config.agents.manu.model, "missionbarisal/live-model");
+        assert.equal(config.agents.manu.model, undefined);
         const state = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"));
         assert.equal(state.customProviderUrl, base);
         assert.equal(state.customProviderApiKey, apiKey);
@@ -417,7 +468,7 @@ test("installer replaces a previous free baseline when the provider becomes live
         assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
         const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
         assert.equal(config.model, "missionbarisal/live-model");
-        assert.equal(config.agents.manu.model, "missionbarisal/live-model");
+        assert.equal(config.agents.manu.model, undefined);
       } finally {
         fs.rmSync(root, { recursive: true, force: true });
       }
@@ -510,7 +561,7 @@ test("a slow provider is saved but not selected, and stale models are removed", 
         assert.match(result.stdout, /slow prompt processing/);
         const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
         assert.equal(config.model, BASELINE);
-        assert.equal(config.agents.manu.model, BASELINE);
+        assert.equal(config.agents.manu.model, undefined);
         assert.deepEqual(Object.keys(config.providers.missionbarisal.models), ["live-model"]);
         assert.ok(!("old-model" in config.providers.missionbarisal.models));
         const zombiecoder = JSON.parse(
@@ -552,7 +603,7 @@ test("installer passes the provider key to the probe and to opencode.json", asyn
         assert.equal(authorization, "Bearer gateway-key");
         assert.equal(config.providers.missionbarisal.settings.apiKey, "gateway-key");
         assert.equal(config.model, "missionbarisal/live-model");
-        assert.equal(config.agents.manu.model, "missionbarisal/live-model");
+        assert.equal(config.agents.manu.model, undefined);
         const zombiecoder = JSON.parse(
           fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"),
         );

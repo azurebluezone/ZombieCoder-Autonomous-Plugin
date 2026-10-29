@@ -8,7 +8,12 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildContextPack, CONTEXT_LIMITS, resolveAllowedPath } from "../src/zombie/context.ts";
+import {
+  buildContextPack,
+  CONTEXT_LIMITS,
+  resolveAllowedPath,
+  stripHomePath,
+} from "../src/zombie/context.ts";
 import {
   applyResponseGate,
   evaluateResponse,
@@ -252,6 +257,21 @@ test("response gate still blocks real action claims after narrowing the markers"
     const verdict = evaluateResponse(text, { allowedRoot: root });
     assert.equal(verdict.passed, false, `claim must block: ${text}`);
   }
+});
+
+test("provider-facing pack replaces the OS home directory with ~", () => {
+  const root = seedProject();
+  const home = os.homedir();
+  fs.appendFileSync(
+    path.join(root, ".zombiecoder", "syllabus.md"),
+    `\n### local path\nWorking copy at ${home}/secret-project\n`,
+  );
+  const pack = buildContextPack(root, "manu");
+  assert.ok(!pack.text.includes(home), "home directory leaked into the provider pack");
+  assert.match(pack.text, /~\/secret-project/);
+  assert.equal(pack.allowedRoot, root, "tools keep the real absolute path");
+  assert.equal(stripHomePath(`${home}/x`, home), "~/x");
+  assert.equal(stripHomePath("nothing to strip", home), "nothing to strip");
 });
 
 test("context pack reuses the cached SSOT snapshot until the file changes", () => {

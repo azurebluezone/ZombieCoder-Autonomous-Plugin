@@ -6,20 +6,23 @@
 // available through tools; the pack is the cheap default.
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { readText, sha256 } from "./io.ts";
 import { readIndex, type MemoryMessage } from "./memory.ts";
 import { readSyllabus } from "./syllabus.ts";
 import { memoryIndexFile, ssotFile, syllabusFile } from "./paths.ts";
+import { FOCUS_LIMITS, listProjectFiles, resolveFocus, type FocusPlan } from "./focus.ts";
 
 export const CONTEXT_LIMITS = {
   // Only the slices an agent needs for the current task. The full SSOT and
   // syllabus stay on disk and are read on demand through tools.
   ssot: 1200,
   syllabus: 650,
+  focus: 700,
   memoryPerMessage: 220,
   memoryTotal: 700,
-  total: 2800,
+  total: 3600,
 } as const;
 
 // Which SSOT sections each role actually needs. A documentation agent does not
@@ -82,9 +85,40 @@ export type ContextPack = {
   ssotExcerptBytes: number;
   /** Bytes of the syllabus excerpt actually prepared for the prompt, not the file. */
   syllabusExcerptBytes: number;
+  /** Target files resolved from the user's message, when one was available. */
+  focus: FocusPlan | null;
   memory: MemoryStatus;
   owners: ContextOwners;
 };
+
+// Provider-facing text must not carry the OS home directory. `/home/<user>` (or
+// `C:\Users\<user>`) reveals the account name and device layout on every
+// request, and a model provider is a third party. Tools still receive the real
+// absolute paths — evidence quality is unchanged; only the copy that leaves the
+// machine is rewritten to `~`.
+const HOME_DIR = (() => {
+  try {
+    return os.homedir();
+  } catch {
+    return "";
+  }
+})();
+
+export function stripHomePath(text: string, home = HOME_DIR): string {
+  const value = String(text ?? "");
+  const target = String(home ?? "").trim();
+  if (!target || target === "/" || target === "\\") return value;
+  const variants = new Set([
+    target,
+    target.replace(/\\/g, "/"),
+    target.replace(/\//g, "\\"),
+  ]);
+  let out = value;
+  for (const variant of variants) {
+    if (variant) out = out.split(variant).join("~");
+  }
+  return out;
+}
 
 function clip(text: string, limit: number, from: "head" | "tail" = "head"): string {
   const value = String(text ?? "").trim();
@@ -194,6 +228,7 @@ export function buildContextPack(
   projectRoot: string,
   agentID: string,
   recent: MemoryMessage[] = [],
+  userMessage = "",
 ): ContextPack {
   const ssotPath = ssotFile(projectRoot);
   const syllabusPath = syllabusFile(projectRoot);
@@ -220,6 +255,19 @@ export function buildContextPack(
   const ssotExcerptBytes = ssot.exists ? Buffer.byteLength(ssotBody, "utf8") : 0;
   const syllabusExcerptBytes = syllabus.exists ? Buffer.byteLength(syllabusBody, "utf8") : 0;
 
+  // Focus: turn the user's sentence into the smallest truthful file set. This is
+  // what stops the "plan first, scan everything" loop the audit found.
+  let focusPlan: FocusPlan | null = null;
+  if (String(userMessage ?? "").trim().length > 0) {
+    try {
+      const files = listProjectFiles(projectRoot);
+      if (files.length > 0) focusPlan = resolveFocus(files, userMessage);
+    } catch {
+      focusPlan = null;
+    }
+  }
+  const focusBody = focusPlan ? clip(focusPlan.text, CONTEXT_LIMITS.focus) : "";
+
   const lines = [
     "## ZombieCoder Compact Context Pack",
     "",
@@ -237,6 +285,7 @@ export function buildContextPack(
       : "### Syllabus (missing)",
     syllabusBody,
     "",
+    ...(focusBody ? [`### Focus files — from the user's message (${Buffer.byteLength(focusBody, "utf8")}B)`, focusBody, ""] : []),
     `### Session memory (${memory.recent} recent, ${memory.archives} archives) — owner: ${CONTEXT_OWNERS.memory.agent}`,
     memorySummary(recent),
     "",
@@ -247,12 +296,15 @@ export function buildContextPack(
     `- Skills → ${CONTEXT_OWNERS.skills.agent} (${CONTEXT_OWNERS.skills.role})`,
     `- Evidence gate → ${CONTEXT_OWNERS.gate.agent} (${CONTEXT_OWNERS.gate.role})`,
   ];
-  const text = clip(lines.join("\n"), CONTEXT_LIMITS.total);
+  const text = stripHomePath(clip(lines.join("\n"), CONTEXT_LIMITS.total));
   const uiLine = `Context: SSOT ${ssot.exists ? "OK" : "MISSING"} (${CONTEXT_OWNERS.ssot.agent}) | Syllabus ${
     syllabus.exists ? "OK" : "MISSING"
   } (${CONTEXT_OWNERS.syllabus.agent}) | Memory ${memory.recent} recent / ${memory.archives} archives (${
     CONTEXT_OWNERS.memory.agent
-  }) | Pack ${Buffer.byteLength(text, "utf8")}B`;
+  }) | Focus ${focusPlan ? `${focusPlan.primary.length}+${focusPlan.related.length} files` : "off"} | Pack ${Buffer.byteLength(
+    text,
+    "utf8",
+  )}B`;
   return {
     text,
     bytes: Buffer.byteLength(text, "utf8"),
@@ -262,6 +314,7 @@ export function buildContextPack(
     syllabus,
     ssotExcerptBytes,
     syllabusExcerptBytes,
+    focus: focusPlan,
     memory,
     owners: CONTEXT_OWNERS,
   };

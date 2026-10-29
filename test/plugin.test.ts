@@ -17,14 +17,27 @@ process.env.ZOMBIECODER_ORIGIN_URL = "off";
 
 type Fake = ReturnType<typeof makeContext>;
 
-function makeContext(root: string) {
+const DEFAULT_TEST_MODELS = [
+  {
+    providerID: "opencode",
+    modelID: "big-pickle",
+    cost: [{ input: 0, output: 0 }],
+    status: "active",
+    capabilities: { tools: true },
+    enabled: true,
+  },
+];
+
+function makeContext(root: string, options: { models?: any[] } = {}) {
+  const catalog = options.models ?? DEFAULT_TEST_MODELS;
   const tools: any[] = [];
   const skills: any[] = [];
   const hooks: string[] = [];
   const toolHooks: Record<string, (event: any) => any> = {};
   const sessionHooks: Record<string, (event: any) => any> = {};
   const agentSwitches: Array<{ sessionID: string; agent: string }> = [];
-  const switchState = { fail: false };
+  const modelSwitches: Array<{ sessionID: string; model: any }> = [];
+  const switchState = { fail: false, failModel: false };
   const synthetics: Array<{ sessionID: string; text: string; description?: string }> = [];
   const prompts: Array<{ sessionID: string; text: string; delivery?: string }> = [];
   const storage = new Map<string, unknown>();
@@ -35,18 +48,7 @@ function makeContext(root: string) {
     location: { directory: root },
     provider: { list: async () => ({ data: [] }) },
     model: {
-      list: async () => ({
-        data: [
-          {
-            providerID: "opencode",
-            modelID: "big-pickle",
-            cost: [{ input: 0, output: 0 }],
-            status: "active",
-            capabilities: { tools: true },
-            enabled: true,
-          },
-        ],
-      }),
+      list: async () => ({ data: catalog }),
       default: async () => ({ data: { providerID: "opencode", modelID: "big-pickle" } }),
     },
     agent: {
@@ -101,6 +103,10 @@ function makeContext(root: string) {
         if (switchState.fail) throw new Error("agent not found");
         agentSwitches.push(input);
       },
+      switchModel: async (input: { sessionID: string; model: any }) => {
+        if (switchState.failModel) throw new Error("model not found");
+        modelSwitches.push(input);
+      },
       synthetic: async (input: { sessionID: string; text: string; description?: string }) => {
         synthetics.push(input);
       },
@@ -117,6 +123,7 @@ function makeContext(root: string) {
     toolHooks,
     sessionHooks,
     agentSwitches,
+    modelSwitches,
     synthetics,
     prompts,
     storage,
@@ -173,7 +180,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.ok(agents.includes("zombiecoder.md"), "renamed agent markdown missing");
   assert.ok(!agents.includes("kobir.md"), "old agent markdown must not survive the rename");
   const manu = fs.readFileSync(path.join(root, ".opencode", "agents", "manu.md"), "utf8");
-  assert.match(manu, /^model: opencode\/big-pickle$/m);
+  assert.doesNotMatch(manu, /^model:/m, "pins are off by default: markdown must not pin a model");
   assert.match(manu, /ZombieCoder Shared Rules/);
   assert.match(manu, /Cross-Domain Baseline/);
   assert.match(manu, /ভাইয়া/);
@@ -188,12 +195,55 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.match(manu, /current mode: `all`/);
   assert.match(manu, /V2-তে `scout` নেই/);
   assert.match(manu, /নিজের mode নিজে বদলাতে পারো না/);
+  // The provider is a third party: owner PII from identity.ts must never ride
+  // along in an agent prompt or config. The persona travels, the person does not.
+  for (const secret of [
+    "Sahon Srabon",
+    "+880 1323-626282",
+    "infi@zombiecoder.my.id",
+    "235 South Pirarbag",
+  ]) {
+    assert.ok(!manu.includes(secret), `agent markdown leaked identity field: ${secret}`);
+  }
 
   // V2 config is the second agent door: provider, agents, models, permissions.
   const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+  for (const secret of [
+    "Sahon Srabon",
+    "+880 1323-626282",
+    "infi@zombiecoder.my.id",
+    "235 South Pirarbag",
+  ]) {
+    assert.ok(
+      !JSON.stringify(config.agents).includes(secret),
+      `agent config leaked identity field: ${secret}`,
+    );
+  }
+  // Our plugin must not decorate provider requests with its own identity
+  // headers. The model provider sees the bearer token OpenCode already sends,
+  // nothing added by ZombieCoder.
+  const modelRequest = fake.sessionHooks["model.request"];
+  assert.equal(typeof modelRequest, "function", "model.request hook was not registered");
+  const requestEvent = {
+    sessionID: "ses_headers",
+    agent: "manu",
+    model: { providerID: "opencode", id: "big-pickle" },
+    kind: "primary",
+    headers: { authorization: "Bearer test" } as Record<string, string>,
+  };
+  await modelRequest(requestEvent);
+  assert.deepEqual(requestEvent.headers, { authorization: "Bearer test" });
+  assert.ok(
+    !Object.keys(requestEvent.headers).some((key) => /zombie/i.test(key)),
+    "provider request must not carry a ZombieCoder identity header",
+  );
+
   assert.equal(config.$schema, "https://opencode.ai/config.json");
   assert.equal(config.agents.zombiecoder.mode, "all");
-  assert.equal(config.agents.zombiecoder.model, "opencode/big-pickle");
+  // Pins off (default): no agent model, one root default. A /models choice still
+  // wins for the session, and subagents inherit it.
+  assert.equal(config.agents.zombiecoder.model, undefined);
+  assert.equal(config.model, "opencode/big-pickle");
   assert.equal(config.agents.manu.mode, "all");
   for (const agent of Object.values(config.agents) as any[]) {
     assert.equal(agent.mode, "all", "every agent must be a main agent, not a subagent");
@@ -734,6 +784,7 @@ test("global install keeps global agent models when a project plan falls back to
       opencodeApiUrl: "",
       ssotRefreshMs: 300000,
       modelStrategy: "auto",
+      agentModelPins: true,
     }),
   );
 
@@ -788,6 +839,7 @@ test("global install falls back to free models when the configured provider is d
       opencodeApiUrl: "",
       ssotRefreshMs: 300000,
       modelStrategy: "auto",
+      agentModelPins: true,
     }),
   );
 
@@ -997,6 +1049,11 @@ test("a gate-blocked answer escalates through three agents and then opens the br
   assert.match(await first.response.text(), /UNVERIFIED/, "the blocked answer must stay truthful");
   await (first as any).zombiecoderSettled;
   assert.deepEqual(fake.agentSwitches, [{ sessionID: "ses_gate", agent: "jarin" }]);
+  assert.equal(
+    fake.modelSwitches.length,
+    0,
+    "pins off by default: switching agent must leave the /models choice untouched",
+  );
   assert.equal(fake.prompts.length, 1);
   assert.equal(fake.prompts[0].delivery, "queue");
   assert.match(fake.prompts[0].text, /circuit breaker/);
@@ -1026,6 +1083,82 @@ test("a gate-blocked answer escalates through three agents and then opens the br
   assert.equal(breaker.failures.length, 3);
   assert.deepEqual(breaker.agents, ["manu", "jarin", "brishti"]);
   assert.match(breaker.failures[0].context.blockedPreview, /I fixed the login bug/);
+
+  await cleanup();
+});
+
+test("pins on: the breaker moves the model with the agent, never a random one", async () => {
+  const root = tempProject();
+  fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "config.json"),
+    JSON.stringify({
+      version: "0.0.0-test",
+      customProviderUrl: "",
+      customProviderID: "missionbarisal",
+      mcpUrl: "",
+      opencodeApiUrl: "",
+      ssotRefreshMs: 300000,
+      modelStrategy: "free",
+      agentModelPins: true,
+    }),
+  );
+  const fake = makeContext(root, {
+    models: [
+      {
+        providerID: "opencode",
+        modelID: "big-pickle",
+        cost: [{ input: 0, output: 0 }],
+        status: "active",
+        capabilities: { tools: true },
+        enabled: true,
+      },
+      {
+        providerID: "opencode",
+        modelID: "second-free",
+        cost: [{ input: 0, output: 0 }],
+        status: "active",
+        capabilities: { tools: true },
+        enabled: true,
+      },
+    ],
+  });
+  const cleanup = await setup(fake.ctx);
+  const hook = fake.sessionHooks["http.response"];
+  assert.equal(typeof hook, "function", "http.response hook was not registered");
+
+  const unproven =
+    [
+      `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: "I fixed the login bug, the issue was the poll timer and the stale HTML." } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}`,
+      "data: [DONE]",
+    ].join("\n") + "\n";
+
+  const event = {
+    kind: "primary",
+    sessionID: "ses_pins",
+    agent: "manu",
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    response: new Response(unproven, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }),
+  };
+  await hook(event);
+  await event.response.text();
+  await (event as any).zombiecoderSettled;
+
+  assert.deepEqual(fake.agentSwitches, [{ sessionID: "ses_pins", agent: "jarin" }]);
+  const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+  const pinned = config.agents.jarin.model as string;
+  assert.equal(pinned, "opencode/second-free", "the pinned mapping must resolve deterministically");
+  assert.equal(fake.modelSwitches.length, 1, "pins on: the model must follow the agent");
+  // Model.Ref wire shape is { id, providerID, variant? } — not
+  // { providerID, model }. Verified against @opencode/schema/dist/model.d.ts.
+  assert.deepEqual(fake.modelSwitches[0], {
+    sessionID: "ses_pins",
+    model: { providerID: "opencode", id: "second-free" },
+  });
 
   await cleanup();
 });

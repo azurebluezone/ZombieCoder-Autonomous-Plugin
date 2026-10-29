@@ -216,11 +216,16 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
         fingerprint: scanProject(deps.projectRoot()),
       }),
 
-      context_status: async (input: { agent?: string; sessionID?: string }) => {
+      context_status: async (input: { agent?: string; sessionID?: string; message?: string }) => {
         const sessionID = String(input?.sessionID ?? "").trim();
         const projectRoot = deps.projectRoot(sessionID);
         const recent = sessionID ? await readRecent(deps.storage, sessionID) : [];
-        const pack = buildContextPack(projectRoot, String(input?.agent ?? "unknown"), recent);
+        const pack = buildContextPack(
+          projectRoot,
+          String(input?.agent ?? "unknown"),
+          recent,
+          String(input?.message ?? ""),
+        );
         return {
           uiLine: pack.uiLine,
           packBytes: pack.bytes,
@@ -229,6 +234,7 @@ export async function registerRpc(rpc: RpcLike | undefined, deps: SurfaceDeps): 
           syllabus: pack.syllabus,
           ssotExcerptBytes: pack.ssotExcerptBytes,
           syllabusExcerptBytes: pack.syllabusExcerptBytes,
+          focus: pack.focus,
           memory: pack.memory,
           owners: pack.owners,
         };
@@ -451,12 +457,13 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "context_status",
       description:
-        "Show the compact context this agent is working from: SSOT, syllabus and session memory. Call it before substantive work and show the uiLine to the user so context management is visible in the UI.",
+        "Show the compact context this agent is working from: SSOT, syllabus, focus files and session memory. Call it before substantive work and show the uiLine to the user so context management is visible in the UI. Pass `message` with the user's sentence to get the target file list.",
       input: {
         type: "object" as const,
         properties: {
           agent: { type: "string", description: "Agent id, when the caller knows it." },
           sessionID: { type: "string", description: "Session id, to include recent kept memory." },
+          message: { type: "string", description: "The user's sentence, to resolve the focus file list." },
         },
         additionalProperties: false,
       },
@@ -464,13 +471,21 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         const sessionID = String(input?.sessionID ?? context?.sessionID ?? "").trim();
         const projectRoot = deps.projectRoot(context?.sessionID || sessionID);
         const recent = sessionID ? await readRecent(deps.storage, sessionID) : [];
-        const pack = buildContextPack(projectRoot, String(input?.agent ?? "unknown"), recent);
+        const pack = buildContextPack(
+          projectRoot,
+          String(input?.agent ?? "unknown"),
+          recent,
+          String(input?.message ?? ""),
+        );
         return {
           uiLine: pack.uiLine,
           packBytes: pack.bytes,
           allowedRoot: pack.allowedRoot,
           ssot: pack.ssot,
           syllabus: pack.syllabus,
+          ssotExcerptBytes: pack.ssotExcerptBytes,
+          syllabusExcerptBytes: pack.syllabusExcerptBytes,
+          focus: pack.focus,
           memory: pack.memory,
         };
       },

@@ -21,7 +21,7 @@
       "read_only": true,
       "checksum_algorithm": "sha256",
       "checksum_scope": "canonical JSON of this object, checksum field removed",
-      "checksum": "bf8c8211e6b85790ec92fb9bd35909438511452016866903dca279e929dbef46"
+      "checksum": "31a024d40d333bd8c797e59b91783430bea297787257c89d061ef4ebbee2cf96"
     }
   }
 }

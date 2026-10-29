@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-10-29T18:11:17.766Z",
+  "generated_at": "2026-10-29T18:12:03.016Z",
   "scope": [
     "src",
     "bin",
@@ -14,9 +14,9 @@
   "file_count": 63,
   "total_bytes": 645568,
   "git": {
-    "commit": "a901f65",
+    "commit": "9e6e9f9",
     "branch": "main",
-    "dirty": true
+    "dirty": false
   },
   "files": [
     {

@@ -8,17 +8,17 @@
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  root  1bc44507a58180f022db89f1ce1f820fcf43877395d3ef81ebde17c70dd00489  ║
-║  files 63 · bytes 645568 · base a901f65 · dirty                          ║
+║  files 63 · bytes 645568 · base 9e6e9f9 · clean                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-10-29T18:11:17.766Z` |
-| Base commit | `a901f65` |
+| Generated (UTC) | `2026-10-29T18:12:03.016Z` |
+| Base commit | `9e6e9f9` |
 | Branch | `main` |
-| Code tree | `dirty` |
+| Code tree | `clean` |
 | Files | 63 |
 | Bytes | 645568 |
 | Root SHA-256 | `1bc44507a58180f022db89f1ce1f820fcf43877395d3ef81ebde17c70dd00489` |

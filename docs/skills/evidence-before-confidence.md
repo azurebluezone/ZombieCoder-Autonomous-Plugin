@@ -20,8 +20,21 @@ A claim is not true because it sounds right. It is true because you can point to
 | `END_TO_END_TESTED` | The user path worked | command + exit code + output |
 | `NOT_TESTED` | Not exercised | say so, do not imply success |
 | `UNVERIFIED` | No proof | stop, do not guess |
+| `FIXTURE_ONLY` | Only a fixture/mock was exercised | name the fixture file |
+| `SELF_AUTHORED_MOCK` | The proof is code you wrote for the check | name the file and say it is a mock |
 
 One label is not another. A passing unit test does not prove a live gateway. A live gateway does not prove the UI path.
+
+## Real input or no claim
+
+A test proves what the test actually touched. Authentic test output is real evidence of a real run — a file under `test/` is not a mock, and `npm test → 113/113` is `real_run`. The question is never "was it a test?"; it is "did the check touch the real thing, or a stand-in?".
+
+- Name the real input first: the user's file, the real endpoint, the installed binary, the actual repository.
+- Every evidence item carries `origin`: `live`, `real_run`, `real_file`, or `simulated`.
+- A `fixed` / `installed` / `works` / `done` claim needs at least one `live`, `real_run` or `real_file` item. `simulated` may support it, never carry it alone.
+- A green run against a mock/fixture/demo is `simulated` no matter how real the test runner is. It never proves "done", and a label does not make it "done" either.
+- No real input available? Write `NOT_TESTED` and say what the user must supply. Do not build a stand-in and call it success.
+- Mocks stay legal as a boundary tool: name the file `*.mock.ts` / `fixture-*.json`, mark it `MOCK` in the header, and report it as `FIXTURE_ONLY` / `SELF_AUTHORED_MOCK`.
 
 ## Before saying PASS
 

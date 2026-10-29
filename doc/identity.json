@@ -1,7 +1,7 @@
 {
   "system_identity": {
     "name": "ZombieCoder",
-    "version": "2.1.1",
+    "version": "2.2.1",
     "version_source": "GET /api/info (observed at generation time)",
     "tagline": "যেখানে কোড ও কথা বলে",
     "branding": {
@@ -16,12 +16,12 @@
       },
       "license": "Proprietary - Local Freedom Protocol"
     },
-    "generated_at": "2026-10-20T21:21:47.909Z",
+    "generated_at": "2026-10-29T18:06:25.244Z",
     "manifest": {
       "read_only": true,
       "checksum_algorithm": "sha256",
       "checksum_scope": "canonical JSON of this object, checksum field removed",
-      "checksum": "475450367fbb7c69387560555ddd38d22f08db53e10c5128c76447517081de16"
+      "checksum": "bf8c8211e6b85790ec92fb9bd35909438511452016866903dca279e929dbef46"
     }
   }
 }

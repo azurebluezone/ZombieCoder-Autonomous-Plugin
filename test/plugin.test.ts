@@ -219,10 +219,11 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(ssot, /^## .*Model plan/m);
   assert.doesNotMatch(ssot, /^## .*MCP/m);
 
-  assert.equal(fake.tools.length, 11);
+  assert.equal(fake.tools.length, 12);
   assert.ok(fake.tools.every((tool) => tool.output), "every tool must declare an output schema");
   assert.ok(fake.tools.some((tool) => tool.name === "memory_archive"));
   assert.ok(fake.tools.some((tool) => tool.name === "evidence_gate"), "evidence_gate tool missing");
+  assert.ok(fake.tools.some((tool) => tool.name === "verify_real"), "verify_real tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "syntax_check"), "syntax_check tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "skill_catalog"), "skill_catalog tool missing");
   const modesTool = fake.tools.find((tool) => tool.name === "agent_modes");
@@ -272,6 +273,40 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(claimResult.usable, false);
   assert.ok(claimResult.missing.includes("evidence_is_nonempty_array"));
 
+  const verifyTool = fake.tools.find((tool) => tool.name === "verify_real");
+  assert.ok(verifyTool, "verify_real tool missing");
+  const realInput = path.join(root, "real-input.txt");
+  fs.writeFileSync(realInput, "real user data\n");
+  const realArtifact = path.join(root, ".zombiecoder", "verify", "run.log");
+  fs.mkdirSync(path.dirname(realArtifact), { recursive: true });
+  fs.writeFileSync(realArtifact, "processed 1 record\n");
+  const verified = (await verifyTool.execute({
+    input: realInput,
+    artifact: realArtifact,
+    command: "cat src/real-input.txt",
+    origin: "real_run",
+  })).output;
+  assert.equal(verified.status, "PASS");
+  assert.equal(verified.evidence.origin, "real_run");
+  assert.ok(fs.existsSync(verified.recordFile), "verify_real must write a provenance record");
+
+  const missingInput = (await verifyTool.execute({
+    input: path.join(root, "src", "ghost.txt"),
+    artifact: realArtifact,
+  })).output;
+  assert.equal(missingInput.status, "NOT_TESTED");
+  assert.equal(missingInput.evidence, null);
+
+  const mockInput = path.join(root, "mocks", "payment.mock.ts");
+  fs.mkdirSync(path.dirname(mockInput), { recursive: true });
+  fs.writeFileSync(mockInput, "// mock\n");
+  const standIn = (await verifyTool.execute({
+    input: mockInput,
+    artifact: realArtifact,
+  })).output;
+  assert.equal(standIn.status, "NOT_TESTED");
+  assert.match(standIn.reason, /stand-in/);
+
   assert.equal(fake.skills.length, 5);
   assert.ok(
     fake.skills.some(
@@ -288,7 +323,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
   const toolStep = report.steps.find((step: any) => step.step === "register-tools");
   assert.equal(toolStep.ok, true);
-  assert.equal(toolStep.detail, "11 registered");
+  assert.equal(toolStep.detail, "12 registered");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
 
   await cleanup();

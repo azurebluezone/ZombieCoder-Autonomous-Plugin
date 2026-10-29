@@ -20,6 +20,7 @@ import hashlib
 import json
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -176,13 +177,42 @@ def _evidence_path(source: str, root: Path) -> tuple[Path, int | None, bool] | N
     return resolved, line, inside
 
 
+# Evidence provenance. A claim is only as strong as what the check actually
+# exercised: a live service, a real execution, or a real file proves an outcome;
+# a simulation (a mock/fixture/demo standing in for the real dependency) only
+# proves the code path. The directory is not evidence: a file under test/ is a
+# genuine test and its output is authentic. Only an explicit stand-in name
+# (mock/fixture/fake/stub/demo) or a mocks//fixtures/ path counts as simulated.
+CLAIM_ORIGINS = {"live", "real_run", "real_file", "simulated"}
+REAL_ORIGINS = {"live", "real_run", "real_file"}
+STAND_IN_DIRS = {"fixtures", "__fixtures__", "mocks", "__mocks__"}
+STAND_IN_BASENAME_RE = re.compile(
+    r"(?:^(?:mock|fixture|fake|stub|demo)[-_.]|[-_.](?:mock|fixture|fake|stub|demo)\.)",
+    re.I,
+)
+
+
+def _looks_like_stand_in(path_text: str) -> bool:
+    """True when the source names an explicit stand-in, not a real test file."""
+    normalized = str(path_text or "").replace("\\", "/")
+    segments = [segment for segment in normalized.split("/") if segment not in ("", ".")]
+    if not segments:
+        return False
+    if any(segment.lower() in STAND_IN_DIRS for segment in segments[:-1]):
+        return True
+    return bool(STAND_IN_BASENAME_RE.search(segments[-1]))
+
+
 def validate_claim(payload: Any, report: Report, root: Path | None = None) -> None:
     """A factual claim needs evidence that resolves to a real artifact.
 
     `verified: true` is a claim by the model, not proof. A path source must exist
     inside the allowed root (and a :line must be in range); a command source must
-    carry a result marker (exit code, PASS/FAIL, test count, timing). This is what
-    stops a fabricated evidence object from passing by shape alone.
+    carry a result marker (exit code, PASS/FAIL, test count, timing). Every item
+    must also declare `origin`, and at least one item must be `live`,
+    `real_run` or `real_file`: a `simulated` item (mock/fixture/demo standing in
+    for the real dependency) can support a claim but can never carry a
+    "fixed"/"done" claim on its own.
     """
     base = (root or Path.cwd()).resolve()
     report.check("payload_is_object", isinstance(payload, dict))
@@ -194,6 +224,7 @@ def validate_claim(payload: Any, report: Report, root: Path | None = None) -> No
     if not isinstance(evidence, list):
         return
     verifiable = 0
+    verifiable_real = 0
     for index, item in enumerate(evidence):
         prefix = f"evidence[{index}]"
         report.check(f"{prefix}_is_object", isinstance(item, dict))
@@ -206,6 +237,21 @@ def validate_claim(payload: Any, report: Report, root: Path | None = None) -> No
             continue
         source = str(item.get("source") or "")
         observation = str(item.get("observation") or "")
+        origin = item.get("origin")
+        if not report.check(
+            f"{prefix}.origin_is_declared",
+            isinstance(origin, str) and origin in CLAIM_ORIGINS,
+            origin,
+        ):
+            continue
+        fixture_source = _looks_like_stand_in(source)
+        if origin in REAL_ORIGINS:
+            report.check(
+                f"{prefix}.origin_matches_source",
+                not fixture_source,
+                f"{origin} <- {source}",
+            )
+        real_evidence = origin in REAL_ORIGINS and not fixture_source
         ref = _evidence_path(source, base)
         if ref is not None:
             resolved, line, inside = ref
@@ -220,6 +266,8 @@ def validate_claim(payload: Any, report: Report, root: Path | None = None) -> No
                 report.check(f"{prefix}.line_in_range", 0 < line <= total, f"{line} <= {total}")
             if exists:
                 verifiable += 1
+                if real_evidence:
+                    verifiable_real += 1
         else:
             has_result = bool(
                 re.search(r"\b(?:exit(?:ed)?(?:\s+with)?(?:\s+code)?\s*\d+|PASS|FAIL|OK|\d+\s*/\s*\d+|\d+\s*(?:tests?|checks?)|tok/s|\d+\s*ms)\b", observation, re.I)
@@ -227,7 +275,14 @@ def validate_claim(payload: Any, report: Report, root: Path | None = None) -> No
             report.check(f"{prefix}.observation_has_result", has_result)
             if has_result:
                 verifiable += 1
+                if real_evidence:
+                    verifiable_real += 1
     report.check("at_least_one_verifiable_evidence", verifiable > 0, verifiable)
+    report.check(
+        "at_least_one_real_evidence",
+        verifiable_real > 0,
+        {"real": verifiable_real, "rule": "a fixture or test double cannot carry a done claim alone"},
+    )
     report.usable = not report.missing
 
 
@@ -452,6 +507,17 @@ def result_dict(report: Report, raw: bytes) -> dict[str, Any]:
 
 
 def self_test() -> int:
+    # Self-test must not depend on the current directory: the installed copy runs
+    # from .opencode/zombiecoder/tools, where the repo's tools/ path does not
+    # exist. Build one real file in a temp root and validate against that root.
+    with tempfile.TemporaryDirectory(prefix="zombiecoder-gate-") as tmp:
+        return _run_self_test(Path(tmp))
+
+
+def _run_self_test(root: Path) -> int:
+    evidence_file = root / "real-evidence.md"
+    evidence_file.write_text("line 1\n", encoding="utf-8")
+    source = f"{evidence_file}:1"
     fixtures = {
         "chat_valid": {
             "id": "chatcmpl-test",
@@ -473,8 +539,12 @@ def self_test() -> int:
         "anthropic_valid": {"type": "message", "role": "assistant", "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}},
         "stream_valid": "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n",
         "responses_valid": {"object": "response", "status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}]},
-        "claim_valid": {"claim": "The file exists.", "evidence": [{"source": "tools/evidence_gate.py:1", "observation": "line 1 exists", "verified": True}]},
+        "claim_valid": {"claim": "The file exists.", "evidence": [{"source": source, "observation": "line 1 exists", "verified": True, "origin": "real_file"}]},
         "claim_invalid_no_evidence": {"claim": "The capital of France is Berlin.", "evidence": []},
+        "claim_simulated_only": {"claim": "The feature is fixed.", "evidence": [{"source": "npm test", "observation": "12/12 tests passed", "verified": True, "origin": "simulated"}]},
+        "claim_missing_origin": {"claim": "The file exists.", "evidence": [{"source": source, "observation": "line 1 exists", "verified": True}]},
+        "claim_real_plus_simulated": {"claim": "The file exists.", "evidence": [{"source": "npm test", "observation": "12/12 tests passed", "verified": True, "origin": "simulated"}, {"source": source, "observation": "line 1 exists", "verified": True, "origin": "real_file"}]},
+        "claim_genuine_test_run": {"claim": "The suite is green.", "evidence": [{"source": "npm test", "observation": "113/113 tests passed, exit code 0", "verified": True, "origin": "real_run"}]},
     }
     expected = {
         "chat_valid": "PASS",
@@ -487,11 +557,15 @@ def self_test() -> int:
         "responses_valid": "PASS",
         "claim_valid": "PASS",
         "claim_invalid_no_evidence": "FAIL",
+        "claim_simulated_only": "FAIL",
+        "claim_missing_origin": "FAIL",
+        "claim_real_plus_simulated": "PASS",
+        "claim_genuine_test_run": "PASS",
     }
     failures = []
     for name, payload in fixtures.items():
         raw = json.dumps(payload).encode()
-        result = result_dict(validate("auto", payload), raw)
+        result = result_dict(validate("auto", payload, root), raw)
         got = result["status"]
         print(f"{name}: {got} (expected {expected[name]})")
         if got != expected[name]:

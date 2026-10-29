@@ -71,6 +71,48 @@ const CLAIM_MARKERS: RegExp[] = [
   /\b(?:everything|all)\s+(?:works?|is\s+fixed|is\s+done|is\s+ready)\b/i,
 ];
 
+// Provenance is about the subject of the check, not about the directory.
+//
+// A file under test/ is not a mock. Authentic test output ("npm test -> 113/113")
+// is evidence of a real run and must never be downgraded for being a test. What
+// this gate rejects is an *outcome* claim whose only cited artifact is an
+// explicit stand-in: a file named mock/fixture/fake/stub/demo, or a mocks/ or
+// fixtures/ path. Location under test/ proves nothing either way, so it is not
+// used as a signal.
+const STAND_IN_DIRS = new Set(["fixtures", "__fixtures__", "mocks", "__mocks__"]);
+
+const STAND_IN_BASENAMES: RegExp[] = [
+  /^(?:mock|fixture|fake|stub|demo)[-_.]/i,
+  /[-_.](?:mock|fixture|fake|stub|demo)\./i,
+];
+
+/**
+ * True when a file is *explicitly named* as a stand-in (mock/fixture/demo).
+ * A genuine test file is real evidence of a real run and returns false.
+ */
+export function isStandInPath(file: string, root: string): boolean {
+  let relative = file;
+  try {
+    const rel = path.relative(root, file);
+    if (rel && !rel.startsWith("..")) relative = rel;
+  } catch {
+    // Keep the absolute path; the segment test still works.
+  }
+  const segments = relative.replace(/\\/g, "/").split("/");
+  const base = segments.pop() ?? "";
+  if (segments.some((segment) => STAND_IN_DIRS.has(segment.toLowerCase()))) return true;
+  return STAND_IN_BASENAMES.some((pattern) => pattern.test(base));
+}
+
+// Completion claims only. "The test passes" is not a product outcome; "it
+// works"/"fixed"/"done" is. Keeping this list narrow stops an honest test
+// report from being mistaken for a success claim.
+const OUTCOME_CLAIM_MARKERS: RegExp[] = [
+  /\b(?:fixed|solved|resolved|works?|working|done|installed|deployed|configured|completed?|ready)\b/i,
+  /(?:ঠিক|সমাধান|ফিক্স|ইনস্টল|কনফিগার|আপডেট|তৈরি)\S*\s*(?:করেছি|করে\s+ফেলেছি|হয়ে\s+গেছে|হয়েছে|সম্পন্ন\s+হয়েছে)/,
+  /(?:সব|সবকিছু)\s+(?:ঠিক|ভালো|ঠিকঠাক|কাজ\s+করছে)/,
+];
+
 const TRUTH_PATTERNS: RegExp[] = [
   /প্রমাণ নেই/,
   /প্রমাণ ছাড়া/,
@@ -436,6 +478,32 @@ export function evaluateResponse(
       ...base,
       passed: false,
       reason: `file path does not exist: ${paths.slice(0, 3).join(", ")}`,
+    };
+  }
+
+  // Stand-in-only success claim: every cited artifact is explicitly a
+  // mock/fixture/demo. A stand-in can prove a code path, never an outcome; the
+  // claim is downgraded even if it carries a label, because "fixed" is false.
+  const citedFiles = resolvedPaths
+    .map((entry) =>
+      entry.resolution.status === "ok"
+        ? { candidate: entry.candidate, file: entry.resolution.file }
+        : null,
+    )
+    .filter((entry): entry is { candidate: string; file: string } => entry !== null);
+  const outcomeClaim = OUTCOME_CLAIM_MARKERS.some((pattern) => pattern.test(trimmed));
+  if (
+    outcomeClaim &&
+    citedFiles.length > 0 &&
+    citedFiles.every((entry) => isStandInPath(entry.file, options.allowedRoot))
+  ) {
+    return {
+      ...base,
+      passed: false,
+      reason: `stand-in only: ${citedFiles
+        .slice(0, 3)
+        .map((entry) => entry.candidate)
+        .join(", ")} — a mock/demo cannot prove a done claim; run real input or report NOT_TESTED`,
     };
   }
 

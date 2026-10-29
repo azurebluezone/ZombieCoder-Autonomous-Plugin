@@ -10,6 +10,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { auditFile, memoryDir, ssotFile, syllabusFile } from "./paths.ts";
 import { appendJsonl, readJsonl, readText, redactValue, PLUGIN_VERSION } from "./io.ts";
@@ -18,6 +19,7 @@ import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { scanProject } from "./scan.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
 import { buildContextPack } from "./context.ts";
+import { isStandInPath } from "./responseGate.ts";
 import { syntaxCheck } from "./lsp.ts";
 import {
   autoInstallSkills,
@@ -436,6 +438,134 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             }
           }
         }
+      },
+    },
+    {
+      name: "verify_real",
+      description:
+        "Record provenance for a real-input check: hash the real input and the artifact produced from it, write .zombiecoder/verify/<id>.json, and return a claim-ready evidence object (origin real_run/real_file). It never runs a command and never invents proof: missing input, missing/empty artifact, a stand-in path, or an artifact older than the input returns NOT_TESTED with the next step.",
+      input: {
+        type: "object" as const,
+        properties: {
+          input: { type: "string", description: "Real input file inside the working directory." },
+          artifact: { type: "string", description: "Log/report produced by running against that input." },
+          command: { type: "string", description: "Exact command that produced the artifact." },
+          origin: {
+            type: "string",
+            enum: ["real_run", "real_file"],
+            description: "real_run for an execution, real_file for a read artifact.",
+          },
+        },
+        required: ["input", "artifact"],
+        additionalProperties: false,
+      },
+      run: (input: any, context?: ToolContextLike) => {
+        const projectRoot = rootFor(context);
+        const resolve = (value: string) => (path.isAbsolute(value) ? value : path.resolve(projectRoot, value));
+        const inputPath = resolve(String(input?.input ?? ""));
+        const artifactPath = resolve(String(input?.artifact ?? ""));
+        const command = String(input?.command ?? "").trim();
+        const origin = String(input?.origin ?? "real_run");
+        if (origin !== "real_run" && origin !== "real_file") {
+          throw new Error("origin must be real_run or real_file");
+        }
+        const insideRoot = (file: string) => {
+          const rel = path.relative(projectRoot, file);
+          return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+        };
+        const notTested = (reason: string, next: string) => ({
+          status: "NOT_TESTED" as const,
+          reason,
+          next,
+          evidence: null,
+        });
+
+        if (!String(input?.input ?? "").trim() || !String(input?.artifact ?? "").trim()) {
+          return notTested("input and artifact are required", "pass the real input path and the artifact it produced");
+        }
+        if (!fs.existsSync(inputPath)) {
+          return notTested(`real input not found: ${inputPath}`, "supply the real file the user cares about");
+        }
+        if (!insideRoot(inputPath)) {
+          return notTested(
+            `real input is outside the working directory: ${inputPath}`,
+            "copy it under the project root, or cite it directly with path:line",
+          );
+        }
+        if (!fs.statSync(inputPath).isFile()) {
+          return notTested(`real input is not a file: ${inputPath}`, "pass a concrete file, or a manifest file for a directory");
+        }
+        if (isStandInPath(inputPath, projectRoot)) {
+          return notTested(
+            `input is an explicit stand-in: ${inputPath}`,
+            "use the real data, not a mock/fixture/demo",
+          );
+        }
+        if (!fs.existsSync(artifactPath)) {
+          return notTested(`artifact not found: ${artifactPath}`, "run the check against the real input and pass its output file");
+        }
+        if (!insideRoot(artifactPath)) {
+          return notTested(
+            `artifact is outside the working directory: ${artifactPath}`,
+            "write the output under .zombiecoder/verify/",
+          );
+        }
+        if (!fs.statSync(artifactPath).isFile()) {
+          return notTested(`artifact is not a file: ${artifactPath}`, "pass the log/report file itself");
+        }
+        if (isStandInPath(artifactPath, projectRoot)) {
+          return notTested(
+            `artifact is an explicit stand-in: ${artifactPath}`,
+            "the artifact must come from a real run, not a mock/fixture/demo",
+          );
+        }
+        if (fs.statSync(artifactPath).size === 0) {
+          return notTested(`artifact is empty: ${artifactPath}`, "re-run the check and capture its output");
+        }
+
+        const digest = (file: string) => {
+          const stat = fs.statSync(file);
+          return {
+            path: file,
+            bytes: stat.size,
+            mtimeMs: stat.mtimeMs,
+            sha256: createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
+          };
+        };
+        const inputRecord = digest(inputPath);
+        const artifactRecord = digest(artifactPath);
+        if (artifactRecord.mtimeMs < inputRecord.mtimeMs) {
+          return notTested(
+            "artifact is older than the input",
+            "re-run the check after the input changed and capture fresh output",
+          );
+        }
+
+        const dir = path.join(projectRoot, ".zombiecoder", "verify");
+        fs.mkdirSync(dir, { recursive: true });
+        const id = `${new Date().toISOString().replace(/[:.]/g, "-")}-${inputRecord.sha256.slice(0, 8)}`;
+        const recordFile = path.join(dir, `${id}.json`);
+        const record = {
+          status: "PASS",
+          generatedAt: new Date().toISOString(),
+          origin,
+          command: command || null,
+          projectRoot,
+          input: inputRecord,
+          artifact: artifactRecord,
+        };
+        fs.writeFileSync(recordFile, JSON.stringify(record, null, 2), { mode: 0o600 });
+
+        return {
+          status: "PASS" as const,
+          recordFile,
+          evidence: {
+            source: artifactPath,
+            observation: `real_input=${inputPath} input_sha256=${inputRecord.sha256.slice(0, 12)} command=${command || "not recorded"} artifact_sha256=${artifactRecord.sha256.slice(0, 12)}`,
+            verified: true,
+            origin,
+          },
+        };
       },
     },
     {

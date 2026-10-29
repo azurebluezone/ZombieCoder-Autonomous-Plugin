@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-10-23T23:36:24.315Z",
+  "generated_at": "2026-10-29T18:11:17.766Z",
   "scope": [
     "src",
     "bin",
@@ -10,13 +10,13 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "8685b60743496839bd9b20bdd796367c29ed7870c33553f8df683b53d2b560ad",
+  "root_sha256": "1bc44507a58180f022db89f1ce1f820fcf43877395d3ef81ebde17c70dd00489",
   "file_count": 63,
-  "total_bytes": 629876,
+  "total_bytes": 645568,
   "git": {
-    "commit": "96c2e1f",
+    "commit": "a901f65",
     "branch": "main",
-    "dirty": false
+    "dirty": true
   },
   "files": [
     {
@@ -36,8 +36,8 @@
     },
     {
       "path": "docs/skills/evidence-before-confidence.md",
-      "bytes": 1825,
-      "sha256": "087195382d983591c2d2d5619ac0b36ee695ba3a0d9ef25bb5c7777911b034c3"
+      "bytes": 3140,
+      "sha256": "6f05dd0fc50a97fb8d0eaf77be0f68aee5ee4760847e98a7d3ca3ffb51fe21f7"
     },
     {
       "path": "docs/skills/fastapi.md",
@@ -46,8 +46,8 @@
     },
     {
       "path": "docs/skills/first-principles.md",
-      "bytes": 1700,
-      "sha256": "4e63d8eeb8ae30b39427fc6335c38891cffded74fc866246faf2224127fd5bef"
+      "bytes": 1752,
+      "sha256": "a6081c550298eb25bbb9d887be98e642a7a4f239ece4b9c8b3cec9865297db3a"
     },
     {
       "path": "docs/skills/laravel.md",
@@ -156,8 +156,8 @@
     },
     {
       "path": "src/roster.ts",
-      "bytes": 29647,
-      "sha256": "b484cb0b084d756b5bb4a06eaf810fe48339f138681d454bc7968645f3f39da0"
+      "bytes": 31695,
+      "sha256": "253cc9fbb0949d52e0a6a37a63016d988115af1b5a103b48f36bcb881cfbf5cc"
     },
     {
       "path": "src/runtime.ts",
@@ -226,8 +226,8 @@
     },
     {
       "path": "src/zombie/responseGate.ts",
-      "bytes": 30544,
-      "sha256": "a4bf6450db61abbff7e33eb1f3cc526184907f34caa05534e00a92d9051bb806"
+      "bytes": 33671,
+      "sha256": "e279e70d3ea5b164ee1c6feee880187d6657c7904fe13c932ceb0aa71260c6a2"
     },
     {
       "path": "src/zombie/scan.ts",
@@ -236,8 +236,8 @@
     },
     {
       "path": "src/zombie/server.ts",
-      "bytes": 24517,
-      "sha256": "025912e18d4207e3da8031ef112da1380b46fb2ffc58c84c2810d3e88400c05e"
+      "bytes": 30411,
+      "sha256": "64dfe0cae3e4f23d4f0239467bde36014d609a45e503b26a5ecf1a9dd0570bfa"
     },
     {
       "path": "src/zombie/skillCatalog.ts",
@@ -271,8 +271,8 @@
     },
     {
       "path": "test/context.test.ts",
-      "bytes": 26306,
-      "sha256": "b2aa101f0034ec594a2c8c0633919cde7f6b1019927e7776534d203a423e2d86"
+      "bytes": 28054,
+      "sha256": "18edcdccfb82c5dc16dbc675064291d94009d214e3cbb405646affb5388bb297"
     },
     {
       "path": "test/install.test.ts",
@@ -321,8 +321,8 @@
     },
     {
       "path": "test/plugin.test.ts",
-      "bytes": 41244,
-      "sha256": "c26527832b327744fb6585b41cc2eb1489b8f7617695796b713252d13872f199"
+      "bytes": 42752,
+      "sha256": "b90cca0a96cd1e453ba468774765d2ea2d0d33cc257fb23b5f1ceb33d5dee381"
     },
     {
       "path": "test/repo.test.ts",

@@ -12,6 +12,7 @@ import { buildContextPack, CONTEXT_LIMITS, resolveAllowedPath } from "../src/zom
 import {
   applyResponseGate,
   evaluateResponse,
+  isStandInPath,
   parseResponseBody,
   resolveEvidencePath,
 } from "../src/zombie/responseGate.ts";
@@ -165,6 +166,47 @@ test("response gate blocks an unproven claim and passes real evidence", () => {
   );
   assert.equal(explanatory.passed, true);
   assert.match(explanatory.reason, /explanatory/);
+});
+
+test("response gate keeps authentic test output and rejects a stand-in-only done claim", () => {
+  const root = seedProject();
+  fs.mkdirSync(path.join(root, "test"), { recursive: true });
+  fs.mkdirSync(path.join(root, "mocks"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "test", "checkout.test.ts"),
+    Array.from({ length: 40 }, (_, index) => `// test line ${index + 1}`).join("\n") + "\n",
+  );
+  fs.writeFileSync(
+    path.join(root, "mocks", "payment.mock.ts"),
+    Array.from({ length: 30 }, (_, index) => `// mock line ${index + 1}`).join("\n") + "\n",
+  );
+
+  // A real test file is evidence of a real run. Directory "test/" is not a sin.
+  const realTest = evaluateResponse(
+    "The checkout test passes: test/checkout.test.ts:12.",
+    { allowedRoot: root },
+  );
+  assert.equal(realTest.passed, true);
+  assert.ok(realTest.matched.length > 0);
+
+  // The disease: the mock is the only thing exercised, yet the answer says done.
+  const standIn = evaluateResponse(
+    "I fixed the checkout bug; mocks/payment.mock.ts:9 returns 200.",
+    { allowedRoot: root },
+  );
+  assert.equal(standIn.passed, false);
+  assert.match(standIn.reason, /stand-in only/);
+
+  // Honest status report: no outcome claim, real input explicitly not tested.
+  const honest = evaluateResponse(
+    "FIXTURE_ONLY — mocks/payment.mock.ts:9 passes; the real payment endpoint is NOT_TESTED.",
+    { allowedRoot: root },
+  );
+  assert.equal(honest.passed, true);
+
+  assert.equal(isStandInPath(path.join(root, "mocks", "payment.mock.ts"), root), true);
+  assert.equal(isStandInPath(path.join(root, "test", "checkout.test.ts"), root), false);
+  assert.equal(isStandInPath(path.join(root, "src", "plugin.ts"), root), false);
 });
 
 test("response gate blocks a short Bengali success claim", () => {

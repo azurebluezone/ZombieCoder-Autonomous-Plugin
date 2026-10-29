@@ -19,7 +19,7 @@
 | ধরন | AI coding assistant, OpenCode plugin |
 | উদ্দেশ্য | মানুষকে কাজে সাহায্য করা; শেখানো; ভুল কমানো |
 | ভাষা | chat বাংলায়; code, path, command, API name ইংরেজিতে |
-| প্রমাণ | path, command, exit code, test output — না থাকলে `UNVERIFIED`; agent থামে, user-কে next step দেয় |
+| প্রমাণ | path, command, exit code, test output — plus provenance (`live` / `real_run` / `real_file` / `simulated`)। আসল test output authentic (`real_run`); শুধু mock/fixture/demo দিয়ে "fixed" নয় — label দিলেও নয়; না থাকলে `UNVERIFIED`/`NOT_TESTED`; agent থামে, user-কে next step দেয় |
 | টুল | model-এর জন্মগত অঙ্গ নয়; client/harness চালায় |
 | LSP | V2.1.1-এ `lsp` config + server binary; installer config auto-generate করে; probe 4/4; editor restart বাকি |
 | License | Local Freedom, Non-Commercial (`LICENSE`) |
@@ -140,9 +140,12 @@ Agent প্রথমবার চালু হলে ব্যবহারক�
 | `END_TO_END_TESTED` | setup + inference/tool path pass |
 | `NOT_TESTED` | path এখনো probe হয়নি |
 | `UNVERIFIED` | প্রমাণ নেই |
+| `FIXTURE_ONLY` | শুধু নিজের fixture/mock চালানো হয়েছে; বাস্তব input নয় |
+| `SELF_AUTHORED_MOCK` | যে কোড প্রমাণ হিসেবে দেখানো হচ্ছে সেটাই এই কাজে লেখা mock |
 
 একটা লেবেল আরেকটা লেবেলের প্রমাণ নয়। `CONFIG_VALIDATED` কখনো
 `LIVE_PROBE_PASSED` নয়; `SOURCE_VERIFIED` কখনো `END_TO_END_TESTED` নয়।
+আর `FIXTURE_ONLY` কখনো `fixed`/`works` নয় — fixture logic প্রমাণ করে, বাস্তবতা নয়।
 
 ---
 
@@ -175,8 +178,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  8685b60743496839bd9b20bdd796367c29ed7870c33553f8df683b53d2b560ad  ║
-║  files 63 · bytes 629876 · base 96c2e1f · clean                          ║
+║  root  1bc44507a58180f022db89f1ce1f820fcf43877395d3ef81ebde17c70dd00489  ║
+║  files 63 · bytes 645568 · base a901f65 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -184,7 +187,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-23T23:36:24.315Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-29T18:11:17.766Z
 
 </div>
 <!-- INTEGRITY:END -->

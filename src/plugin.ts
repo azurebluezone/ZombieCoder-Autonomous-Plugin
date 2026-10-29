@@ -890,6 +890,11 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     reloadSkills: async () => {
       await ctx.skill?.reload?.();
     },
+    synthetic: async (input: { sessionID: string; text: string; description?: string }) => {
+      const door = (ctx as any).session?.synthetic;
+      if (typeof door !== "function") throw new Error("session.synthetic unavailable");
+      await door(input);
+    },
   };
 
   const rpc = await stepAsync("register-rpc", () => registerRpc(ctx.rpc, deps));

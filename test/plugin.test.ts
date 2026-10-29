@@ -319,21 +319,32 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
         expected: "tests pass",
         check: "npm test",
         pass: "green",
-        budget: "10m",
       }),
     /observable outcome/,
     "a test status is not an expected outcome",
   );
-  const opened = (await goalTool.execute({
-    action: "open",
-    goal: "checkout returns an order id",
-    input: "src/real-input.txt",
-    expected: "POST /checkout returns 201 with an order id",
-    check: "npm test",
-    pass: "201 + order id in the body",
-    budget: "10m",
-  })).output;
+  const opened = (await goalTool.execute(
+    {
+      action: "open",
+      goal: "checkout returns an order id",
+      input: "src/real-input.txt",
+      expected: "POST /checkout returns 201 with an order id",
+      check: "npm test",
+      pass: "201 + order id in the body",
+    },
+    { sessionID: "ses_goal" },
+  )).output;
   assert.equal(opened.status, "open");
+  assert.equal(opened.uiShown, true, "the preview must be pushed to the session UI");
+  assert.match(opened.preview, /তুমি চাইছ/);
+  assert.match(opened.preview, /POST \/checkout returns 201/);
+  assert.doesNotMatch(opened.preview, /বাজেট|budget/i, "no time/budget line in the preview");
+  const previewCard = fake.synthetics.find(
+    (entry) => entry.description === "goal contract preview",
+  );
+  assert.ok(previewCard, "goal_contract open must show a synthetic preview card");
+  assert.match(previewCard.text, /👍 ঠিক থাকলে/);
+  assert.match(previewCard.text, /✋ না মিললে/);
   const syllabusAfterOpen = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
   assert.match(syllabusAfterOpen, new RegExp(`Goal Contract ${opened.id}`));
   assert.match(syllabusAfterOpen, /expected: POST \/checkout returns 201/);

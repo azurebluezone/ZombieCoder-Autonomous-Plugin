@@ -51,6 +51,8 @@ export type SurfaceDeps = {
   modelPlan: () => unknown;
   /** Reload the skill registry after a project skill is added. */
   reloadSkills?: () => Promise<void>;
+  /** Show a visible card in the session UI (OpenCode synthetic message). */
+  synthetic?: (input: { sessionID: string; text: string; description?: string }) => Promise<unknown>;
 };
 
 const obj = (properties: Record<string, unknown>) => ({
@@ -324,7 +326,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "goal_contract",
       description:
-        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and budget. close records the observed output and exit code; PASS only when exitCode is 0 and observed is non-empty. This fixes the expected result before the work, so a mock cannot be tuned to it afterwards.",
+        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code. open needs the real user input, an observable expected output (not 'tests pass'), the check command and pass criteria; it also shows a Bengali preview card in the session UI and returns it as `preview` — the agent must stop there until the user confirms. No time budget is asked or promised. close records the observed output and exit code; PASS only when exitCode is 0 and observed is non-empty. This fixes the expected result before the work, so a mock cannot be tuned to it afterwards.",
       input: {
         type: "object" as const,
         properties: {
@@ -335,7 +337,6 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           expected: { type: "string", description: "Observable outcome the user will see (status/body/file content)." },
           check: { type: "string", description: "Command that produces the observable outcome." },
           pass: { type: "string", description: "Pass criteria." },
-          budget: { type: "string", description: "Time/attempt budget." },
           observed: { type: "string", description: "Actual output produced by the check." },
           exitCode: { type: "number" },
           artifact: { type: "string", description: "Path to the recorded output." },
@@ -343,7 +344,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
         required: ["action"],
         additionalProperties: false,
       },
-      run: (input: any, context?: ToolContextLike) => {
+      run: async (input: any, context?: ToolContextLike) => {
         const projectRoot = rootFor(context);
         const action = String(input?.action ?? "");
         const text = (key: string) => String(input?.[key] ?? "").trim();
@@ -354,14 +355,12 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const expected = text("expected");
           const check = text("check");
           const pass = text("pass");
-          const budget = text("budget");
           const missing = [
             ["goal", goal],
             ["input", realInput],
             ["expected", expected],
             ["check", check],
             ["pass", pass],
-            ["budget", budget],
           ]
             .filter(([, value]) => !value)
             .map(([name]) => name);
@@ -382,10 +381,37 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             `- expected: ${expected}`,
             `- check: \`${check}\``,
             `- pass: ${pass}`,
-            `- budget: ${budget}`,
           ].join("\n");
           const written = appendSyllabus(projectRoot, `Goal Contract ${id}`, summary, auditFile(projectRoot));
-          return { id, file: written.file, status: "open" };
+          // Human-readable card: the user must see what the agent understood
+          // before any code is written. Shown as a synthetic session message so
+          // it appears in the UI, not only inside a file.
+          const preview = [
+            "🧭 কাজ শুরুর আগে — একবার মিলিয়ে নাও",
+            "",
+            `তুমি চাইছ: ${goal}`,
+            `আসল ইনপুট: ${realInput}`,
+            `আমি তোমাকে দেব: ${expected}`,
+            `যাচাই: \`${check}\` → ${pass}`,
+            "",
+            '👍 ঠিক থাকলে "হ্যাঁ" লেখো — তখনই কাজ শুরু করব।',
+            '✋ না মিললে "না" লেখো; আমি কিছু বদলাবো না, আগে নতুন করে লিখব।',
+          ].join("\n");
+          let uiShown = false;
+          const sessionID = String(context?.sessionID ?? "").trim();
+          if (sessionID && deps.synthetic) {
+            try {
+              await deps.synthetic({
+                sessionID,
+                text: preview,
+                description: "goal contract preview",
+              });
+              uiShown = true;
+            } catch {
+              uiShown = false;
+            }
+          }
+          return { id, file: written.file, status: "open", uiShown, preview };
         }
 
         if (action === "close") {

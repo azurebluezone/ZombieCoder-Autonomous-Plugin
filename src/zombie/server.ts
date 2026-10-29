@@ -322,6 +322,101 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       },
     },
     {
+      name: "goal_contract",
+      description:
+        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and budget. close records the observed output and exit code; PASS only when exitCode is 0 and observed is non-empty. This fixes the expected result before the work, so a mock cannot be tuned to it afterwards.",
+      input: {
+        type: "object" as const,
+        properties: {
+          action: { type: "string", enum: ["open", "close"] },
+          id: { type: "string", description: "Contract id returned by open; required by close." },
+          goal: { type: "string" },
+          input: { type: "string", description: "Real user input: file path, URL, or exact request." },
+          expected: { type: "string", description: "Observable outcome the user will see (status/body/file content)." },
+          check: { type: "string", description: "Command that produces the observable outcome." },
+          pass: { type: "string", description: "Pass criteria." },
+          budget: { type: "string", description: "Time/attempt budget." },
+          observed: { type: "string", description: "Actual output produced by the check." },
+          exitCode: { type: "number" },
+          artifact: { type: "string", description: "Path to the recorded output." },
+        },
+        required: ["action"],
+        additionalProperties: false,
+      },
+      run: (input: any, context?: ToolContextLike) => {
+        const projectRoot = rootFor(context);
+        const action = String(input?.action ?? "");
+        const text = (key: string) => String(input?.[key] ?? "").trim();
+
+        if (action === "open") {
+          const goal = text("goal");
+          const realInput = text("input");
+          const expected = text("expected");
+          const check = text("check");
+          const pass = text("pass");
+          const budget = text("budget");
+          const missing = [
+            ["goal", goal],
+            ["input", realInput],
+            ["expected", expected],
+            ["check", check],
+            ["pass", pass],
+            ["budget", budget],
+          ]
+            .filter(([, value]) => !value)
+            .map(([name]) => name);
+          if (missing.length > 0) {
+            throw new Error(`goal_contract open is missing: ${missing.join(", ")}`);
+          }
+          // "tests pass" is a status, not an outcome. A mock can satisfy it.
+          if (/^(?:tests?|suite|checks?)\s+(?:pass|passes|green|ok)\b/i.test(expected) || /^pass(?:ed)?$/i.test(expected)) {
+            throw new Error(
+              "expected must be an observable outcome (status/body/file content), not a test status",
+            );
+          }
+          const id = `gc-${Date.now().toString(36)}`;
+          const summary = [
+            `- status: open`,
+            `- goal: ${goal}`,
+            `- input: ${realInput}`,
+            `- expected: ${expected}`,
+            `- check: \`${check}\``,
+            `- pass: ${pass}`,
+            `- budget: ${budget}`,
+          ].join("\n");
+          const written = appendSyllabus(projectRoot, `Goal Contract ${id}`, summary, auditFile(projectRoot));
+          return { id, file: written.file, status: "open" };
+        }
+
+        if (action === "close") {
+          const id = text("id");
+          const observed = text("observed");
+          const exitCode = input?.exitCode;
+          if (!id) throw new Error("goal_contract close needs the id returned by open");
+          if (!observed) throw new Error("goal_contract close needs the observed output");
+          if (typeof exitCode !== "number" || !Number.isFinite(exitCode)) {
+            throw new Error("goal_contract close needs a numeric exitCode");
+          }
+          const syllabus = readSyllabus(projectRoot) ?? "";
+          if (!syllabus.includes(`Goal Contract ${id}`)) {
+            throw new Error(`goal_contract ${id} was never opened; open it before closing`);
+          }
+          const artifact = text("artifact");
+          const status = exitCode === 0 ? "PASS" : "FAIL";
+          const summary = [
+            `- status: ${status}`,
+            `- observed: ${observed}`,
+            `- exitCode: ${exitCode}`,
+            ...(artifact ? [`- artifact: ${artifact}`] : []),
+          ].join("\n");
+          const written = appendSyllabus(projectRoot, `Goal Contract ${id} — result`, summary, auditFile(projectRoot));
+          return { id, file: written.file, status, exitCode };
+        }
+
+        throw new Error("goal_contract action must be open or close");
+      },
+    },
+    {
       name: "project_fingerprint",
       description: "Scan the project live and return its machine-readable fingerprint. No fingerprint file is created.",
       input: empty,

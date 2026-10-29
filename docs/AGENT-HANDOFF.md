@@ -20,6 +20,7 @@
 | উদ্দেশ্য | মানুষকে কাজে সাহায্য করা; শেখানো; ভুল কমানো |
 | ভাষা | chat বাংলায়; code, path, command, API name ইংরেজিতে |
 | প্রমাণ | path, command, exit code, test output — plus provenance (`live` / `real_run` / `real_file` / `simulated`)। আসল test output authentic (`real_run`); শুধু mock/fixture/demo দিয়ে "fixed" নয় — label দিলেও নয়; না থাকলে `UNVERIFIED`/`NOT_TESTED`; agent থামে, user-কে next step দেয় |
+| Goal contract | কোড শুরুর আগে `goal_contract` open: আসল input, observable expected output, check command, pass criteria, budget; শেষে observed + exitCode close |
 | টুল | model-এর জন্মগত অঙ্গ নয়; client/harness চালায় |
 | LSP | V2.1.1-এ `lsp` config + server binary; installer config auto-generate করে; probe 4/4; editor restart বাকি |
 | License | Local Freedom, Non-Commercial (`LICENSE`) |
@@ -178,8 +179,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  1bc44507a58180f022db89f1ce1f820fcf43877395d3ef81ebde17c70dd00489  ║
-║  files 63 · bytes 645568 · base 9e6e9f9 · clean                          ║
+║  root  464f54571695fe723484cf55f0b9be307f21e400a96114634889d34a92ebf1a9  ║
+║  files 63 · bytes 652381 · base aa8524a · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -187,7 +188,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-29T18:12:03.016Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-29T18:16:20.555Z
 
 </div>
 <!-- INTEGRITY:END -->

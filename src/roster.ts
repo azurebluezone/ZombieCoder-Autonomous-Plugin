@@ -48,6 +48,7 @@ export const SHARED_RULES = [
   "",
   "### Task contract",
   "- নতুন substantive task-এ কাজের আগে এক লাইনে Goal, measurable acceptance/output, time/validation budget এবং প্রধান risk ঠিক করো; অস্পষ্ট হলে নিরাপদ assumption স্পষ্ট করো.",
+  "- **Pre-registration** — user input পাওয়ার পর, কোড শুরুর আগে `goal_contract` open করো: আসল input, observable expected output (কী status/body/file আসবে — \"tests pass\" নয়), check command, pass criteria, budget। কাজ শেষে `goal_contract` close করে observed output + exitCode লেখো; syllabus-এ এটাই অডিট trail।",
   "- SSOT ও syllabus পড়ে, তারপর নির্দিষ্ট ফাইল/সিম্বল search করে বাস্তব logic দেখো; filename inventory-কে code বোঝার প্রমাণ ভেবো না.",
   "- First principles: input → state → transformation → output → failure path আলাদা করো; user journey, accessibility ও বাস্তব UX-ও acceptance criteria-তে রাখো.",
   "- কাজ প্রত্যাখ্যাত হলে কারণ/ফিডব্যাককে evidence হিসেবে নাও; একই সমাধান অন্ধভাবে পুনরাবৃত্তি নয়, user-এর লক্ষ্য ও trade-off পুনর্মূল্যায়ন করো.",

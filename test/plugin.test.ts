@@ -219,11 +219,12 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(ssot, /^## .*Model plan/m);
   assert.doesNotMatch(ssot, /^## .*MCP/m);
 
-  assert.equal(fake.tools.length, 12);
+  assert.equal(fake.tools.length, 13);
   assert.ok(fake.tools.every((tool) => tool.output), "every tool must declare an output schema");
   assert.ok(fake.tools.some((tool) => tool.name === "memory_archive"));
   assert.ok(fake.tools.some((tool) => tool.name === "evidence_gate"), "evidence_gate tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "verify_real"), "verify_real tool missing");
+  assert.ok(fake.tools.some((tool) => tool.name === "goal_contract"), "goal_contract tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "syntax_check"), "syntax_check tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "skill_catalog"), "skill_catalog tool missing");
   const modesTool = fake.tools.find((tool) => tool.name === "agent_modes");
@@ -307,6 +308,55 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(standIn.status, "NOT_TESTED");
   assert.match(standIn.reason, /stand-in/);
 
+  const goalTool = fake.tools.find((tool) => tool.name === "goal_contract");
+  assert.ok(goalTool, "goal_contract tool missing");
+  await assert.rejects(
+    () =>
+      goalTool.execute({
+        action: "open",
+        goal: "checkout",
+        input: "src/real-input.txt",
+        expected: "tests pass",
+        check: "npm test",
+        pass: "green",
+        budget: "10m",
+      }),
+    /observable outcome/,
+    "a test status is not an expected outcome",
+  );
+  const opened = (await goalTool.execute({
+    action: "open",
+    goal: "checkout returns an order id",
+    input: "src/real-input.txt",
+    expected: "POST /checkout returns 201 with an order id",
+    check: "npm test",
+    pass: "201 + order id in the body",
+    budget: "10m",
+  })).output;
+  assert.equal(opened.status, "open");
+  const syllabusAfterOpen = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
+  assert.match(syllabusAfterOpen, new RegExp(`Goal Contract ${opened.id}`));
+  assert.match(syllabusAfterOpen, /expected: POST \/checkout returns 201/);
+
+  const closed = (await goalTool.execute({
+    action: "close",
+    id: opened.id,
+    observed: "HTTP 201 {\"orderId\":7}",
+    exitCode: 0,
+  })).output;
+  assert.equal(closed.status, "PASS");
+  const failedClose = (await goalTool.execute({
+    action: "close",
+    id: opened.id,
+    observed: "HTTP 500",
+    exitCode: 1,
+  })).output;
+  assert.equal(failedClose.status, "FAIL");
+  await assert.rejects(
+    () => goalTool.execute({ action: "close", id: "gc-never", observed: "x", exitCode: 0 }),
+    /never opened/,
+  );
+
   assert.equal(fake.skills.length, 5);
   assert.ok(
     fake.skills.some(
@@ -323,7 +373,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
   const toolStep = report.steps.find((step: any) => step.step === "register-tools");
   assert.equal(toolStep.ok, true);
-  assert.equal(toolStep.detail, "12 registered");
+  assert.equal(toolStep.detail, "13 registered");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
 
   await cleanup();

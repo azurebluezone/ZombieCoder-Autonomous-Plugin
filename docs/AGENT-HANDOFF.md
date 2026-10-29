@@ -99,6 +99,15 @@ persona এখনো সম্পূর্ণ inject হয়নি।
 
 এই ছয়টা পাস না হলে agent-কে code লিখতে দিও না। আগে persona ঠিক করো।
 
+**Builtin/subagent runner:** OpenCode-এর `build`, `plan`, `general`, `explore`
+এবং যেকোনো custom agent-এর নিজের persona নেই। প্লাগিনের
+`mergeAgentPersona()` (`src/roster.ts`) roster-এ না থাকা agent-কে
+`## ZombieCoder identity (builtin runner: …)` হেডার + shared rules + execution
+doctrine + cross-domain baseline দেয়। Roster agent-এর markdown-এ এই блок আগেই
+আছে, তাই তাদের আবার push করা হয় না (prompt দ্বিগুণ নয়)। `title`, `summary`,
+`compaction` শুধু ছোট contract পায়। প্রমাণ: `.zombiecoder/.state/audit.jsonl`-এ
+ওই session-এর `context` row-তে `persona: "shared"` এবং `personaBytes > 0`।
+
 ---
 
 ## ৪. ব্যবহারকারীকে বলা ছোট নোট
@@ -179,8 +188,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  86f7e2f50817a18f8dedc8bc2dfffc797ddecbb723b84b10ce76b5f76b32b5e9  ║
-║  files 73 · bytes 739248 · base 680a624 · dirty                          ║
+║  root  9e0d1d60d152f8869bd9655b834d8e1a19a7326947234bc2d29bd0ad11c4574b  ║
+║  files 74 · bytes 745461 · base 01411ec · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -188,7 +197,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-29T22:58:09.122Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-29T23:19:02.282Z
 
 </div>
 <!-- INTEGRITY:END -->

@@ -773,6 +773,19 @@ test("context hook archives overflow without waiting for session.idle", async ()
   assert.match(builtinText, /Start every response with "ভাইয়া"/);
   assert.doesNotMatch(builtinText, /unknown agent/);
 
+  // The audit must record which merge branch ran, not just "context".
+  const auditRows = fs
+    .readFileSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const rosterAudit = auditRows.find((row) => row.sessionID === "ses_ctx" && row.kind === "context");
+  const builtinAudit = auditRows.find((row) => row.sessionID === "ses_builtin" && row.kind === "context");
+  assert.equal(rosterAudit.persona, "roster", "roster agents keep their own markdown");
+  assert.equal(rosterAudit.personaBytes, 0, "roster persona must not be pushed twice");
+  assert.equal(builtinAudit.persona, "shared", "builtin runner uses the merged persona");
+  assert.ok(builtinAudit.personaBytes > 5000, "the merged persona is the full block");
+
   const { readArchive, readIndex } = await import("../src/zombie/memory.ts");
   const archivedTexts = () =>
     readArchive(root, "ses_ctx").flatMap((row: any) => row.archived.map((m: any) => m.text));

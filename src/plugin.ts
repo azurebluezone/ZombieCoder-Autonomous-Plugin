@@ -21,7 +21,7 @@ import {
   GLOBAL_PERMISSIONS,
   LEGACY_AGENT_IDS,
   BASELINE_MODEL,
-  SHARED_PERSONA,
+  mergeAgentPersona,
   agentMarkdown,
   renderAgentsConfig,
   type AgentDef,
@@ -83,10 +83,6 @@ import {
 import { registerRpc, registerTools, audit } from "./zombie/server.ts";
 
 export const PLUGIN_ID = "zombiecoder";
-
-// Internal OpenCode sessions are not user-facing agents. They keep the short
-// contract but must not pay for the full 7KB persona.
-const HIDDEN_BUILTIN_AGENTS = new Set(["compaction", "title", "summary"]);
 export { DEFAULT_SSOT_REFRESH_MS }; // spec §3.3 — every 5 minutes; one definition in defaults.ts
 // OpenCode applies a transform AFTER setup() returns. Waiting inside setup blocks
 // the very apply we are waiting for, so registration is reported as "pending" and
@@ -1092,29 +1088,17 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           break;
         }
         const pack = buildContextPack(projectRoot, agentID, recent, userMessage);
-        // Builtin OpenCode agents (build/plan/general/explore) have no roster
-        // entry. Without this block a subagent session runs with the builtin
-        // prompt and loses the ZombieCoder identity entirely. The builtin name
-        // describes the tool surface, not the persona.
-        const builtinPersona =
-          def || agentID === "unknown" || HIDDEN_BUILTIN_AGENTS.has(agentID)
-            ? []
-            : [
-                `## ZombieCoder identity (builtin runner: ${agentID})`,
-                "You are a ZombieCoder agent executing inside an OpenCode builtin agent runner.",
-                "The builtin name describes the tool surface, not the identity. The shared",
-                "rules, evidence contract and response contract below bind this session.",
-                "",
-                SHARED_PERSONA,
-                "",
-              ];
+        // One merge point for every agent. Roster agents already carry the
+        // shared rules in their markdown; builtin runners (build/plan/general/
+        // explore) do not, so they get the identity header + full persona here.
+        const persona = mergeAgentPersona(agentID);
         if (Array.isArray(event?.system) && typeof event.system.push === "function") {
           event.system.push({
             type: "text",
             text: [
               pack.text,
               "",
-              ...builtinPersona,
+              ...(persona.text ? [persona.text, ""] : []),
               "### Agent contract",
               def
                 ? `Decision rule: ${def.rule}`
@@ -1142,8 +1126,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           syllabusExcerptBytes: pack.syllabusExcerptBytes,
           memoryArchives: pack.memory.archives,
           uiLine: pack.uiLine,
-          persona: def ? "roster" : builtinPersona.length > 0 ? "shared" : "none",
-          personaBytes: builtinPersona.length > 0 ? builtinPersona.join("\n").length : 0,
+          persona: persona.kind,
+          personaBytes: persona.bytes,
         });
       }),
     );

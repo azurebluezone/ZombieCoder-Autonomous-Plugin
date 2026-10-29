@@ -19,6 +19,13 @@ import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { scanProject } from "./scan.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
 import { buildContextPack } from "./context.ts";
+import {
+  matches,
+  normalizeMatch,
+  parseContract,
+  runCheck,
+  validateExpected,
+} from "./goalContract.ts";
 import { isStandInPath } from "./responseGate.ts";
 import { syntaxCheck } from "./lsp.ts";
 import {
@@ -30,6 +37,8 @@ import { ROSTER } from "../roster.ts";
 import { AGENT_MODES, BUILTIN_AGENTS, MODE_REGISTRY, planModeSwitch, type AgentMode } from "./modes.ts";
 
 export const RPC_ID = "zombiecoder";
+/** Safety cap for the real check command close runs. Not a work budget. */
+const CHECK_TIMEOUT_MS = 120_000;
 export const TOOL_NAMESPACE = { name: "zombiecoder", description: "ZombieCoder project control surface" };
 
 export type RpcLike = {
@@ -332,7 +341,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "goal_contract",
       description:
-        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code. open needs the real user input, an observable expected output (not 'tests pass'), the check command and pass criteria; it also shows a Bengali preview card in the session UI and returns it as `preview`. The card is the pre-work announcement: the agent starts the work right away and stops only if the user objects — no extra confirmation word. No time budget is asked or promised. close records the observed output and exit code; PASS only when exitCode is 0 and observed is non-empty. This fixes the expected result before the work, so a mock cannot be tuned to it afterwards.",
+        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and a match mode (contains|equals|regex|json); it also shows a Bengali preview card in the session UI and returns it as `preview`. The card is the pre-work announcement: the agent starts the work right away and stops only if the user objects — no extra confirmation word. No time budget is asked or promised. close RUNS the recorded check command in the project root (120s cap) and matches the real output against the recorded expected value; PASS only when the exit code is 0 and the output matches. Agent-supplied observed/exitCode are saved as a claim and never trusted. A mismatch, empty output or failed command is FAIL, so a mock cannot be tuned to the expected result afterwards.",
       input: {
         type: "object" as const,
         properties: {
@@ -341,8 +350,13 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           goal: { type: "string" },
           input: { type: "string", description: "Real user input: file path, URL, or exact request." },
           expected: { type: "string", description: "Observable outcome the user will see (status/body/file content)." },
-          check: { type: "string", description: "Command that produces the observable outcome." },
+          check: { type: "string", description: "Command that produces the observable outcome. close runs it." },
           pass: { type: "string", description: "Pass criteria." },
+          match: {
+            type: "string",
+            enum: ["contains", "equals", "regex", "json"],
+            description: "How close compares the real output with expected. Default contains.",
+          },
           observed: { type: "string", description: "Actual output produced by the check." },
           exitCode: { type: "number" },
           artifact: { type: "string", description: "Path to the recorded output." },
@@ -379,6 +393,12 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
               "expected must be an observable outcome (status/body/file content), not a test status",
             );
           }
+          if (/[\r\n]/.test(expected) || /[\r\n]/.test(check)) {
+            throw new Error("expected and check must be single-line; use a regex or a JSON token");
+          }
+          const mode = normalizeMatch(text("match"));
+          const expectedError = validateExpected(expected, mode);
+          if (expectedError) throw new Error(expectedError);
           const id = `gc-${Date.now().toString(36)}`;
           const summary = [
             `- status: open`,
@@ -387,6 +407,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             `- expected: ${expected}`,
             `- check: \`${check}\``,
             `- pass: ${pass}`,
+            `- match: ${mode}`,
           ].join("\n");
           const written = appendSyllabus(projectRoot, `Goal Contract ${id}`, summary, auditFile(projectRoot));
           // Human-readable card: the user must see what the agent understood
@@ -399,6 +420,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             `আসল ইনপুট: ${realInput}`,
             `আমি তোমাকে দেব: ${expected}`,
             `যাচাই: \`${check}\` → ${pass}`,
+            `মিলানোর নিয়ম: ${mode}`,
             "",
             "👍 দেখে নাও — আপত্তি না থাকলে কাজ শুরু করছি।",
             "✋ ভুল মনে হলে থামাও; নতুন করে লিখব, কিছু বদলাবে না।",
@@ -422,27 +444,90 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
 
         if (action === "close") {
           const id = text("id");
-          const observed = text("observed");
-          const exitCode = input?.exitCode;
           if (!id) throw new Error("goal_contract close needs the id returned by open");
-          if (!observed) throw new Error("goal_contract close needs the observed output");
-          if (typeof exitCode !== "number" || !Number.isFinite(exitCode)) {
-            throw new Error("goal_contract close needs a numeric exitCode");
-          }
           const syllabus = readSyllabus(projectRoot) ?? "";
-          if (!syllabus.includes(`Goal Contract ${id}`)) {
+          const contract = parseContract(syllabus, id);
+          if (!contract) {
             throw new Error(`goal_contract ${id} was never opened; open it before closing`);
           }
+          const mode = normalizeMatch(contract.match);
+          const expectedError = validateExpected(contract.expected, mode);
+          if (expectedError) {
+            throw new Error(`goal_contract ${id} is invalid: ${expectedError}`);
+          }
+          // The agent's own numbers are a claim, not proof. The verdict comes
+          // from running the recorded command in the project root.
+          const run = await runCheck(projectRoot, contract.check, {
+            timeoutMs: CHECK_TIMEOUT_MS,
+          });
+          const output = run.stdout.trim() || run.stderr.trim();
+          let status: "PASS" | "FAIL" = "FAIL";
+          let reason = "";
+          if (run.timedOut) reason = `check timed out after ${CHECK_TIMEOUT_MS}ms`;
+          else if (run.error) reason = `check could not start: ${run.error}`;
+          else if (run.exitCode === null) reason = "check was killed before it exited";
+          else if (run.exitCode !== 0) reason = `check exited with ${run.exitCode}`;
+          else if (!output) reason = "check produced no output";
+          else if (!matches(output, contract.expected, mode)) {
+            reason = `observed output does not match expected (${mode})`;
+          } else status = "PASS";
+
+          const claimed = [
+            text("observed") ? `claimObserved: ${text("observed").slice(0, 300)}` : "",
+            typeof input?.exitCode === "number" ? `claimExitCode: ${input.exitCode}` : "",
+          ].filter(Boolean);
+          const singleLine = (value: string) => value.replace(/\r?\n/g, " ⏎ ").slice(0, 500);
           const artifact = text("artifact");
-          const status = exitCode === 0 ? "PASS" : "FAIL";
           const summary = [
             `- status: ${status}`,
-            `- observed: ${observed}`,
-            `- exitCode: ${exitCode}`,
+            `- command: \`${contract.check}\``,
+            `- exitCode: ${run.exitCode === null ? "none" : run.exitCode}`,
+            `- observed: ${singleLine(output) || "(empty)"}`,
+            `- expected: ${contract.expected}`,
+            `- match: ${mode}`,
+            ...(reason ? [`- reason: ${reason}`] : []),
+            ...claimed,
             ...(artifact ? [`- artifact: ${artifact}`] : []),
           ].join("\n");
           const written = appendSyllabus(projectRoot, `Goal Contract ${id} — result`, summary, auditFile(projectRoot));
-          return { id, file: written.file, status, exitCode };
+
+          // The UI must show the verdict too, not only the file.
+          const sessionID = String(context?.sessionID ?? "").trim();
+          let uiShown = false;
+          if (sessionID && deps.synthetic) {
+            try {
+              await deps.synthetic({
+                sessionID,
+                description: "goal contract result",
+                text: [
+                  status === "PASS" ? `✅ Goal Contract ${id} — PASS` : `❌ Goal Contract ${id} — FAIL`,
+                  "",
+                  `চেক: \`${contract.check}\` → exit ${run.exitCode === null ? "none" : run.exitCode}`,
+                  `expected: ${contract.expected}`,
+                  `পেলাম: ${singleLine(output) || "(কোনো output নেই)"}`,
+                  ...(reason ? [`কারণ: ${reason}`] : []),
+                  "",
+                  status === "PASS"
+                    ? "প্রমাণ syllabus-এ লেখা হয়েছে।"
+                    : "এটা PASS নয় — ফল বদলালে নতুন contract খোলো।",
+                ].join("\n"),
+              });
+              uiShown = true;
+            } catch {
+              uiShown = false;
+            }
+          }
+          return {
+            id,
+            file: written.file,
+            status,
+            exitCode: run.exitCode,
+            observed: output,
+            expected: contract.expected,
+            match: mode,
+            reason: reason || undefined,
+            uiShown,
+          };
         }
 
         throw new Error("goal_contract action must be open or close");

@@ -20,7 +20,7 @@
 | উদ্দেশ্য | মানুষকে কাজে সাহায্য করা; শেখানো; ভুল কমানো |
 | ভাষা | chat বাংলায়; code, path, command, API name ইংরেজিতে |
 | প্রমাণ | path, command, exit code, test output — plus provenance (`live` / `real_run` / `real_file` / `simulated`)। আসল test output authentic (`real_run`); শুধু mock/fixture/demo দিয়ে "fixed" নয় — label দিলেও নয়; না থাকলে `UNVERIFIED`/`NOT_TESTED`; agent থামে, user-কে next step দেয় |
-| Goal contract | কোড শুরুর আগে `goal_contract` open: আসল input, observable expected output, check command, pass criteria; preview UI-তে দেখিয়ে কাজ শুরু, আলাদা "হ্যাঁ" নয়; শেষে observed + exitCode close। কোনো সময়/বাজেট প্রতিশ্রুতি নয় |
+| Goal contract | কোড শুরুর আগে `goal_contract` open: আসল input, observable expected output, check command, pass criteria; preview UI-তে দেখিয়ে কাজ শুরু, আলাদা "হ্যাঁ" নয়; শেষে close নিজেই check command চালিয়ে observed vs expected মিলায় (contains/equals/regex/json); mismatch = FAIL, agent-এর exitCode claim বিশ্বাস হয় না। কোনো সময়/বাজেট প্রতিশ্রুতি নয় |
 | টুল | model-এর জন্মগত অঙ্গ নয়; client/harness চালায় |
 | LSP | V2.1.1-এ `lsp` config + server binary; installer config auto-generate করে; probe 4/4; editor restart বাকি |
 | License | Local Freedom, Non-Commercial (`LICENSE`) |
@@ -179,8 +179,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  d6bcf02f74d50ac1dd1c54edd8690b4513d497d93c641d96d3c82f2f360fb9a0  ║
-║  files 71 · bytes 719941 · base 88f8252 · dirty                          ║
+║  root  86f7e2f50817a18f8dedc8bc2dfffc797ddecbb723b84b10ce76b5f76b32b5e9  ║
+║  files 73 · bytes 739248 · base 680a624 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -188,7 +188,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-29T22:13:18.198Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-29T22:58:09.122Z
 
 </div>
 <!-- INTEGRITY:END -->

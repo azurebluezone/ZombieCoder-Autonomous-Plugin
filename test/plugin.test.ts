@@ -373,21 +373,45 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
     /observable outcome/,
     "a test status is not an expected outcome",
   );
+  await assert.rejects(
+    () =>
+      goalTool.execute({
+        action: "open",
+        goal: "checkout",
+        input: "src/real-input.txt",
+        expected: "not-json",
+        check: "node check-order.mjs",
+        pass: "json",
+        match: "json",
+      }),
+    /valid JSON/,
+    "match=json must reject an invalid expectation at open",
+  );
+
+  // The contract's check is a real command; close runs it. The agent's own
+  // observed/exitCode is a claim and must never decide PASS.
+  fs.writeFileSync(
+    path.join(root, "check-order.mjs"),
+    'console.log(JSON.stringify({ id: 7, total: 42 }));\n',
+  );
+
   const opened = (await goalTool.execute(
     {
       action: "open",
       goal: "checkout returns an order id",
-      input: "src/real-input.txt",
-      expected: "POST /checkout returns 201 with an order id",
-      check: "npm test",
-      pass: "201 + order id in the body",
+      input: "check-order.mjs",
+      expected: '{"id":7,"total":42}',
+      check: "node check-order.mjs",
+      pass: "exit 0 and the exact JSON body",
+      match: "json",
     },
     { sessionID: "ses_goal" },
   )).output;
   assert.equal(opened.status, "open");
   assert.equal(opened.uiShown, true, "the preview must be pushed to the session UI");
   assert.match(opened.preview, /তুমি চাইছ/);
-  assert.match(opened.preview, /POST \/checkout returns 201/);
+  assert.match(opened.preview, /\{"id":7,"total":42\}/);
+  assert.match(opened.preview, /মিলানোর নিয়ম: json/);
   assert.doesNotMatch(opened.preview, /বাজেট|budget/i, "no time/budget line in the preview");
   const previewCard = fake.synthetics.find(
     (entry) => entry.description === "goal contract preview",
@@ -398,22 +422,75 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(previewCard.text, /"হ্যাঁ"/, "no confirmation word is requested");
   const syllabusAfterOpen = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
   assert.match(syllabusAfterOpen, new RegExp(`Goal Contract ${opened.id}`));
-  assert.match(syllabusAfterOpen, /expected: POST \/checkout returns 201/);
+  assert.match(syllabusAfterOpen, /expected: \{"id":7,"total":42\}/);
+  assert.match(syllabusAfterOpen, /- match: json/);
 
-  const closed = (await goalTool.execute({
+  // A lying claim (observed 500, exitCode 1) is recorded but ignored.
+  const closed = (await goalTool.execute(
+    {
+      action: "close",
+      id: opened.id,
+      observed: "HTTP 500 it broke",
+      exitCode: 1,
+    },
+    { sessionID: "ses_goal" },
+  )).output;
+  assert.equal(closed.status, "PASS", "the real check output wins over the agent claim");
+  assert.equal(closed.exitCode, 0);
+  assert.match(closed.observed, /"id":7/);
+  assert.equal(closed.uiShown, true, "the result must be pushed to the session UI");
+  const resultCard = fake.synthetics.find(
+    (entry) => entry.description === "goal contract result",
+  );
+  assert.ok(resultCard, "goal_contract close must show a synthetic result card");
+  assert.match(resultCard.text, /PASS/);
+  const syllabusAfterClose = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
+  assert.match(syllabusAfterClose, /claimExitCode: 1/);
+  assert.match(syllabusAfterClose, /- exitCode: 0/);
+
+  // The real output must match the recorded expectation, not the agent's word.
+  const mismatch = (await goalTool.execute(
+    {
+      action: "open",
+      goal: "checkout returns order 999",
+      input: "check-order.mjs",
+      expected: '{"id":999,"total":0}',
+      check: "node check-order.mjs",
+      pass: "order 999",
+      match: "json",
+    },
+    { sessionID: "ses_goal" },
+  )).output;
+  const mismatchClose = (await goalTool.execute({
     action: "close",
-    id: opened.id,
-    observed: "HTTP 201 {\"orderId\":7}",
+    id: mismatch.id,
+    observed: '{"id":999,"total":0}',
     exitCode: 0,
   })).output;
-  assert.equal(closed.status, "PASS");
-  const failedClose = (await goalTool.execute({
+  assert.equal(mismatchClose.status, "FAIL");
+  assert.match(mismatchClose.reason, /does not match/);
+
+  // A failing command stays FAIL regardless of the agent's exitCode claim.
+  const failing = (await goalTool.execute(
+    {
+      action: "open",
+      goal: "failing check",
+      input: "check-order.mjs",
+      expected: "anything",
+      check: 'node -e "process.exit(3)"',
+      pass: "must not pass",
+    },
+    { sessionID: "ses_goal" },
+  )).output;
+  const failingClose = (await goalTool.execute({
     action: "close",
-    id: opened.id,
-    observed: "HTTP 500",
-    exitCode: 1,
+    id: failing.id,
+    observed: "all good",
+    exitCode: 0,
   })).output;
-  assert.equal(failedClose.status, "FAIL");
+  assert.equal(failingClose.status, "FAIL");
+  assert.match(failingClose.reason, /exited with 3/);
+
   await assert.rejects(
     () => goalTool.execute({ action: "close", id: "gc-never", observed: "x", exitCode: 0 }),
     /never opened/,
@@ -678,6 +755,23 @@ test("context hook archives overflow without waiting for session.idle", async ()
   assert.match(injected, /Pack \d+B/);
   assert.match(injected, /Decision rule:/);
   assert.match(injected, /Start every response with "ভাইয়া"/);
+
+  // Builtin OpenCode agents (explore/general/build/plan) have no roster entry.
+  // They must still receive the ZombieCoder identity, not a generic prompt.
+  const builtinEvent = {
+    agent: "explore",
+    sessionID: "ses_builtin",
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    messages: [message(0)],
+    system: [] as Array<{ type: string; text: string }>,
+  };
+  await hook(builtinEvent);
+  const builtinText = builtinEvent.system.map((part) => part.text).join("\n");
+  assert.match(builtinText, /ZombieCoder identity \(builtin runner: explore\)/);
+  assert.match(builtinText, /ZombieCoder Shared Rules/);
+  assert.match(builtinText, /Execution Doctrine/);
+  assert.match(builtinText, /Start every response with "ভাইয়া"/);
+  assert.doesNotMatch(builtinText, /unknown agent/);
 
   const { readArchive, readIndex } = await import("../src/zombie/memory.ts");
   const archivedTexts = () =>

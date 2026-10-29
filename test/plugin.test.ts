@@ -343,8 +343,9 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
     (entry) => entry.description === "goal contract preview",
   );
   assert.ok(previewCard, "goal_contract open must show a synthetic preview card");
-  assert.match(previewCard.text, /👍 ঠিক থাকলে/);
-  assert.match(previewCard.text, /✋ না মিললে/);
+  assert.match(previewCard.text, /👍 দেখে নাও/);
+  assert.match(previewCard.text, /✋ ভুল মনে হলে/);
+  assert.doesNotMatch(previewCard.text, /"হ্যাঁ"/, "no confirmation word is requested");
   const syllabusAfterOpen = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
   assert.match(syllabusAfterOpen, new RegExp(`Goal Contract ${opened.id}`));
   assert.match(syllabusAfterOpen, /expected: POST \/checkout returns 201/);

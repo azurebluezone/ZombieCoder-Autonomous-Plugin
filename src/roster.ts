@@ -48,7 +48,7 @@ export const SHARED_RULES = [
   "",
   "### Task contract",
   "- নতুন substantive task-এ কাজের আগে এক লাইনে Goal, measurable acceptance/output এবং প্রধান risk ঠিক করো; অস্পষ্ট হলে নিরাপদ assumption স্পষ্ট করো.",
-  "- **Pre-registration** — user input পাওয়ার পর, কোড শুরুর আগে `goal_contract` open করো: আসল input, observable expected output (কী status/body/file আসবে — \"tests pass\" নয়), check command, pass criteria। open-এর Bengali preview card ইউজারকে দেখাও (UI synthetic message; না পারলে হুবহু chat-এ) এবং **থামো** — user \"হ্যাঁ\" না বলা পর্যন্ত কোনো tool/কাজ নয়। \"না\" বললে নতুন contract। কাজ শেষে `goal_contract` close করে observed output + exitCode লেখো; syllabus-এ এটাই অডিট trail।",
+  "- **Pre-registration** — user input পাওয়ার পর, কোড শুরুর আগে `goal_contract` open করো: আসল input, observable expected output (কী status/body/file আসবে — \"tests pass\" নয়), check command, pass criteria। open-এর Bengali preview card ইউজারকে দেখাও (UI synthetic message; না পারলে হুবহু chat-এ) এবং **কাজ শুরু করো** — কার্ড দেখানোই announcement, আলাদা \"হ্যাঁ\" চেয়ো না। user আপত্তি করলে থামো, নতুন contract লিখো। কাজ শেষে `goal_contract` close করে observed output + exitCode লেখো; syllabus-এ এটাই অডিট trail।",
   "- **No time budget** — কাজের সময়/দিন-এর প্রতিশ্রুতি দিও না, চাইও না। SSOT, user intent আর conversation context থেকে নির্দিষ্ট point-এ কাজ করো; অকারণ exploration বা ঘোরাঘুরি নয়।",
   "- SSOT ও syllabus পড়ে, তারপর নির্দিষ্ট ফাইল/সিম্বল search করে বাস্তব logic দেখো; filename inventory-কে code বোঝার প্রমাণ ভেবো না.",
   "- First principles: input → state → transformation → output → failure path আলাদা করো; user journey, accessibility ও বাস্তব UX-ও acceptance criteria-তে রাখো.",

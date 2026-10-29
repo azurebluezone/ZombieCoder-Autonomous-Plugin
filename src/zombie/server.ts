@@ -326,7 +326,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "goal_contract",
       description:
-        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code. open needs the real user input, an observable expected output (not 'tests pass'), the check command and pass criteria; it also shows a Bengali preview card in the session UI and returns it as `preview` — the agent must stop there until the user confirms. No time budget is asked or promised. close records the observed output and exit code; PASS only when exitCode is 0 and observed is non-empty. This fixes the expected result before the work, so a mock cannot be tuned to it afterwards.",
+        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code. open needs the real user input, an observable expected output (not 'tests pass'), the check command and pass criteria; it also shows a Bengali preview card in the session UI and returns it as `preview`. The card is the pre-work announcement: the agent starts the work right away and stops only if the user objects — no extra confirmation word. No time budget is asked or promised. close records the observed output and exit code; PASS only when exitCode is 0 and observed is non-empty. This fixes the expected result before the work, so a mock cannot be tuned to it afterwards.",
       input: {
         type: "object" as const,
         properties: {
@@ -394,8 +394,8 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             `আমি তোমাকে দেব: ${expected}`,
             `যাচাই: \`${check}\` → ${pass}`,
             "",
-            '👍 ঠিক থাকলে "হ্যাঁ" লেখো — তখনই কাজ শুরু করব।',
-            '✋ না মিললে "না" লেখো; আমি কিছু বদলাবো না, আগে নতুন করে লিখব।',
+            "👍 দেখে নাও — আপত্তি না থাকলে কাজ শুরু করছি।",
+            "✋ ভুল মনে হলে থামাও; নতুন করে লিখব, কিছু বদলাবে না।",
           ].join("\n");
           let uiShown = false;
           const sessionID = String(context?.sessionID ?? "").trim();

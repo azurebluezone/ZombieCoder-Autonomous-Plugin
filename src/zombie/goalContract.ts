@@ -91,6 +91,54 @@ export function parseContract(syllabus: string, id: string): GoalContractFields 
   };
 }
 
+export type OpenContract = {
+  /** Contract id returned by open. */
+  id: string;
+  /** What the user asked for, as recorded at open. */
+  goal: string;
+  /** Session that opened it (older contracts have no session line). */
+  session: string;
+};
+
+/**
+ * Contracts opened in a session whose result block is still missing. The
+ * syllabus is the ledger: open appends a block, close appends `<id> — result`.
+ * Anything else (a chat claim, an agent's memory) is not evidence.
+ */
+export function openContracts(syllabus: string, sessionID?: string): OpenContract[] {
+  const wanted = String(sessionID ?? "").trim();
+  const text = String(syllabus ?? "");
+  const blocks: Array<{ id: string; result: boolean; fields: Record<string, string> }> = [];
+  let current: (typeof blocks)[number] | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    const heading = /^### Goal Contract (gc-[A-Za-z0-9]+)( — result)?[ \t]*$/.exec(line);
+    if (heading) {
+      if (current) blocks.push(current);
+      current = { id: heading[1], result: Boolean(heading[2]), fields: {} };
+      continue;
+    }
+    if (/^#{1,3} /.test(line)) {
+      if (current) blocks.push(current);
+      current = null;
+      continue;
+    }
+    if (!current) continue;
+    const field = /^- ([a-z]+): (.*)$/.exec(line);
+    if (field) current.fields[field[1]] = field[2].replace(/^`+|`+$/g, "").trim();
+  }
+  if (current) blocks.push(current);
+  const closed = new Set(blocks.filter((block) => block.result).map((block) => block.id));
+  return blocks
+    .filter((block) => !block.result && !closed.has(block.id))
+    .filter((block) => block.fields.status === "open")
+    .filter((block) => !wanted || block.fields.session === wanted)
+    .map((block) => ({
+      id: block.id,
+      goal: block.fields.goal ?? "",
+      session: block.fields.session ?? "",
+    }));
+}
+
 /** First JSON object/array in the text, balanced and string-aware. */
 export function extractJson(text: string): string | null {
   const value = String(text ?? "");

@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-10-29T23:19:02.282Z",
+  "generated_at": "2026-10-30T00:46:03.677Z",
   "scope": [
     "src",
     "bin",
@@ -10,11 +10,11 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "9e0d1d60d152f8869bd9655b834d8e1a19a7326947234bc2d29bd0ad11c4574b",
+  "root_sha256": "1428389eebaba44c0cd343ae0bbfe5217def1254e73fb10b9636969b5f076419",
   "file_count": 74,
-  "total_bytes": 745461,
+  "total_bytes": 755255,
   "git": {
-    "commit": "01411ec",
+    "commit": "5297658",
     "branch": "main",
     "dirty": true
   },
@@ -156,8 +156,8 @@
     },
     {
       "path": "src/plugin.ts",
-      "bytes": 68246,
-      "sha256": "12fc7c72992e694523143e83e2118abca6f9c9ecb98c19f85e6bb05787ed3629"
+      "bytes": 70792,
+      "sha256": "cf201600c0a3beafad214ae977149d4bd70f0d32696304f9aa665d069ecc2a4d"
     },
     {
       "path": "src/roster.ts",
@@ -176,8 +176,8 @@
     },
     {
       "path": "src/zombie/context.ts",
-      "bytes": 12607,
-      "sha256": "ca87b85edaf449a67df3f16b93b56173e7150b9e47a9dddac9f714f6ccd7d255"
+      "bytes": 14621,
+      "sha256": "694eb9ee85480f6eb71bda68a2d4ad7a0094df60d19158c63e9efa3e3107a5dd"
     },
     {
       "path": "src/zombie/defaults.ts",
@@ -191,8 +191,8 @@
     },
     {
       "path": "src/zombie/goalContract.ts",
-      "bytes": 6906,
-      "sha256": "7bd4dcf29d3eefd4440c7524154ba495e0210c4b505432e28a3301cc8d31bde0"
+      "bytes": 8750,
+      "sha256": "372926ca33af52b2e678626b8183b310103c2fe50cf2fd58f107a0f55663d104"
     },
     {
       "path": "src/zombie/io.ts",
@@ -256,8 +256,8 @@
     },
     {
       "path": "src/zombie/server.ts",
-      "bytes": 41338,
-      "sha256": "c788b74b5eca3553bf3dabceed49c649999b8773d1ec8ef9d2c8386750c034f5"
+      "bytes": 41401,
+      "sha256": "16de3dd1e04fcd951e1c5233e86840e88c74502304a5296064c05a5926bb7221"
     },
     {
       "path": "src/zombie/skillCatalog.ts",
@@ -291,8 +291,8 @@
     },
     {
       "path": "test/context.test.ts",
-      "bytes": 28755,
-      "sha256": "0947fbbf73f9e4e9ba4aaf6ae22ef0eb5c2caf581116e8eeb8633271128ef27a"
+      "bytes": 30441,
+      "sha256": "6b93ddb4534444c009390cf069734c30d19263f667e413e9ce7c71467fbb4883"
     },
     {
       "path": "test/focus.test.ts",
@@ -366,8 +366,8 @@
     },
     {
       "path": "test/plugin.test.ts",
-      "bytes": 54275,
-      "sha256": "b9839d89c8f1216ef1bedcbbe269bee68a7218c9eec1b63419fd1b08547f0081"
+      "bytes": 55916,
+      "sha256": "9911e979f32554ca3b286eba1d9f92b98caa27030619a927510467d50c4291c3"
     },
     {
       "path": "test/repo.test.ts",

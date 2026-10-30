@@ -668,6 +668,56 @@ test("three consecutive tool errors hand the session to the next roster agent on
   await cleanup();
 });
 
+test("a write without an open goal contract shows one warning card and audits it", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const after = fake.toolHooks["execute.after"];
+  assert.equal(typeof after, "function", "tool hook was not registered");
+
+  await after({
+    status: "completed",
+    sessionID: "ses_nocontract",
+    agent: "manu",
+    tool: "edit",
+    id: "call-1",
+  });
+  const warnings = fake.synthetics.filter((entry) => entry.description === "goal contract missing");
+  assert.equal(warnings.length, 1, "a write before the contract must produce one visible card");
+  assert.match(warnings[0].text, /goal contract ছাড়া কাজ শুরু হয়েছে/);
+  assert.match(warnings[0].text, /goal_contract open/);
+  const audit = fs.readFileSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl"), "utf8");
+  assert.match(audit, /"kind":"goal\.missing"/);
+  assert.match(audit, /"tool":"edit"/);
+
+  await after({
+    status: "completed",
+    sessionID: "ses_nocontract",
+    agent: "manu",
+    tool: "write",
+    id: "call-2",
+  });
+  assert.equal(
+    fake.synthetics.filter((entry) => entry.description === "goal contract missing").length,
+    1,
+    "the warning is once per session, not per write",
+  );
+
+  await after({
+    status: "completed",
+    sessionID: "ses_readonly",
+    agent: "manu",
+    tool: "read",
+    id: "call-3",
+  });
+  assert.equal(
+    fake.synthetics.filter((entry) => entry.description === "goal contract missing").length,
+    1,
+    "a read-only tool must not warn",
+  );
+  await cleanup();
+});
+
 test("session.idle archives the complete OpenCode session context", async () => {
   const root = tempProject();
   assert.equal(fs.existsSync(path.join(root, ".zombiecoder")), false);

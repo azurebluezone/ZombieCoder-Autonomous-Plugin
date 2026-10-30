@@ -13,6 +13,7 @@ import { readIndex, type MemoryMessage } from "./memory.ts";
 import { readSyllabus } from "./syllabus.ts";
 import { memoryIndexFile, ssotFile, syllabusFile } from "./paths.ts";
 import { FOCUS_LIMITS, listProjectFiles, resolveFocus, type FocusPlan } from "./focus.ts";
+import { openContracts } from "./goalContract.ts";
 
 export const CONTEXT_LIMITS = {
   // Only the slices an agent needs for the current task. The full SSOT and
@@ -87,6 +88,8 @@ export type ContextPack = {
   syllabusExcerptBytes: number;
   /** Target files resolved from the user's message, when one was available. */
   focus: FocusPlan | null;
+  /** Goal contracts opened in this session whose result is not recorded yet. */
+  openContractIDs: string[];
   memory: MemoryStatus;
   owners: ContextOwners;
 };
@@ -195,10 +198,24 @@ function ssotExcerpt(text: string, agentID: string): string {
 }
 
 function syllabusExcerpt(text: string): string {
-  // Lessons are the only syllabus content that changes per turn. Scope and the
-  // agent list are already in the system prompt, so do not pay for them twice.
-  const lessons = section(text, "## 5. Lessons", CONTEXT_LIMITS.syllabus);
-  return clip(lessons, CONTEXT_LIMITS.syllabus, "tail");
+  // Lessons are the only syllabus content that changes per turn. The seed puts
+  // its placeholder and signature above the first lesson, so slicing the raw
+  // section used to send "_Nothing recorded yet_" to the model even when the
+  // file had 12 lessons. Split on lesson headings instead and keep the newest.
+  const at = text.indexOf("## 5. Lessons");
+  if (at < 0) return "No lessons yet; read the full syllabus with read_syllabus before work.";
+  const body = text.slice(at).replace(/^## 5\. Lessons[^\n]*\n/, "");
+  const lessons = body
+    .split(/^### /m)
+    .slice(1)
+    .map((entry) => entry.trimEnd())
+    .filter((entry) => entry.length > 0 && !/^Goal Contract /i.test(entry));
+  if (lessons.length === 0) {
+    return "No lessons yet; read the full syllabus with read_syllabus before work.";
+  }
+  const newest = lessons[lessons.length - 1].trim();
+  const header = `Newest of ${lessons.length} lessons (newest last). Full history: read_syllabus.`;
+  return clip(`${header}\n### ${newest}`, CONTEXT_LIMITS.syllabus);
 }
 
 function memorySummary(recent: MemoryMessage[]): string {
@@ -229,6 +246,7 @@ export function buildContextPack(
   agentID: string,
   recent: MemoryMessage[] = [],
   userMessage = "",
+  sessionID = "",
 ): ContextPack {
   const ssotPath = ssotFile(projectRoot);
   const syllabusPath = syllabusFile(projectRoot);
@@ -254,6 +272,22 @@ export function buildContextPack(
     : `Missing: ${syllabusPath}. Run the plugin setup before making claims.`;
   const ssotExcerptBytes = ssot.exists ? Buffer.byteLength(ssotBody, "utf8") : 0;
   const syllabusExcerptBytes = syllabus.exists ? Buffer.byteLength(syllabusBody, "utf8") : 0;
+
+  // The gate is derived from the syllabus ledger, not from the model's memory.
+  // An open contract without a result block means work was pre-registered; no
+  // open contract means the agent is about to start unregistered.
+  const openContractsForSession = openContracts(syllabusText ?? "", sessionID);
+  const gate = openContractsForSession.length
+    ? [
+        `- open: ${openContractsForSession
+          .map((contract) => `${contract.id} — ${contract.goal || "(no goal recorded)"}`)
+          .join("; ")}`,
+        "- close it with the recorded check before claiming success; without that result the claim is UNVERIFIED.",
+      ]
+    : [
+        "- none for this session.",
+        "- Before the first write/edit/shell that changes the project, call `goal_contract` open: real input, observable expected output, check command, pass criteria.",
+      ];
 
   // Focus: turn the user's sentence into the smallest truthful file set. This is
   // what stops the "plan first, scan everything" loop the audit found.
@@ -285,6 +319,9 @@ export function buildContextPack(
       : "### Syllabus (missing)",
     syllabusBody,
     "",
+    "### Pre-work gate — goal contract",
+    ...gate,
+    "",
     ...(focusBody ? [`### Focus files — from the user's message (${Buffer.byteLength(focusBody, "utf8")}B)`, focusBody, ""] : []),
     `### Session memory (${memory.recent} recent, ${memory.archives} archives) — owner: ${CONTEXT_OWNERS.memory.agent}`,
     memorySummary(recent),
@@ -301,10 +338,9 @@ export function buildContextPack(
     syllabus.exists ? "OK" : "MISSING"
   } (${CONTEXT_OWNERS.syllabus.agent}) | Memory ${memory.recent} recent / ${memory.archives} archives (${
     CONTEXT_OWNERS.memory.agent
-  }) | Focus ${focusPlan ? `${focusPlan.primary.length}+${focusPlan.related.length} files` : "off"} | Pack ${Buffer.byteLength(
-    text,
-    "utf8",
-  )}B`;
+  }) | Focus ${focusPlan ? `${focusPlan.primary.length}+${focusPlan.related.length} files` : "off"} | Contract ${
+    openContractsForSession.length ? openContractsForSession[0].id : "none"
+  } | Pack ${Buffer.byteLength(text, "utf8")}B`;
   return {
     text,
     bytes: Buffer.byteLength(text, "utf8"),
@@ -315,6 +351,7 @@ export function buildContextPack(
     ssotExcerptBytes,
     syllabusExcerptBytes,
     focus: focusPlan,
+    openContractIDs: openContractsForSession.map((contract) => contract.id),
     memory,
     owners: CONTEXT_OWNERS,
   };

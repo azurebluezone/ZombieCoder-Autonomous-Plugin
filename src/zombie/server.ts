@@ -400,8 +400,10 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const expectedError = validateExpected(expected, mode);
           if (expectedError) throw new Error(expectedError);
           const id = `gc-${Date.now().toString(36)}`;
+          const sessionID = String(context?.sessionID ?? "").trim();
           const summary = [
             `- status: open`,
+            ...(sessionID ? [`- session: ${sessionID}`] : []),
             `- goal: ${goal}`,
             `- input: ${realInput}`,
             `- expected: ${expected}`,
@@ -426,7 +428,6 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             "✋ ভুল মনে হলে থামাও; নতুন করে লিখব, কিছু বদলাবে না।",
           ].join("\n");
           let uiShown = false;
-          const sessionID = String(context?.sessionID ?? "").trim();
           if (sessionID && deps.synthetic) {
             try {
               await deps.synthetic({

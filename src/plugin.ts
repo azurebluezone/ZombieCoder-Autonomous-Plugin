@@ -38,7 +38,7 @@ import {
 } from "./zombie/io.ts";
 import { scanProject } from "./zombie/scan.ts";
 import { writeSsot } from "./zombie/ssot.ts";
-import { ensureSyllabus, recordProjectFootprint } from "./zombie/syllabus.ts";
+import { ensureSyllabus, readSyllabus, recordProjectFootprint } from "./zombie/syllabus.ts";
 import {
   archiveSessionSnapshot,
   keepRecent,
@@ -70,6 +70,7 @@ import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
 import { ensureSharedSkills, DEFAULT_SKILL_REPO } from "./zombie/skillCatalog.ts";
 import { buildContextPack } from "./zombie/context.ts";
+import { openContracts } from "./zombie/goalContract.ts";
 import { applyResponseGate } from "./zombie/responseGate.ts";
 import {
   BREAKER_LIMIT,
@@ -88,6 +89,10 @@ export { DEFAULT_SSOT_REFRESH_MS }; // spec §3.3 — every 5 minutes; one defin
 // the very apply we are waiting for, so registration is reported as "pending" and
 // the report is updated when the deferred callback actually fires.
 export const TRANSFORM_APPLY_TIMEOUT_MS = 15000;
+
+// Tools that change the project. A read-only investigation may run before a
+// goal contract; a write may not.
+const MUTATING_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch"]);
 
 export type ZombieConfig = {
   customProviderUrl: string;
@@ -628,6 +633,45 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     return resolved;
   };
 
+  // A write that lands before any goal contract is a process violation, not a
+  // detail: the user was promised a pre-work card. We cannot rewind the write,
+  // so we make it visible (card + audit) exactly once per session.
+  const warnMissingGoalContract = async (input: {
+    projectRoot: string;
+    sessionID: string;
+    agentID: string;
+    tool: string;
+  }): Promise<void> => {
+    const { projectRoot, sessionID, agentID } = input;
+    if (!sessionID || sessionID === "unknown") return;
+    const tool = String(input.tool ?? "").trim().toLowerCase();
+    if (!MUTATING_TOOLS.has(tool)) return;
+    const key = `goal/warned/${sessionID}`;
+    if (await ctx.storage.get(key)) return;
+    const syllabus = readSyllabus(projectRoot) ?? "";
+    if (openContracts(syllabus, sessionID).length > 0) return;
+    await ctx.storage.set(key, { at: new Date().toISOString(), tool });
+    audit(projectRoot, agentID, { kind: "goal.missing", sessionID, tool });
+    const door = (ctx as any).session?.synthetic;
+    if (typeof door !== "function") return;
+    try {
+      await door({
+        sessionID,
+        description: "goal contract missing",
+        text: [
+          "🧭 goal contract ছাড়া কাজ শুরু হয়েছে",
+          "",
+          `টুল: \`${tool}\` — এটা চালানোর আগে \`goal_contract open\` হওয়া দরকার ছিল।`,
+          "",
+          "এখনই খুলে নাও: আসল input → চোখে দেখা expected output → check command → pass criteria।",
+          "শেষে `goal_contract close` নিজেই চেক চালিয়ে PASS/FAIL দেবে; মুখের দাবি নয়।",
+        ].join("\n"),
+      });
+    } catch {
+      /* best-effort card; the audit row above is the durable record */
+    }
+  };
+
   const report: Report = {
     plugin: PLUGIN_ID,
     version: PLUGIN_VERSION,
@@ -1087,7 +1131,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           userMessage = textOf(messages[i]);
           break;
         }
-        const pack = buildContextPack(projectRoot, agentID, recent, userMessage);
+        const pack = buildContextPack(projectRoot, agentID, recent, userMessage, sessionID);
         // One merge point for every agent. Roster agents already carry the
         // shared rules in their markdown; builtin runners (build/plan/general/
         // explore) do not, so they get the identity header + full persona here.
@@ -1522,6 +1566,17 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           status: event?.status ?? "unknown",
           consecutiveFailures: count,
         });
+
+        // The pre-work card is only honest if the agent actually opened a
+        // contract. Weak/free models ignore the prompt rule, so a write that
+        // lands without one gets a visible warning card and an audit row.
+        await warnMissingGoalContract({
+          projectRoot,
+          sessionID,
+          agentID,
+          tool: String(event?.tool ?? ""),
+        });
+
         if (!failed || count < 3 || previous?.escalated) return;
 
         const index = ROSTER.findIndex((agent) => agent.id === agentID);

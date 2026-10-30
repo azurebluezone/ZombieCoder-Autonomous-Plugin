@@ -7,21 +7,21 @@
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  9e0d1d60d152f8869bd9655b834d8e1a19a7326947234bc2d29bd0ad11c4574b  ║
-║  files 74 · bytes 745461 · base 01411ec · dirty                          ║
+║  root  1428389eebaba44c0cd343ae0bbfe5217def1254e73fb10b9636969b5f076419  ║
+║  files 74 · bytes 755255 · base 5297658 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-10-29T23:19:02.282Z` |
-| Base commit | `01411ec` |
+| Generated (UTC) | `2026-10-30T00:46:03.677Z` |
+| Base commit | `5297658` |
 | Branch | `main` |
 | Code tree | `dirty` |
 | Files | 74 |
-| Bytes | 745461 |
-| Root SHA-256 | `9e0d1d60d152f8869bd9655b834d8e1a19a7326947234bc2d29bd0ad11c4574b` |
+| Bytes | 755255 |
+| Root SHA-256 | `1428389eebaba44c0cd343ae0bbfe5217def1254e73fb10b9636969b5f076419` |
 
 ## Scope
 
@@ -72,14 +72,14 @@ npm run integrity:check
 | `src/ethics.ts` | 10670 | `db6c18984a5357106de459cd701c613c293971be372785594d57e83eeea7c921` |
 | `src/generate.ts` | 5757 | `44d222baf6975fa4c3e127f94b96fcfb069378b2a0945d16a06a7c5955d4cd97` |
 | `src/identity.ts` | 9611 | `79e7033922d8e1d31161b491a13724983c13cd073587fb854aac246f6bf237bf` |
-| `src/plugin.ts` | 68246 | `12fc7c72992e694523143e83e2118abca6f9c9ecb98c19f85e6bb05787ed3629` |
+| `src/plugin.ts` | 70792 | `cf201600c0a3beafad214ae977149d4bd70f0d32696304f9aa665d069ecc2a4d` |
 | `src/roster.ts` | 42165 | `8d95038255f39c50b0967d041d33169267f59ef6be6af60184fbb7d0454701e0` |
 | `src/runtime.ts` | 15970 | `dccfccb3906942d0bd4ac526e0958e3dd5cb6d57007cb58c47a20678ae7c7bae` |
 | `src/zombie/circuitBreaker.ts` | 7498 | `ef7bc1023a1740d7284fabe9bfa0af7b65e5539d8f76fbdf03c17a2101ce4bd1` |
-| `src/zombie/context.ts` | 12607 | `ca87b85edaf449a67df3f16b93b56173e7150b9e47a9dddac9f714f6ccd7d255` |
+| `src/zombie/context.ts` | 14621 | `694eb9ee85480f6eb71bda68a2d4ad7a0094df60d19158c63e9efa3e3107a5dd` |
 | `src/zombie/defaults.ts` | 3489 | `d9219f68b9af5c7d52bb485b892353431be32c105dc55a27a31e26e118a9ffa1` |
 | `src/zombie/focus.ts` | 13450 | `83b95b0216e699fda9047cad4ce854de8fd9c22182d174fa800f0f6ff411b14b` |
-| `src/zombie/goalContract.ts` | 6906 | `7bd4dcf29d3eefd4440c7524154ba495e0210c4b505432e28a3301cc8d31bde0` |
+| `src/zombie/goalContract.ts` | 8750 | `372926ca33af52b2e678626b8183b310103c2fe50cf2fd58f107a0f55663d104` |
 | `src/zombie/io.ts` | 5006 | `89b3f44e558f7b7d07735a9ac0a1fc3f610794c2ac10f50d3e7cd19b379d5dad` |
 | `src/zombie/lsp.ts` | 13112 | `4ad4e476d20812de3f93bb8182d535cd3e1ed2764a8e117083daa9511cb25604` |
 | `src/zombie/lspConfig.ts` | 6270 | `66d6ae3e695eca85a21563f9f42d3538005f3a753496e058ea79cd6be823e59a` |
@@ -92,14 +92,14 @@ npm run integrity:check
 | `src/zombie/responseGate.ts` | 33671 | `e279e70d3ea5b164ee1c6feee880187d6657c7904fe13c932ceb0aa71260c6a2` |
 | `src/zombie/sanitize.ts` | 2173 | `d8fe339c61516c679ed35bbfe234375f977b7aff5673e375b4862ce8a15dc7ac` |
 | `src/zombie/scan.ts` | 7562 | `9a9b657954f86a7f758a0d1fe17523a9d4c8496803c1e72017c3a7ce88116ade` |
-| `src/zombie/server.ts` | 41338 | `c788b74b5eca3553bf3dabceed49c649999b8773d1ec8ef9d2c8386750c034f5` |
+| `src/zombie/server.ts` | 41401 | `16de3dd1e04fcd951e1c5233e86840e88c74502304a5296064c05a5926bb7221` |
 | `src/zombie/skillCatalog.ts` | 18749 | `653cd28c70d3f4196859a2f340979840bcbeaabb131aa3ae45c7c8e7f7093a6c` |
 | `src/zombie/skills.ts` | 5284 | `b8bc230b09d593dd2f6775f5c81a7b292e205ac2fd1e2b7cb43b78ddbe4c81d4` |
 | `src/zombie/ssot.ts` | 6978 | `8a6086ac0c5a410895c5370485d71d799906e1c52cca6f9e46ca33865f67ea6f` |
 | `src/zombie/syllabus.ts` | 10103 | `bd48e4983d1b91ef00906a47373c1df1afc129c20c7050a30403a2d762f7e1f1` |
 | `src/zombie/transform.ts` | 3964 | `1c25f3eb1f6ecc9c8ed68b9894f2dfcffb75e233540be06b81f8bda78cc11ba2` |
 | `test/circuitBreaker.test.ts` | 3676 | `08d6ece5d464358a6fe2837bbf7b2b091770fd7c14fa0e29a9f25fe5180922fc` |
-| `test/context.test.ts` | 28755 | `0947fbbf73f9e4e9ba4aaf6ae22ef0eb5c2caf581116e8eeb8633271128ef27a` |
+| `test/context.test.ts` | 30441 | `6b93ddb4534444c009390cf069734c30d19263f667e413e9ce7c71467fbb4883` |
 | `test/focus.test.ts` | 4051 | `47d93d65959c80c0b1ebb99b7cc5445d5dfbef536c9d3bc51bc90937b0e8b3a1` |
 | `test/footprint.test.ts` | 2690 | `6c053dfca81fe65da03e216d72bea79abbd015ec73f2f714aeb1769db705b8e3` |
 | `test/goalContract.test.ts` | 2925 | `25c20c0bce6857558634f96fa8de4ad5e62ef438028c898cab9e49ecd8abc813` |
@@ -114,7 +114,7 @@ npm run integrity:check
 | `test/models.test.ts` | 13588 | `e95627522ea45b911d3d53221fe23d1cdc25fe32604b17c3a312d95d380c4510` |
 | `test/modes.test.ts` | 4666 | `35f0830f7126a91027398b1fed04b73c3a77d482bf488987f041d6837094d6c2` |
 | `test/origin.test.ts` | 4002 | `d75f26822785389c2c9a3b1213c74555ced930c374797d2e702c80fad6788b9f` |
-| `test/plugin.test.ts` | 54275 | `b9839d89c8f1216ef1bedcbbe269bee68a7218c9eec1b63419fd1b08547f0081` |
+| `test/plugin.test.ts` | 55916 | `9911e979f32554ca3b286eba1d9f92b98caa27030619a927510467d50c4291c3` |
 | `test/repo.test.ts` | 2891 | `dfe11cfde7963d84f580a12d49c6acbf81494a9087e4dbe1c04ebca4e9c0427e` |
 | `test/roster.test.ts` | 2895 | `4c2d42977c3ecf1ab57342771628e91e963449c21d95c9fbd8689be92cf022a1` |
 | `test/sanitize.test.ts` | 1479 | `3007467c56d4af5e853e60ec08cddbeaf4f7f9281822cf8f1199e1618d7ae870` |

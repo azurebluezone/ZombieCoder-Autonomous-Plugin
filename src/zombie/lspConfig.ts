@@ -40,11 +40,15 @@ export type SyncLspResult = {
   updated: boolean;
   servers: string[];
   missing: string[];
+  /** Managed entries whose configured binary disappeared and was re-resolved. */
+  refreshed?: string[];
   skipped?: string;
 };
 
-// Same four servers documented in docs/LSP.md. The pins matter: TS 7 dropped
+// Servers documented in docs/LSP.md. The pins matter: TS 7 dropped
 // lib/tsserver.js, which typescript-language-server 6.x still expects.
+// css/html/markdown come from the same vscode-langservers-extracted package,
+// so one install covers templates, styles and docs without another dependency.
 export const LSP_SERVERS: LspServerSpec[] = [
   {
     id: "typescript",
@@ -72,6 +76,27 @@ export const LSP_SERVERS: LspServerSpec[] = [
     bin: "vscode-json-language-server",
     args: ["--stdio"],
     extensions: [".json", ".jsonc"],
+    packages: ["vscode-langservers-extracted"],
+  },
+  {
+    id: "css",
+    bin: "vscode-css-language-server",
+    args: ["--stdio"],
+    extensions: [".css", ".scss", ".less"],
+    packages: ["vscode-langservers-extracted"],
+  },
+  {
+    id: "html",
+    bin: "vscode-html-language-server",
+    args: ["--stdio"],
+    extensions: [".html", ".htm"],
+    packages: ["vscode-langservers-extracted"],
+  },
+  {
+    id: "markdown",
+    bin: "vscode-markdown-language-server",
+    args: ["--stdio"],
+    extensions: [".md", ".mdx"],
     packages: ["vscode-langservers-extracted"],
   },
 ];
@@ -178,12 +203,29 @@ export function syncLspConfig(
     config.lsp && typeof config.lsp === "object" && !Array.isArray(config.lsp) ? config.lsp : {};
   const nextLsp: Record<string, any> = { ...existing };
   const added: string[] = [];
-  for (const [id, entry] of Object.entries(resolved.servers)) {
-    if (nextLsp[id]) continue;
-    nextLsp[id] = entry;
-    added.push(id);
+  const refreshed: string[] = [];
+  for (const spec of LSP_SERVERS) {
+    const entry = resolved.servers[spec.id];
+    if (!entry) continue;
+    const current = nextLsp[spec.id];
+    if (!current) {
+      nextLsp[spec.id] = entry;
+      added.push(spec.id);
+      continue;
+    }
+    const command = Array.isArray(current?.command) ? current.command : null;
+    const first = command && typeof command[0] === "string" ? command[0] : "";
+    const bin = first ? path.basename(first) : "";
+    const managed = bin === spec.bin || bin === spec.bin + ".cmd" || bin === spec.bin + ".exe";
+    if (managed && !fs.existsSync(first)) {
+      nextLsp[spec.id] = {
+        ...entry,
+        ...(Array.isArray(current?.extensions) ? { extensions: current.extensions } : {}),
+      };
+      refreshed.push(spec.id);
+    }
   }
-  if (added.length === 0) {
+  if (added.length === 0 && refreshed.length === 0) {
     return {
       file: configFile,
       updated: false,
@@ -207,5 +249,6 @@ export function syncLspConfig(
     updated: true,
     servers: Object.keys(resolved.servers),
     missing: resolved.missing,
+    ...(refreshed.length ? { refreshed } : {}),
   };
 }

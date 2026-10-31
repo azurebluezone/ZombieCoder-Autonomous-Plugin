@@ -9,16 +9,17 @@
 // append-only by construction.
 
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { auditFile, memoryDir, ssotFile, syllabusFile } from "./paths.ts";
-import { appendJsonl, readJsonl, readText, redactValue, PLUGIN_VERSION } from "./io.ts";
+import { appendJsonl, ensureDir, readJsonl, readText, redactValue, writeAtomic, PLUGIN_VERSION } from "./io.ts";
 import { readArchive, readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
 import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { scanProject } from "./scan.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
-import { buildContextPack } from "./context.ts";
+import { buildContextPack, resolveAllowedPath } from "./context.ts";
 import {
   matches,
   normalizeMatch,
@@ -60,6 +61,12 @@ export type SurfaceDeps = {
   modelPlan: () => unknown;
   /** Reload the skill registry after a project skill is added. */
   reloadSkills?: () => Promise<void>;
+  /** Reload agent markdown after a persona/config change. */
+  reloadAgents?: () => Promise<void>;
+  /** Reload the provider and model catalogs after a model/config change. */
+  reloadProviders?: () => Promise<void>;
+  /** Reload the plugin's own tool registrations after a surface change. */
+  reloadTools?: () => Promise<void>;
   /** Show a visible card in the session UI (OpenCode synthetic message). */
   synthetic?: (input: { sessionID: string; text: string; description?: string }) => Promise<unknown>;
 };
@@ -891,6 +898,256 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
               : null,
           note: "Mode is config-level. Apply the patch, then reload/restart; without reload the switch is UNVERIFIED.",
         };
+      },
+    },
+    {
+      name: "reload",
+      description:
+        "Reload one or all OpenCode doors after a persona, skill, provider or tool change: agents, skills, providers (provider + model catalogs), tools. Returns per-target ok/error; a door missing in this OpenCode version reports ok:false instead of pretending.",
+      input: {
+        type: "object" as const,
+        properties: {
+          target: { type: "string", enum: ["all", "agents", "skills", "providers", "tools"] },
+        },
+        additionalProperties: false,
+      },
+      run: async (input: any) => {
+        const requested = String(input?.target ?? "all");
+        const targets = requested === "all" ? ["agents", "skills", "providers", "tools"] : [requested];
+        const doors: Record<string, (() => Promise<void>) | undefined> = {
+          agents: deps.reloadAgents,
+          skills: deps.reloadSkills,
+          providers: deps.reloadProviders,
+          tools: deps.reloadTools,
+        };
+        const results: { target: string; ok: boolean; error?: string }[] = [];
+        for (const target of targets) {
+          const door = doors[target];
+          if (!door) {
+            results.push({ target, ok: false, error: "door not available in this OpenCode version" });
+            continue;
+          }
+          try {
+            await door();
+            results.push({ target, ok: true });
+          } catch (error) {
+            results.push({ target, ok: false, error: String(error) });
+          }
+        }
+        return { ok: results.every((entry) => entry.ok), results };
+      },
+    },
+    {
+      name: "http_probe",
+      description:
+        "Call an HTTP endpoint and return status, redacted response headers, byte count, body sha256 and a bounded body preview. Redirects are not followed, so a 3xx stays visible.",
+      input: {
+        type: "object" as const,
+        properties: {
+          url: { type: "string" },
+          method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] },
+          headers: { type: "object", additionalProperties: { type: "string" } },
+          body: { type: "string" },
+          timeout_ms: { type: "number" },
+        },
+        required: ["url"],
+        additionalProperties: false,
+      },
+      run: async (input: any) => {
+        const raw = String(input?.url ?? "").trim();
+        let url: URL;
+        try {
+          url = new URL(raw);
+        } catch {
+          throw new Error("url must be an absolute http(s) URL");
+        }
+        if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("url must be http or https");
+        const method = String(input?.method ?? "GET").toUpperCase();
+        const headers: Record<string, string> = {};
+        if (input?.headers && typeof input.headers === "object" && !Array.isArray(input.headers)) {
+          for (const [key, value] of Object.entries(input.headers)) headers[key] = String(value);
+        }
+        const timeout = Math.min(Math.max(Number(input?.timeout_ms ?? 10_000), 1_000), 30_000);
+        const started = Date.now();
+        let response: Awaited<ReturnType<typeof fetch>>;
+        try {
+          response = await fetch(url, {
+            method,
+            headers,
+            body: method === "GET" || method === "HEAD" ? undefined : input?.body,
+            redirect: "manual",
+            signal: AbortSignal.timeout(timeout),
+          });
+        } catch (error) {
+          return { url: url.toString(), method, ok: false, duration_ms: Date.now() - started, error: String(error) };
+        }
+        const body = Buffer.from(await response.arrayBuffer());
+        const secretHeader = /^(authorization|cookie|set-cookie|x-api-key|proxy-authorization)$/i;
+        const responseHeaders: Record<string, string> = {};
+        response.headers.forEach((value, key) => {
+          responseHeaders[key] = secretHeader.test(key) ? "<redacted>" : value;
+        });
+        const text = body.toString("utf8");
+        return {
+          url: url.toString(),
+          method,
+          status: response.status,
+          ok: response.ok,
+          duration_ms: Date.now() - started,
+          bytes: body.length,
+          sha256: createHash("sha256").update(body).digest("hex"),
+          headers: responseHeaders,
+          body_preview: text.slice(0, 2000),
+          body_truncated: text.length > 2000,
+        };
+      },
+    },
+    {
+      name: "patch_preview",
+      description:
+        "Dry-run one exact-string replacement: counts matches and shows the changed lines. It writes only when apply=true, and copies the original into .zombiecoder/.state/backups first.",
+      input: {
+        type: "object" as const,
+        properties: {
+          file: { type: "string" },
+          old_string: { type: "string" },
+          new_string: { type: "string" },
+          apply: { type: "boolean" },
+        },
+        required: ["file", "old_string", "new_string"],
+        additionalProperties: false,
+      },
+      run: (input: any, context?: ToolContextLike) => {
+        const projectRoot = rootFor(context);
+        const target = resolveAllowedPath(projectRoot, String(input?.file ?? ""));
+        if (!target) {
+          return { file: String(input?.file ?? ""), matches: 0, applied: false, error: "path outside the allowed root" };
+        }
+        const oldString = String(input?.old_string ?? "");
+        const newString = String(input?.new_string ?? "");
+        if (!oldString) return { file: target, matches: 0, applied: false, error: "old_string is required" };
+        const before = readText(target);
+        if (before === undefined) return { file: target, matches: 0, applied: false, error: "file not readable" };
+        const first = before.indexOf(oldString);
+        const second = first < 0 ? -1 : before.indexOf(oldString, first + oldString.length);
+        if (first < 0 || second >= 0) {
+          return {
+            file: target,
+            matches: first < 0 ? 0 : 2,
+            applied: false,
+            error: first < 0 ? "old_string not found" : "old_string matches more than once",
+          };
+        }
+        const oldLines = oldString.split("\n");
+        const newLines = newString.split("\n");
+        const diff = [...oldLines.map((line) => "- " + line), ...newLines.map((line) => "+ " + line)];
+        let backup: string | undefined;
+        if (input?.apply === true) {
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          backup = path.join(projectRoot, ".zombiecoder", ".state", "backups", `${stamp}-${path.basename(target)}`);
+          ensureDir(path.dirname(backup));
+          fs.copyFileSync(target, backup);
+          writeAtomic(target, before.slice(0, first) + newString + before.slice(first + oldString.length));
+        }
+        return {
+          file: target,
+          matches: 1,
+          applied: input?.apply === true,
+          backup,
+          additions: newLines.length,
+          deletions: oldLines.length,
+          diff: diff.slice(0, 80),
+          diff_truncated: diff.length > 80,
+        };
+      },
+    },
+    {
+      name: "env_get",
+      description:
+        "Check whether an environment variable exists without revealing it: presence, length, a short sha256 fingerprint and a placeholder hint. The value is never returned.",
+      input: {
+        type: "object" as const,
+        properties: { name: { type: "string" } },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      run: (input: any) => {
+        const name = String(input?.name ?? "").trim();
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error("name must be a valid environment variable name");
+        const value = process.env[name];
+        if (value === undefined) return { name, present: false };
+        return {
+          name,
+          present: true,
+          length: value.length,
+          sha256_12: createHash("sha256").update(value).digest("hex").slice(0, 12),
+          placeholder: /^(changeme|change-me|todo|example|xxx+|your[-_].*)$/i.test(value.trim()),
+        };
+      },
+    },
+    {
+      name: "service_probe",
+      description:
+        "Probe a service: TCP connect by default, or an HTTP GET when path is given. Returns reachability, duration and, for HTTP, status, byte count and body sha256.",
+      input: {
+        type: "object" as const,
+        properties: {
+          host: { type: "string" },
+          port: { type: "number" },
+          path: { type: "string" },
+          timeout_ms: { type: "number" },
+        },
+        required: ["port"],
+        additionalProperties: false,
+      },
+      run: async (input: any) => {
+        const host = String(input?.host ?? "127.0.0.1").trim();
+        const port = Number(input?.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("port must be an integer 1-65535");
+        const timeout = Math.min(Math.max(Number(input?.timeout_ms ?? 3_000), 500), 15_000);
+        if (input?.path !== undefined) {
+          const rawPath = String(input.path);
+          const suffix = rawPath.startsWith("/") ? rawPath : "/" + rawPath;
+          const hostPart = host.includes(":") ? `[${host}]` : host;
+          const started = Date.now();
+          try {
+            const response = await fetch(`http://${hostPart}:${port}${suffix}`, {
+              redirect: "manual",
+              signal: AbortSignal.timeout(timeout),
+            });
+            const body = Buffer.from(await response.arrayBuffer());
+            return {
+              host,
+              port,
+              path: suffix,
+              reachable: true,
+              duration_ms: Date.now() - started,
+              http: {
+                status: response.status,
+                ok: response.ok,
+                bytes: body.length,
+                sha256: createHash("sha256").update(body).digest("hex"),
+              },
+            };
+          } catch (error) {
+            return { host, port, path: suffix, reachable: false, duration_ms: Date.now() - started, error: String(error) };
+          }
+        }
+        const started = Date.now();
+        return await new Promise<Record<string, unknown>>((resolve) => {
+          const socket = net.createConnection({ host, port });
+          let settled = false;
+          const finish = (result: Record<string, unknown>) => {
+            if (settled) return;
+            settled = true;
+            socket.destroy();
+            resolve({ host, port, duration_ms: Date.now() - started, ...result });
+          };
+          socket.setTimeout(timeout);
+          socket.once("connect", () => finish({ reachable: true }));
+          socket.once("timeout", () => finish({ reachable: false, error: "timeout" }));
+          socket.once("error", (error) => finish({ reachable: false, error: String(error) }));
+        });
       },
     },
   ];

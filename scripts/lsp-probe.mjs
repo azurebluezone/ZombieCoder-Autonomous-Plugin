@@ -18,6 +18,7 @@ Options:
                     ~/.config/opencode, ~/.opencode)
   --root <path>     Workspace root URI (default: current directory)
   --timeout <ms>    Per-server initialize timeout (default: 15000)
+  --compact         One line per server (no capability list)
   -h, --help        Show this help
 `;
 
@@ -49,6 +50,7 @@ function defaultConfig() {
 const configPath = resolve(option("--config", defaultConfig()));
 const root = resolve(option("--root", process.cwd()));
 const timeoutMs = Number(option("--timeout", "15000"));
+const compact = argv.includes("--compact");
 
 if (!Number.isFinite(timeoutMs) || timeoutMs < 1000) {
   process.stderr.write("lsp-probe: --timeout must be a number >= 1000\n");
@@ -209,5 +211,20 @@ for (const [name, entry] of active) {
 }
 
 const ok = servers.every((server) => server.ok);
-process.stdout.write(JSON.stringify({ ok, config: configPath, root, servers }, null, 2) + "\n");
+const payload = compact
+  ? {
+      ok,
+      config: configPath,
+      root,
+      failed: servers.filter((server) => !server.ok).length,
+      servers: servers.map(({ server, ok: ready, duration_ms, serverInfo, error }) => ({
+        server,
+        ok: ready,
+        duration_ms,
+        serverInfo,
+        ...(error ? { error } : {}),
+      })),
+    }
+  : { ok, config: configPath, root, servers };
+process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
 process.exit(ok ? 0 : 1);

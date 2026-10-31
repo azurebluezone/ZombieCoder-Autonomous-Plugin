@@ -890,13 +890,14 @@ if (DO_INSTALL) {
 
 // ---- 4b. LSP toolchain -------------------------------------------------------
 // The config is generated below, but a config with no binary is a dead end.
-// Install the four language servers into <install>/lsp once, then let
+// Install the language servers into <install>/lsp once, then let
 // syncLspConfig() point opencode.json at the resolved absolute paths.
 if (DO_LSP) {
   await step("install LSP servers", () => {
     const before = resolveLspServers(CONFIG_DIR);
     if (before.missing.length === 0) {
-      return `4/4 already resolvable (${Object.keys(before.servers).join(", ")})`;
+      const total = Object.keys(before.servers).length;
+      return `${total}/${total} already resolvable (${Object.keys(before.servers).join(", ")})`;
     }
     if (!DO_INSTALL) {
       return `skipped npm (--no-install); missing ${before.missing.join(", ")}`;
@@ -1304,9 +1305,9 @@ if (DO_LSP) {
     if (configured === 0) {
       return `0 configured; missing ${sync.missing.join(", ")} (run without --no-lsp)`;
     }
-    return `${configured}/4 configured${sync.updated ? " (written)" : " (unchanged)"}${
-      sync.missing.length ? `; missing ${sync.missing.join(", ")}` : ""
-    }`;
+    return `${configured}/${configured + sync.missing.length} configured${
+      sync.updated ? " (written)" : " (unchanged)"
+    }${sync.missing.length ? `; missing ${sync.missing.join(", ")}` : ""}`;
   });
 } else {
   report.steps.push({ step: "sync LSP config", ok: true, detail: "skipped (--no-lsp)" });

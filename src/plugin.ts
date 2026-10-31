@@ -987,6 +987,16 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     reloadSkills: async () => {
       await ctx.skill?.reload?.();
     },
+    reloadAgents: async () => {
+      await ctx.agent?.reload?.();
+    },
+    reloadProviders: async () => {
+      await ctx.provider?.reload?.();
+      await ctx.model?.reload?.();
+    },
+    reloadTools: async () => {
+      await ctx.tool?.reload?.();
+    },
     synthetic: async (input: { sessionID: string; text: string; description?: string }) => {
       const door = (ctx as any).session?.synthetic;
       if (typeof door !== "function") throw new Error("session.synthetic unavailable");

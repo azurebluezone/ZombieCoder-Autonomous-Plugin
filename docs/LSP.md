@@ -5,8 +5,9 @@
 > binary নেই। এখন **installer নিজেই** `<install>/lsp`-এ server toolchain নামায়
 > এবং resolve হওয়া absolute path দিয়ে `opencode.json`-এর `lsp` block লেখে
 > (`src/zombie/lspConfig.ts` → `syncLspConfig`); `--no-lsp` দিলে দুটোই skip হয়।
-> এই setup-এ `typescript`, `python`, `bash`, `json` — ৪টি server configured,
-> আর direct `initialize` probe **4/4 pass** (`npm run lsp:probe`, exit `0`)।
+> এই setup-এ `typescript`, `python`, `bash`, `json`, `css`, `html`, `markdown` — ৭টি
+> server configured, আর direct `initialize` probe **7/7 pass**
+> (`npm run lsp:probe -- --compact`, exit `0`)।
 > Editor UI-তে diagnostics এখনো `NOT_TESTED`; desktop app restart করে একটা
 > source file খুললে সেটা যাচাই করতে হবে।
 
@@ -19,10 +20,10 @@
 | OpenCode version | `2.1.1` (`~/.config/ai.opencode.desktop/cli/2.1.1-x64/opencode-cli --version`) | `LIVE_PROBE_PASSED` |
 | Runtime schema | `/opt/OpenCode/resources/app.asar`-এ `Config.LSP.Server` আছে | `SOURCE_VERIFIED` |
 | LSP protocol | app bundle-এ `initialize`, `textDocument/publishDiagnostics`, `textDocument/hover`, `textDocument/definition`, `workspaceFolders` আছে | `SOURCE_VERIFIED` |
-| Config | `~/.opencode/opencode.json`-এ `lsp` key; ৪টি server; mode `600` | `CONFIG_VALIDATED` |
+| Config | `~/.config/opencode/opencode.json`-এ `lsp` key; ৭টি server; mode `600` | `CONFIG_VALIDATED` |
 | Config reload | log-এ `config.updated` at `2026-10-21T02:43:31Z` | `LIVE_PROBE_PASSED` |
 | Binaries | `typescript-language-server 6.0.2`, `typescript 5.9.3`, `pyright 1.1.414`, `bash-language-server 5.8.1`, `vscode-langservers-extracted 4.10.0` | `SOURCE_VERIFIED` |
-| Initialize probe | `typescript` 23 capabilities, `python` 16, `bash` 11, `json` 11; **4/4 ok** | `LIVE_PROBE_PASSED` |
+| Initialize probe | ৭টি server; `typescript` 23 capabilities, `python` 16, `bash` 11, `json` 11, `css`/`html`/`markdown` ok; **7/7 ok** | `LIVE_PROBE_PASSED` |
 | Editor UI | log-এ এখনো LSP child process নেই; restart/open file বাকি | `NOT_TESTED` |
 
 Runtime প্রমাণের reproducible command:
@@ -88,6 +89,9 @@ Binary paths:
 ~/.opencode/lsp/node_modules/.bin/pyright-langserver
 ~/.opencode/lsp/node_modules/.bin/bash-language-server
 ~/.opencode/lsp/node_modules/.bin/vscode-json-language-server
+~/.opencode/lsp/node_modules/.bin/vscode-css-language-server
+~/.opencode/lsp/node_modules/.bin/vscode-html-language-server
+~/.opencode/lsp/node_modules/.bin/vscode-markdown-language-server
 ```
 
 ---
@@ -127,6 +131,27 @@ Installer `syncLspConfig` দিয়ে `opencode.json`-এর `lsp` object �
         "--stdio"
       ],
       "extensions": [".json", ".jsonc"]
+    },
+    "css": {
+      "command": [
+        "/home/xubuntu/.opencode/lsp/node_modules/.bin/vscode-css-language-server",
+        "--stdio"
+      ],
+      "extensions": [".css", ".scss", ".less"]
+    },
+    "html": {
+      "command": [
+        "/home/xubuntu/.opencode/lsp/node_modules/.bin/vscode-html-language-server",
+        "--stdio"
+      ],
+      "extensions": [".html", ".htm"]
+    },
+    "markdown": {
+      "command": [
+        "/home/xubuntu/.opencode/lsp/node_modules/.bin/vscode-markdown-language-server",
+        "--stdio"
+      ],
+      "extensions": [".md", ".mdx"]
     }
   }
 }
@@ -159,16 +184,42 @@ cd ZombieCoder-Autonomous-Plugin
 npm run lsp:probe -- --root "/home/xubuntu/Documents/Default Project"
 ```
 
-Expected: exit `0`, `ok: true`, ৪টি server। এই run-এ observed:
+Expected: exit `0`, `ok: true`, ৭টি server। Agent-দের জন্য কম্প্যাক্ট output:
 
-| Server | Initialize | Capabilities | Time |
-|---|---:|---:|---:|
-| `typescript` | ok | 23 | 162 ms |
-| `python` | ok | 16 | 252 ms |
-| `bash` | ok | 11 | 439 ms |
-| `json` | ok | 11 | 243 ms |
+```bash
+npm run lsp:probe -- --compact --root "$PWD"
+```
 
-Script শুধু `lsp` section পড়ে; provider key/config বাকি অংশ print করে না।
+এই run-এ observed (compact mode):
+
+| Server | Initialize | Time |
+|---|---:|---:|
+| `typescript` | ok | 167 ms |
+| `python` | ok | 261 ms |
+| `bash` | ok | 398 ms |
+| `json` | ok | 236 ms |
+| `css` | ok | 316 ms |
+| `html` | ok | 620 ms |
+| `markdown` | ok | 377 ms |
+
+Full mode capability list দেখায়; `--compact` শুধু ok/time/serverInfo দেয়। Script শুধু
+`lsp` section পড়ে; provider key/config বাকি অংশ print করে না।
+
+### ৫.৩ Agent playbook — কোন ফাইলে কোন server
+
+| File | Server | Agent-এর কাজ |
+|---|---|---|
+| `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts` | `typescript` | hover, definition, references, rename, diagnostics |
+| `.py`, `.pyi` | `python` | hover, definition, references, diagnostics |
+| `.sh`, `.bash`, `.zsh`, `.ksh` | `bash` | symbol, hover, references |
+| `.json`, `.jsonc` | `json` | schema validation, hover, formatting |
+| `.css`, `.scss`, `.less` | `css` | completion, hover, diagnostics |
+| `.html`, `.htm` | `html` | completion, hover, linked editing |
+| `.md`, `.mdx` | `markdown` | document symbol, links, rename |
+
+নিয়ম: LSP claim করার আগে `npm run lsp:probe -- --compact` চালাও; editor diagnostics
+দাবি করতে হলে app restart + আসল ফাইল খুলে `ps`-এ child process দেখতে হবে। তার আগে
+`NOT_TESTED`।
 
 ### ৫.২ Editor UI
 
@@ -180,7 +231,7 @@ LSP child process এখনো দেখা যায়নি:
 grep -E 'config.updated|lsp.updated' \
   "$HOME/.local/share/opencode/log/opencode.log" | tail -20
 ps -eo pid,args | grep -E \
-  '[t]ypescript-language-server|[p]yright-langserver|[b]ash-language-server|[v]scode-json-language-server'
+  '[t]ypescript-language-server|[p]yright-langserver|[b]ash-language-server|[v]scode-json-language-server|[v]scode-css-language-server|[v]scode-html-language-server|[v]scode-markdown-language-server'
 ```
 
 Editor UI যাচাইয়ের ধাপ:
@@ -254,10 +305,13 @@ Endpoint Cloudflare-এর পিছনে:
 
 1. OpenCode V2.1.1-এ LSP runtime **আছে**; “V2-তে LSP নেই” দাবি ভুল ছিল।
 2. আগের সমস্যা: `lsp` config নেই + binary নেই + TS 7.0.2-এ `tsserver.js` নেই।
-3. এখন ৪টি server configured; direct initialize probe **4/4 pass**।
-4. Desktop editor UI `NOT_TESTED` — restart + file open করে যাচাই করতে হবে।
-5. `syntax_check` fallback; LSP-এর বিকল্প নয়, supplement।
-6. Token valid, কিন্তু exposed — rotate। Cloudflare probe limited, no mixing seen.
+3. এখন ৭টি server configured (`typescript`, `python`, `bash`, `json`, `css`,
+   `html`, `markdown`); direct initialize probe **7/7 pass** (`--compact`, exit `0`)।
+4. Managed entry-র binary path হারিয়ে গেলে `syncLspConfig` সেটা re-resolve করে;
+   owner-এর নিজের (non-managed) entry ছোঁয় না।
+5. Desktop editor UI `NOT_TESTED` — restart + file open করে যাচাই করতে হবে।
+6. `syntax_check` fallback; LSP-এর বিকল্প নয়, supplement।
+7. Token valid, কিন্তু exposed — rotate। Cloudflare probe limited, no mixing seen.
 
 <!-- INTEGRITY:START -->
 <div align="center">
@@ -266,8 +320,8 @@ Endpoint Cloudflare-এর পিছনে:
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  8050e5f0f3dbc6c157e20d67f4aaae800ef8f6c74a38035a6558931bc192ec2f  ║
-║  files 79 · bytes 764613 · base no-git · clean                           ║
+║  root  8f44bbc742fb7a80f07ff50797e4b52aace4386146fc6a98a529e341042acfcf  ║
+║  files 80 · bytes 785088 · base 096bfb7 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -275,7 +329,7 @@ Endpoint Cloudflare-এর পিছনে:
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-31T03:37:00.104Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:00:00.055Z
 
 </div>
 <!-- INTEGRITY:END -->

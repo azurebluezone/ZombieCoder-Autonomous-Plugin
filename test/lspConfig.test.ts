@@ -28,10 +28,13 @@ test("resolveLspServers finds binaries in the install-root lsp dir", () => {
     for (const server of LSP_SERVERS) fakeBin(bins, server.bin);
     const resolved = resolveLspServers(root, { dirs: [bins], env: {} });
     assert.deepEqual(resolved.missing, []);
-    assert.deepEqual(Object.keys(resolved.servers).sort(), ["bash", "json", "python", "typescript"]);
+    assert.deepEqual(Object.keys(resolved.servers).sort(), LSP_SERVERS.map((server) => server.id).sort());
     assert.equal(resolved.servers.typescript.command[0], path.join(bins, "typescript-language-server"));
     assert.deepEqual(resolved.servers.typescript.command.slice(1), ["--stdio"]);
     assert.ok(resolved.servers.typescript.extensions.includes(".ts"));
+    assert.ok(resolved.servers.css.extensions.includes(".css"));
+    assert.ok(resolved.servers.html.extensions.includes(".html"));
+    assert.ok(resolved.servers.markdown.extensions.includes(".md"));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -62,6 +65,36 @@ test("syncLspConfig writes lsp entries, preserves existing ones, and is idempote
 
     const second = syncLspConfig(configFile, root, lspOptions);
     assert.equal(second.updated, false, "a second sync must not rewrite the file");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("syncLspConfig repairs a managed command whose binary disappeared", () => {
+  const root = tempDir("zombiecoder-lsp-stale-");
+  try {
+    const bins = path.join(root, "lsp", "node_modules", ".bin");
+    fakeBin(bins, "typescript-language-server");
+    const configFile = path.join(root, "opencode.json");
+    fs.writeFileSync(
+      configFile,
+      JSON.stringify({
+        lsp: {
+          typescript: {
+            command: [path.join(root, "gone", "typescript-language-server"), "--stdio"],
+            extensions: [".ts"],
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const out = syncLspConfig(configFile, root, { dirs: [bins], env: {} });
+    assert.equal(out.updated, true);
+    assert.deepEqual(out.refreshed, ["typescript"]);
+    const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    assert.equal(config.lsp.typescript.command[0], path.join(bins, "typescript-language-server"));
+    assert.deepEqual(config.lsp.typescript.extensions, [".ts"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

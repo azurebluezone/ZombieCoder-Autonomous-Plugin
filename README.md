@@ -831,6 +831,14 @@ Persona inject না হলে model generic উত্তর দেবে — �
 
 Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
 
+### MCP — image-brand (আলাদা local server)
+
+`mcp/image-brand/` একটি আলাদা local stdio MCP server: PD/CC0 ছবি search, download,
+crop, বাংলা title + logo branding, provenance sidecar — কোনো LLM বা API key নেই।
+চারটি tool: `image_search`, `image_fetch`, `image_brand`, `image_batch`। Project
+`opencode.json`-এ registered; `opencode mcp list` → `✓ image-brand connected`।
+বিস্তারিত: [`mcp/image-brand/README.md`](mcp/image-brand/README.md)।
+
 ---
 
 ## ১১. Skills, memory ও refresh
@@ -1195,8 +1203,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  8f44bbc742fb7a80f07ff50797e4b52aace4386146fc6a98a529e341042acfcf  ║
-║  files 80 · bytes 785088 · base 3843f26 · clean                          ║
+║  root  2ca71ed471c647edc5f356642ec91b71fae6af3b645e18426014269786eb7259  ║
+║  files 88 · bytes 840843 · base 0a95690 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1204,7 +1212,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:00:10.319Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:20:42.934Z
 
 </div>
 <!-- INTEGRITY:END -->

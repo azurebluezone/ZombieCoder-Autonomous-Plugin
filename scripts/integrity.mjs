@@ -34,6 +34,7 @@ const SCOPE = [
   "bin",
   "scripts",
   "test",
+  "mcp",
   "docs/skills",
   "package.json",
   "LICENSE",
@@ -75,6 +76,7 @@ function isIncluded(file) {
     p.startsWith("bin/") ||
     p.startsWith("scripts/") ||
     p.startsWith("test/") ||
+    p.startsWith("mcp/") ||
     p.startsWith("docs/skills/")
   );
 }

@@ -23,6 +23,9 @@
     "identity": "node scripts/identity.mjs --write",
     "identity:check": "node scripts/identity.mjs",
     "lsp:probe": "node scripts/lsp-probe.mjs",
+    "mcp:image-brand": "node mcp/image-brand/server.mjs",
+    "mcp:image-brand:check": "node mcp/image-brand/selfcheck.mjs",
+    "mcp:image-brand:test": "node --test mcp/image-brand/test/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run identity:check && npm run integrity:check"
   },
   "engines": {

@@ -7,21 +7,21 @@
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  8f44bbc742fb7a80f07ff50797e4b52aace4386146fc6a98a529e341042acfcf  ║
-║  files 80 · bytes 785088 · base 3843f26 · clean                          ║
+║  root  2ca71ed471c647edc5f356642ec91b71fae6af3b645e18426014269786eb7259  ║
+║  files 88 · bytes 840843 · base 0a95690 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-10-31T04:00:10.319Z` |
-| Base commit | `3843f26` |
+| Generated (UTC) | `2026-10-31T04:20:42.934Z` |
+| Base commit | `0a95690` |
 | Branch | `murubbi` |
-| Code tree | `clean` |
-| Files | 80 |
-| Bytes | 785088 |
-| Root SHA-256 | `8f44bbc742fb7a80f07ff50797e4b52aace4386146fc6a98a529e341042acfcf` |
+| Code tree | `dirty` |
+| Files | 88 |
+| Bytes | 840843 |
+| Root SHA-256 | `2ca71ed471c647edc5f356642ec91b71fae6af3b645e18426014269786eb7259` |
 
 ## Scope
 
@@ -29,6 +29,7 @@
 - `bin`
 - `scripts`
 - `test`
+- `mcp`
 - `docs/skills`
 - `package.json`
 - `LICENSE`
@@ -67,10 +68,18 @@ npm run integrity:check
 | `docs/skills/uiux-delivery.md` | 3952 | `c2a66f4f4f3edbee5135b6e4b05ef82165f35baf1f9a7138c0d0f0d268394e15` |
 | `docs/skills/web-delivery.md` | 4247 | `61ce13fc7897d4cb1a7bd59cfaa058ef6d94d6d7e7cb34295b179bc7e72cf0db` |
 | `LICENSE` | 1961 | `d06b8b22307bf25fa4e3dba778ad2ccc1350c2e5cd1b5e6ed40c2de25b6cd95a` |
-| `package.json` | 1433 | `3ebcdf5c8dff725ec58c41d880d7ceaaf8eb3fe6dd9921aa0617792f2f40f839` |
+| `mcp/image-brand/e2e-live.mjs` | 2344 | `4ac28dfdcf35f8941dc03ef60e3af3fabb37ba87b212ff91d226d349d54e15c9` |
+| `mcp/image-brand/fixtures.py` | 1731 | `bee4ffeed922dafa6a11c47dfca4ff1c9e647dbf12038cc8cff3d6d31ff1ea44` |
+| `mcp/image-brand/mcp-client.mjs` | 2482 | `262c5ea45f68354888a6b948911c5f6250f8b809a751019626b5d7a16fbc453d` |
+| `mcp/image-brand/pipeline.py` | 15421 | `ca442641384238e4134649ad15f41728650d8166f44cb879bc196d9b5cf5490b` |
+| `mcp/image-brand/README.md` | 5202 | `e274d003703edc2a58c80ebecf4dcdb65c3f4fd7cc2f25b28fb342feb645dde8` |
+| `mcp/image-brand/selfcheck.mjs` | 1964 | `a7aae73b96a4d6de052fd18cc60969c5bc58ef0561f7c7c52ab0588b5035e219` |
+| `mcp/image-brand/server.mjs` | 21452 | `a7168285f8aa3b5d39658dae800552f19caf5b93a64e90aff412354b7b7e41ee` |
+| `mcp/image-brand/test/image-brand.test.mjs` | 4922 | `fe3e98170afcecf482fcd044be5f47069b774dc5783187594c9b31acecb3bd6f` |
+| `package.json` | 1633 | `d9d80c694c44e1faec5f90345bc1ae1e336aac80fb6c78e40b20020b021c4221` |
 | `scripts/configure.mjs` | 14570 | `53c62929b01c0cc5bddc1a21935e88790c6f67a8d5b7989711b894a6da0faf18` |
 | `scripts/identity.mjs` | 4807 | `1714c98c83d6c2eb28f908b1e253161077fcb6868afadd85ef835940af6e1d84` |
-| `scripts/integrity.mjs` | 10134 | `2a3485b44f9e85be5493252f07c815386c8e9c96013ff3f434f368fd44f1b867` |
+| `scripts/integrity.mjs` | 10171 | `7be45b58c660f9d175767847ff0d6c2a43d9704b60ea0a62205b1ee6e4e634a8` |
 | `scripts/lsp-probe.mjs` | 7294 | `77f7d44d6529d2d73376c4ca09053c046d3209af0b90ec1da5fda2335c4fe7ae` |
 | `scripts/setup.mjs` | 12807 | `f991bf440bbcd38819a40978e201817004e5574c4c45ed4f4921fa9ec0353d5f` |
 | `src/agents.ts` | 13479 | `0e9fc2b22e375579fb2e77d8772717aec58cf31bd0bad91795cbd0dd4b46574e` |

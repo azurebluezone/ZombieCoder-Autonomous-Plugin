@@ -31,7 +31,7 @@ files on demand. A new domain gets the same treatment before it enters a prompt.
 
 ## Runtime skill catalog (`docs/skills`)
 
-The 14 files below are shared from the install root by
+The 20 files below are shared from the install root by
 `src/zombie/skillCatalog.ts`, not copied into every project:
 
 ```text
@@ -50,7 +50,13 @@ registered. A working directory never gets its own `skills/` tree.
 | `evidence-before-confidence` | Always; every PASS/success claim | All agents |
 | `resource-optimization` | Always; slow/expensive path | Manu, Nila, Tuhin |
 | `server` | Always; Linux/Nginx/systemd/TLS | Rashed, Tuhin |
+| `typescript` | `tsconfig.json`, `.ts`/`.tsx` files | Manu, Nila |
+| `bootstrap` | `bootstrap` in package.json, Bootstrap classes | Nila, Manu |
+| `tailwind` | `tailwindcss` in package.json/config | Nila, Manu |
+| `ollama` | Ollama API, local model workflows | Tuhin, Rashed |
+| `llama-cpu` | GGUF/llama.cpp, CPU-only inference | Tuhin, Rashed |
 | `laravel` | `composer.json`, `artisan` | Rashed, Manu |
+| `laravel-market` | Laravel + `app/Models` Product/Cart/Order/Stock or commerce migrations | Rashed, Manu |
 | `node` | `package.json` | Manu, Nila, Tuhin |
 | `next` | `package.json` dependency `next` | Nila, Manu |
 | `python` | `requirements.txt`, `pyproject.toml`, `setup.py`, root `*.py` | Majnu, Halim |

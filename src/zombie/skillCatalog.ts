@@ -103,6 +103,14 @@ export const SKILL_CATALOG: SkillSpec[] = [
     tags: ["php", "laravel", "web"],
   },
   {
+    id: "laravel-market",
+    name: "Laravel Market Logic",
+    description:
+      "Design Laravel commerce as a real market day: walk the buyer and seller journey, place every entity before writing code, then verify cart, stock and order paths in the database and browser.",
+    file: "laravel-market.md",
+    tags: ["php", "laravel", "commerce", "market", "stock"],
+  },
+  {
     id: "node",
     name: "Node.js",
     description:
@@ -270,6 +278,20 @@ function fileContains(file: string, needles: string[]): boolean {
   }
 }
 
+function hasCommerceMarkers(projectRoot: string): boolean {
+  const names = (dir: string): string[] => {
+    try {
+      return fs.readdirSync(dir);
+    } catch {
+      return [];
+    }
+  };
+  const model = /^(product|cart|order|stock|variant|inventory|checkout)/i;
+  if (names(path.join(projectRoot, "app", "Models")).some((name) => model.test(name))) return true;
+  const migration = /create_(products|orders|carts|stocks|variants|inventories|order_items)/i;
+  return names(path.join(projectRoot, "database", "migrations")).some((name) => migration.test(name));
+}
+
 /** Pick the skills a project actually needs. Core thinking/evidence skills are always included. */
 export function detectProjectSkills(projectRoot: string): string[] {
   const picked = new Set<string>(CORE_IDS);
@@ -289,6 +311,7 @@ export function detectProjectSkills(projectRoot: string): string[] {
     picked.add("laravel");
     picked.add("uiux-delivery");
     picked.add("web-delivery");
+    if (hasCommerceMarkers(projectRoot)) picked.add("laravel-market");
   }
   if (fs.existsSync(path.join(projectRoot, "public_html"))) {
     picked.add("cpanel");

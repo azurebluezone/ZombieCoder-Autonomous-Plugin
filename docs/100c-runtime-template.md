@@ -402,7 +402,7 @@ pointing an origin hostname at this machine.
 | Prompt throughput | 11.7 tok/s on the install probe; below the 20 tok/s gate | `LIVE_PROBE_PASSED` |
 | Fallback | Provider saved, not selected; all 9 agents → `opencode/big-pickle` | `CONFIG_VALIDATED` |
 | Baseline catalog | `opencode/big-pickle` active, cost 0/0 | `LIVE_PROBE_PASSED` |
-| Skills cache | 10 files in `~/.opencode/zombiecoder/skills-catalog` | `SOURCE_VERIFIED` |
+| Skills cache | 20 files in `~/.opencode/zombiecoder/skills-catalog` | `SOURCE_VERIFIED` |
 | Shared skills | 4 core files in `~/.opencode/zombiecoder/skills` (one copy for every project) | `END_TO_END_TESTED` (function), `NOT_TESTED` (post-restart UI) |
 | LSP config | Installer generates `opencode.json.lsp` from `<install>/lsp` binaries (`syncLspConfig`) | `SOURCE_VERIFIED`; live probe separately |
 | Tests | `npm test` 61/61 pass; `npm run typecheck` pass | `SOURCE_VERIFIED` |
@@ -477,8 +477,8 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  738bd938930c72a6b9c8402165a021729380709754f69bd727ae1ec56eed410e  ║
-║  files 95 · bytes 888384 · base 8b9110a · dirty                          ║
+║  root  799056fba59d43358aa6448e8d879a06820ad729bcf5c68110a65cabb3935dd8  ║
+║  files 97 · bytes 900556 · base 743b5f9 · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -486,7 +486,7 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:35:51.622Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:54:38.005Z
 
 </div>
 <!-- INTEGRITY:END -->

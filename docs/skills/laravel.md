@@ -6,6 +6,13 @@ description: Work on Laravel apps: routes, controllers, Eloquent, migrations, qu
 
 # Laravel
 
+## Commerce flows
+
+For a shop, catalogue, cart, order or stock feature, load `laravel-market`
+first: it walks the real buyer/seller journey and fixes entity placement before
+the migration, then verifies the browser and database path. The generic Laravel
+rules below still apply.
+
 ## Baseline
 
 ```bash

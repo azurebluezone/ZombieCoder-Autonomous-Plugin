@@ -61,6 +61,31 @@ test("every catalog entry ships a real skill file with matching frontmatter", ()
   }
 });
 
+test("detectProjectSkills adds laravel-market only for a commerce-shaped Laravel app", () => {
+  const plain = tempDir("zombiecoder-detect-laravel-");
+  const shop = tempDir("zombiecoder-detect-shop-");
+  try {
+    for (const root of [plain, shop]) {
+      write(
+        path.join(root, "composer.json"),
+        JSON.stringify({ require: { "laravel/framework": "^11.0" } }),
+      );
+    }
+    write(path.join(shop, "app", "Models", "Product.php"), "<?php\n");
+
+    const plainIds = detectProjectSkills(plain);
+    assert.ok(plainIds.includes("laravel"), "plain Laravel app must get the laravel skill");
+    assert.ok(!plainIds.includes("laravel-market"), "no commerce marker must not add laravel-market");
+
+    const shopIds = detectProjectSkills(shop);
+    assert.ok(shopIds.includes("laravel"));
+    assert.ok(shopIds.includes("laravel-market"), "commerce model must add laravel-market");
+  } finally {
+    fs.rmSync(plain, { recursive: true, force: true });
+    fs.rmSync(shop, { recursive: true, force: true });
+  }
+});
+
 test("detectProjectSkills adds UI/UX, delivery and regex skills for their stacks", () => {
   const root = tempDir("zombiecoder-detect-new-");
   try {

@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-10-31T04:35:51.622Z",
+  "generated_at": "2026-10-31T04:54:38.005Z",
   "scope": [
     "src",
     "bin",
@@ -11,11 +11,11 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "738bd938930c72a6b9c8402165a021729380709754f69bd727ae1ec56eed410e",
-  "file_count": 95,
-  "total_bytes": 888384,
+  "root_sha256": "799056fba59d43358aa6448e8d879a06820ad729bcf5c68110a65cabb3935dd8",
+  "file_count": 97,
+  "total_bytes": 900556,
   "git": {
-    "commit": "8b9110a",
+    "commit": "743b5f9",
     "branch": "murubbi",
     "dirty": true
   },
@@ -56,9 +56,14 @@
       "sha256": "a6081c550298eb25bbb9d887be98e642a7a4f239ece4b9c8b3cec9865297db3a"
     },
     {
+      "path": "docs/skills/laravel-market.md",
+      "bytes": 4175,
+      "sha256": "4fa4ae4e951967bfa750d417dc67e16b41c478b48035a1e34d62b065d8475fac"
+    },
+    {
       "path": "docs/skills/laravel.md",
-      "bytes": 1630,
-      "sha256": "f35dc9c1bdf4d6217993761bbc1db7beee164dba54e17e4e03ade68b3361c33a"
+      "bytes": 1910,
+      "sha256": "51b883d978bb3413e243cee90e00db1e25a6b200fd0eaf38d4576aedbb079dec"
     },
     {
       "path": "docs/skills/llama-cpu.md",
@@ -207,8 +212,8 @@
     },
     {
       "path": "scripts/audit-install.mjs",
-      "bytes": 3897,
-      "sha256": "45717ed5a0668c4bd22e06b0e2297ef1527f391a6a1902ea48f209f1ce2d99d3"
+      "bytes": 5416,
+      "sha256": "171914479782b23b7d19a72b841006865ef9be69e561cbc5a271ef49eb18cf52"
     },
     {
       "path": "scripts/configure.mjs",
@@ -362,8 +367,8 @@
     },
     {
       "path": "src/zombie/skillCatalog.ts",
-      "bytes": 20102,
-      "sha256": "12d53ae97f48997ad06600236466e13bdc4c094aabf1b0b888bc576dee5fcc3f"
+      "bytes": 21117,
+      "sha256": "62edad5447390cd3f3d00becc2c24d18eb264ea6a60043dff08e92d83773827f"
     },
     {
       "path": "src/zombie/skills.ts",
@@ -384,6 +389,11 @@
       "path": "src/zombie/transform.ts",
       "bytes": 3964,
       "sha256": "1c25f3eb1f6ecc9c8ed68b9894f2dfcffb75e233540be06b81f8bda78cc11ba2"
+    },
+    {
+      "path": "test/audit-install.test.ts",
+      "bytes": 4155,
+      "sha256": "78ac9b2a258dba24cc55474ec8d03baf2ef4c66d1797e272717c0b369cfd8d44"
     },
     {
       "path": "test/circuitBreaker.test.ts",
@@ -487,8 +497,8 @@
     },
     {
       "path": "test/skillCatalog.test.ts",
-      "bytes": 6533,
-      "sha256": "c7743d5c6a0d39bb57bd3ebf9aa23004efae4ca5bfda903bf17033228ed487ad"
+      "bytes": 7561,
+      "sha256": "1f4b8479d9528d1ba72a5ce1bf4a776924be07d81fcbba64d7e44e794de09730"
     },
     {
       "path": "test/tools.test.ts",

@@ -6,20 +6,66 @@
  *
  * This reads the real filesystem; it does not trust the installer log.
  *
- *   node scripts/audit-install.mjs [--config <dir>]
+ *   node scripts/audit-install.mjs [--config <dir>] [--install <dir>]
+ *
+ *   --config   directory that holds opencode.json (default ~/.config/opencode)
+ *   --install  install root with agents/, plugins/, zombiecoder/
+ *              (default: the --config directory)
+ *   -h, --help show usage and exit 0
+ *
+ * Exit codes: 0 complete, 1 incomplete, 2 bad arguments or unreadable config.
  */
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-function arg(name, fallback) {
-  const index = process.argv.indexOf(name);
-  return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
+const USAGE = `Usage: node scripts/audit-install.mjs [options]
+
+Options:
+  --config <dir>   OpenCode config directory (default: ~/.config/opencode)
+  --install <dir>  Install root with agents/, plugins/, zombiecoder/
+                   (default: the --config directory)
+  -h, --help       Show this help and exit
+
+Exit codes: 0 complete, 1 incomplete, 2 bad arguments or unreadable config.`;
+
+function usage(stream = process.stdout) {
+  stream.write(USAGE + "\n");
 }
 
-const configDir = path.resolve(arg("--config", path.join(os.homedir(), ".config", "opencode")));
-const installDir = path.resolve(arg("--install", configDir));
+function parseArgs(argv) {
+  if (argv.includes("-h") || argv.includes("--help")) {
+    usage();
+    process.exit(0);
+  }
+  const options = {
+    config: path.join(os.homedir(), ".config", "opencode"),
+    install: null,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    const match = /^--(config|install)(?:=(.*))?$/.exec(token);
+    if (!match) {
+      console.error(`FAIL unknown argument ${JSON.stringify(token)}`);
+      usage(process.stderr);
+      process.exit(2);
+    }
+    const value = match[2] ?? argv[index + 1];
+    if (!value || value.startsWith("-")) {
+      console.error(`FAIL --${match[1]} needs a directory`);
+      usage(process.stderr);
+      process.exit(2);
+    }
+    if (match[2] === undefined) index += 1;
+    options[match[1]] = value;
+  }
+  options.config = path.resolve(options.config);
+  options.install = path.resolve(options.install ?? options.config);
+  return options;
+}
+
+const { config: configDir, install: installDir } = parseArgs(process.argv.slice(2));
 const jsonFile = path.join(configDir, "opencode.json");
 const jsoncFile = path.join(configDir, "opencode.jsonc");
 const configFile = fs.existsSync(jsonFile) ? jsonFile : jsoncFile;

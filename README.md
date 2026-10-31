@@ -1196,7 +1196,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  root  8f44bbc742fb7a80f07ff50797e4b52aace4386146fc6a98a529e341042acfcf  ║
-║  files 80 · bytes 785088 · base 096bfb7 · dirty                          ║
+║  files 80 · bytes 785088 · base 3843f26 · clean                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1204,7 +1204,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:00:00.055Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:00:10.319Z
 
 </div>
 <!-- INTEGRITY:END -->

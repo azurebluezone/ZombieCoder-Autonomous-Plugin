@@ -317,6 +317,18 @@ export type ResolveOptions = {
   baselineModel?: string;
 };
 
+// A model reference is `providerID/modelID`. Anything else (a stray "inherit",
+// a bare model name, a placeholder) must never reach `assignModels` as a
+// baseline: the roster's own baseline would then look like a hand-pin and every
+// agent would collapse onto one model.
+export function normalizeModelRef(ref: unknown): string | null {
+  const value = typeof ref === "string" ? ref.trim() : "";
+  const slash = value.indexOf("/");
+  if (slash <= 0 || slash === value.length - 1) return null;
+  if (/\s/.test(value)) return null;
+  return value;
+}
+
 export async function resolveModels(
   doors: CatalogDoors | undefined,
   agents: AgentDef[],
@@ -325,7 +337,7 @@ export async function resolveModels(
   const notes: string[] = [];
   const mode: ModelStrategy = options.strategy ?? "auto";
   const randomize = mode === "random" || options.randomize === true;
-  const baselineModel = options.baselineModel?.trim() || BASELINE_MODEL;
+  const baselineModel = normalizeModelRef(options.baselineModel) ?? BASELINE_MODEL;
   const customProviderID =
     options.customProviderID?.trim() || DEFAULT_CUSTOM_PROVIDER_ID;
   const configuredUrl = (options.customProviderUrl ?? DEFAULT_CUSTOM_PROVIDER_URL).trim();

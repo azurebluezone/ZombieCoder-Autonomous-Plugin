@@ -8,7 +8,12 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildContextPack, CONTEXT_LIMITS, resolveAllowedPath } from "../src/zombie/context.ts";
+import {
+  buildContextPack,
+  CONTEXT_LIMITS,
+  resolveAllowedPath,
+  stripHomePath,
+} from "../src/zombie/context.ts";
 import {
   applyResponseGate,
   evaluateResponse,
@@ -105,6 +110,54 @@ test("context pack merges SSOT, syllabus and memory into a bounded pack", () => 
   assert.match(pack.uiLine, /SSOT OK \(manu\)/);
   assert.match(pack.uiLine, /Syllabus OK \(halim\)/);
   assert.match(pack.text, /### Context ownership/);
+});
+
+test("syllabus excerpt shows the newest lesson, not the seed placeholder", () => {
+  const root = seedProject();
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "syllabus.md"),
+    [
+      "# Syllabus",
+      "",
+      "## 5. Lessons (append-only)",
+      "",
+      "_Nothing recorded yet. Each new lesson lands below, newest last._",
+      "",
+      "---",
+      "",
+      "_— ZombieCoder Syllabus · v0.1.0 · generated 2026-10-28 · files=17_",
+      "",
+      "### Old lesson",
+      "",
+      "The first lesson body.",
+      "",
+      "### Newest lesson — contract gate",
+      "",
+      "A write without a goal contract gets a visible warning.",
+      "",
+      "### Goal Contract gc-abc123",
+      "",
+      "- status: open",
+      "- session: ses_pack",
+      "- goal: fix the excerpt",
+      "",
+    ].join("\n"),
+  );
+  const pack = buildContextPack(root, "manu", [], "fix it", "ses_pack");
+  assert.doesNotMatch(pack.text, /Nothing recorded yet/, "the seed placeholder must never reach the model");
+  assert.match(pack.text, /### Newest lesson — contract gate/);
+  assert.doesNotMatch(pack.text, /### Old lesson/, "only the newest lesson is paid for");
+  assert.match(pack.text, /### Pre-work gate/);
+  assert.match(pack.text, /- open: gc-abc123 — fix the excerpt/);
+  assert.match(pack.uiLine, /\| Contract gc-abc123/);
+});
+
+test("pre-work gate says none when the session has no open contract", () => {
+  const root = seedProject();
+  const pack = buildContextPack(root, "manu", [], "", "ses_none");
+  assert.match(pack.text, /### Pre-work gate/);
+  assert.match(pack.text, /- none for this session\./);
+  assert.match(pack.uiLine, /\| Contract none/);
 });
 
 test("context pack marks missing SSOT instead of inventing content", () => {
@@ -252,6 +305,21 @@ test("response gate still blocks real action claims after narrowing the markers"
     const verdict = evaluateResponse(text, { allowedRoot: root });
     assert.equal(verdict.passed, false, `claim must block: ${text}`);
   }
+});
+
+test("provider-facing pack replaces the OS home directory with ~", () => {
+  const root = seedProject();
+  const home = os.homedir();
+  fs.appendFileSync(
+    path.join(root, ".zombiecoder", "syllabus.md"),
+    `\n### local path\nWorking copy at ${home}/secret-project\n`,
+  );
+  const pack = buildContextPack(root, "manu");
+  assert.ok(!pack.text.includes(home), "home directory leaked into the provider pack");
+  assert.match(pack.text, /~\/secret-project/);
+  assert.equal(pack.allowedRoot, root, "tools keep the real absolute path");
+  assert.equal(stripHomePath(`${home}/x`, home), "~/x");
+  assert.equal(stripHomePath("nothing to strip", home), "nothing to strip");
 });
 
 test("context pack reuses the cached SSOT snapshot until the file changes", () => {

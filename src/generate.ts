@@ -123,15 +123,11 @@ async function main(): Promise<void> {
   }
 
   // identity.json — the machine-readable DNA, checksummed over its own payload.
+  // The checksum MUST come from identityChecksum() (canonical JSON, checksum
+  // field removed). Hashing JSON.stringify(payload) here produced a digest that
+  // no verifier could reproduce, because key order was incidental.
   const payload = identity;
-  const canonical = JSON.stringify(payload);
-  const withChecksum = {
-    ...payload,
-    system_identity: {
-      ...payload.system_identity,
-      manifest: { ...payload.system_identity.manifest, checksum: sha256(canonical) },
-    },
-  };
+  const withChecksum = payload;
   const identityFile = path.join(OUT, "identity.json");
   const identityBacked = backupExisting(identityFile, stamp);
   const identityText = JSON.stringify(withChecksum, null, 2) + "\n";

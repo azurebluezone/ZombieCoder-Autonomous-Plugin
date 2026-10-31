@@ -96,12 +96,29 @@ export function toMemoryMessage(item: any, index?: number): MemoryMessage {
       : Number.isInteger(index)
         ? `snapshot-index-${index}`
         : undefined;
+  // Keep the source timestamp when the payload carries one. Stamping write time
+  // made the archive look like everything happened at once (audit finding).
+  const raw =
+    item?.time?.created ?? item?.createdAt ?? item?.created_at ?? item?.time?.updated ?? item?.updatedAt;
+  const at = typeof raw === "number" && Number.isFinite(raw)
+    ? new Date(raw).toISOString()
+    : typeof raw === "string" && raw.trim()
+      ? raw
+      : new Date().toISOString();
   return {
     id,
     role: roleOf(item),
     text: textOf(item),
-    at: new Date().toISOString(),
+    at,
   };
+}
+
+// Memory is the conversation, not the system prompt. Archiving system/tool rows
+// filled the store with the tool catalog and made "what did we decide?" unreadable.
+const ARCHIVED_ROLES = new Set(["user", "assistant", "message", ""]);
+
+export function isArchivableRole(role?: string): boolean {
+  return ARCHIVED_ROLES.has(String(role ?? "").toLowerCase());
 }
 
 // Disk is the truth. If an archive file exists but predates the index (or was
@@ -275,7 +292,7 @@ export async function keepRecent(
   sessionID: string,
   messages: any[],
 ): Promise<{ kept: number; archived: number; archiveFile: string }> {
-  const all = messages.map(toMemoryMessage).filter((m) => m.text.length > 0);
+  const all = messages.map(toMemoryMessage).filter((m) => m.text.length > 0 && isArchivableRole(m.role));
   const recent = all.slice(-KEEP_RECENT);
   const older = all.slice(0, Math.max(0, all.length - KEEP_RECENT));
 
@@ -301,7 +318,7 @@ export async function archiveSessionSnapshot(
   sessionID: string,
   messages: any[],
 ): Promise<{ kept: number; archived: number; archiveFile: string }> {
-  const all = messages.map(toMemoryMessage).filter((message) => message.text.length > 0);
+  const all = messages.map(toMemoryMessage).filter((message) => message.text.length > 0 && isArchivableRole(message.role));
   const recent = all.slice(-KEEP_RECENT);
   await storage.set(storageKey(sessionID), {
     updatedAt: new Date().toISOString(),

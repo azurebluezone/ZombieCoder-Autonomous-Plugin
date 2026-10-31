@@ -32,11 +32,30 @@ function readPackageVersion(): string {
     } catch {
       /* keep walking */
     }
+    // Installed runtimes ship <config>/package.json without a version field, but
+    // the installer always writes <config>/zombiecoder/config.json with one.
+    // Without this the whole SSOT/syllabus is stamped v0.0.0-dev.
+    const fromConfig = readConfigVersion(dir);
+    if (fromConfig) return fromConfig;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return "0.0.0-dev";
+}
+
+function readConfigVersion(dir: string): string | undefined {
+  const candidates = [path.join(dir, "zombiecoder", "config.json")];
+  if (path.basename(dir) === "zombiecoder") candidates.push(path.join(dir, "config.json"));
+  for (const file of candidates) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (typeof parsed?.version === "string" && parsed.version.trim()) return parsed.version.trim();
+    } catch {
+      /* no config here */
+    }
+  }
+  return undefined;
 }
 
 export const PRODUCT = "ZombieCoder";

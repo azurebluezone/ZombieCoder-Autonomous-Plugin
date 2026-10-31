@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-10-29T18:43:06.423Z",
+  "generated_at": "2026-10-31T03:37:00.104Z",
   "scope": [
     "src",
     "bin",
@@ -10,24 +10,29 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "2f0a0b323030d5c6accd83eaff0e6d42700a3d5a6c5b2a62c45e345446b71a38",
-  "file_count": 63,
-  "total_bytes": 655737,
+  "root_sha256": "8050e5f0f3dbc6c157e20d67f4aaae800ef8f6c74a38035a6558931bc192ec2f",
+  "file_count": 79,
+  "total_bytes": 764613,
   "git": {
-    "commit": "0917a2d",
-    "branch": "main",
-    "dirty": true
+    "commit": null,
+    "branch": null,
+    "dirty": false
   },
   "files": [
     {
       "path": "bin/install.mjs",
-      "bytes": 56629,
-      "sha256": "e1f97357d4b86d9c71f50c22dadb3d173a35845962c9193c23af2ad74f457af7"
+      "bytes": 58140,
+      "sha256": "35198862dfdfb0c2807c26cda239d9509e0e83ab53f668aeae8bc3d51a53d996"
     },
     {
       "path": "bin/quick-install.mjs",
       "bytes": 5685,
       "sha256": "fa97c3318d7630421e4f596044aa61da60c0f0d8b7533035f1013f462cedc078"
+    },
+    {
+      "path": "docs/skills/bootstrap.md",
+      "bytes": 574,
+      "sha256": "0580d9dff2bf4a466597b5dcb41792ba7bba22175e37ff95dfa716acb057e51c"
     },
     {
       "path": "docs/skills/cpanel.md",
@@ -55,6 +60,11 @@
       "sha256": "f35dc9c1bdf4d6217993761bbc1db7beee164dba54e17e4e03ade68b3361c33a"
     },
     {
+      "path": "docs/skills/llama-cpu.md",
+      "bytes": 576,
+      "sha256": "349dbaa66d650c820595498287f3799ac9efb39b11b7391f8680103e84380aef"
+    },
+    {
       "path": "docs/skills/next.md",
       "bytes": 1669,
       "sha256": "afdf6e2a125f8f9db4357c2d11375dd76f2d3b6d75fe3cf21550c105d6b6d254"
@@ -63,6 +73,11 @@
       "path": "docs/skills/node.md",
       "bytes": 1392,
       "sha256": "44a57ebd465774ec2dba3a736e27c24b4e0dd8370ee5a3ada1a642d5a3301f27"
+    },
+    {
+      "path": "docs/skills/ollama.md",
+      "bytes": 512,
+      "sha256": "81dfb0ff1ba9b7596304e63c3e8b6ccbde844ea8ca6bfd7f79012795b4053813"
     },
     {
       "path": "docs/skills/python-regex.md",
@@ -90,6 +105,16 @@
       "sha256": "0149a648a6e8b4d8104097986e6796ceb224433707f5e73c281de5e7577eb4e3"
     },
     {
+      "path": "docs/skills/tailwind.md",
+      "bytes": 595,
+      "sha256": "d89971988125a3d5cc457034e172ca54d758d03c277e9a8b57554b7d06e38e1b"
+    },
+    {
+      "path": "docs/skills/typescript.md",
+      "bytes": 638,
+      "sha256": "07d314e2ab542bbfe39b5fdcfd1e4f8ebc255b61ca989c3f9970608e1095cc5e"
+    },
+    {
       "path": "docs/skills/uiux-delivery.md",
       "bytes": 3952,
       "sha256": "c2a66f4f4f3edbee5135b6e4b05ef82165f35baf1f9a7138c0d0f0d268394e15"
@@ -106,13 +131,18 @@
     },
     {
       "path": "package.json",
-      "bytes": 1303,
-      "sha256": "b54d5b1854c40cb0ab7b325a912d5906334b7da7b6fb8dc3ff4ec552e23ba848"
+      "bytes": 1433,
+      "sha256": "3ebcdf5c8dff725ec58c41d880d7ceaaf8eb3fe6dd9921aa0617792f2f40f839"
     },
     {
       "path": "scripts/configure.mjs",
       "bytes": 14570,
       "sha256": "53c62929b01c0cc5bddc1a21935e88790c6f67a8d5b7989711b894a6da0faf18"
+    },
+    {
+      "path": "scripts/identity.mjs",
+      "bytes": 4807,
+      "sha256": "1714c98c83d6c2eb28f908b1e253161077fcb6868afadd85ef835940af6e1d84"
     },
     {
       "path": "scripts/integrity.mjs",
@@ -141,23 +171,23 @@
     },
     {
       "path": "src/generate.ts",
-      "bytes": 5739,
-      "sha256": "e7f4ac46cf1eaa29920a3431f4be39e231d3103b162d36dd1fb9d3384fb87ad8"
+      "bytes": 5757,
+      "sha256": "44d222baf6975fa4c3e127f94b96fcfb069378b2a0945d16a06a7c5955d4cd97"
     },
     {
       "path": "src/identity.ts",
-      "bytes": 8055,
-      "sha256": "b22066b981cbb755e896eb7a717eb3e7d3162102205bb3e3166ecd939f195ba4"
+      "bytes": 9611,
+      "sha256": "79e7033922d8e1d31161b491a13724983c13cd073587fb854aac246f6bf237bf"
     },
     {
       "path": "src/plugin.ts",
-      "bytes": 61581,
-      "sha256": "a859659e49be31097af4f6746554fd9242732f473f11647d2f9e8b9a73bb02b6"
+      "bytes": 70792,
+      "sha256": "cf201600c0a3beafad214ae977149d4bd70f0d32696304f9aa665d069ecc2a4d"
     },
     {
       "path": "src/roster.ts",
-      "bytes": 32842,
-      "sha256": "8da5382024063260bf0aad83aa5f636a53001b445dc190c6439fd63a1be81a04"
+      "bytes": 46036,
+      "sha256": "52f524400d65d941842efa1d1aac3fee991277caddf55a4126f268dcbaf83abc"
     },
     {
       "path": "src/runtime.ts",
@@ -171,13 +201,23 @@
     },
     {
       "path": "src/zombie/context.ts",
-      "bytes": 10647,
-      "sha256": "046286925e4f5a3cd669873672ab291fd8f4d6a8658fb484f0e848433d38e0f8"
+      "bytes": 14634,
+      "sha256": "167f1ecaff1927ba194b73a7a4a83c43a86b600bd07dd756eacd2c22fac79049"
     },
     {
       "path": "src/zombie/defaults.ts",
-      "bytes": 2668,
-      "sha256": "bdd1da278ec370626c5b0f45622f1989ace2d5c27efde5f040fbac766e142a87"
+      "bytes": 3489,
+      "sha256": "d9219f68b9af5c7d52bb485b892353431be32c105dc55a27a31e26e118a9ffa1"
+    },
+    {
+      "path": "src/zombie/focus.ts",
+      "bytes": 13450,
+      "sha256": "83b95b0216e699fda9047cad4ce854de8fd9c22182d174fa800f0f6ff411b14b"
+    },
+    {
+      "path": "src/zombie/goalContract.ts",
+      "bytes": 8750,
+      "sha256": "372926ca33af52b2e678626b8183b310103c2fe50cf2fd58f107a0f55663d104"
     },
     {
       "path": "src/zombie/io.ts",
@@ -201,13 +241,13 @@
     },
     {
       "path": "src/zombie/memory.ts",
-      "bytes": 11261,
-      "sha256": "591eab6db230579bc1511176869992fce01f062b3c8bb419387272d1bbf8d6a2"
+      "bytes": 12122,
+      "sha256": "227a76748973dd5d0cada954fbaede9ad50a962a4bedf1d29641c656db80338f"
     },
     {
       "path": "src/zombie/models.ts",
-      "bytes": 17490,
-      "sha256": "abc7aec6ebd3d3f1f3b1abec32cfa8d04c34c6f3f451afd7c5917cac09ad1298"
+      "bytes": 18053,
+      "sha256": "e634f34a2101dfa0690bce06969f2376d34d8ae463addae0b9370e20ce96d25a"
     },
     {
       "path": "src/zombie/modes.ts",
@@ -230,19 +270,24 @@
       "sha256": "e279e70d3ea5b164ee1c6feee880187d6657c7904fe13c932ceb0aa71260c6a2"
     },
     {
+      "path": "src/zombie/sanitize.ts",
+      "bytes": 2173,
+      "sha256": "d8fe339c61516c679ed35bbfe234375f977b7aff5673e375b4862ce8a15dc7ac"
+    },
+    {
       "path": "src/zombie/scan.ts",
       "bytes": 7562,
       "sha256": "9a9b657954f86a7f758a0d1fe17523a9d4c8496803c1e72017c3a7ce88116ade"
     },
     {
       "path": "src/zombie/server.ts",
-      "bytes": 36726,
-      "sha256": "fc03a03ade39a62f87ec667737cd9bc12e5324f5595b3be2bc20a44789e2d8b3"
+      "bytes": 41401,
+      "sha256": "16de3dd1e04fcd951e1c5233e86840e88c74502304a5296064c05a5926bb7221"
     },
     {
       "path": "src/zombie/skillCatalog.ts",
-      "bytes": 18749,
-      "sha256": "653cd28c70d3f4196859a2f340979840bcbeaabb131aa3ae45c7c8e7f7093a6c"
+      "bytes": 20102,
+      "sha256": "12d53ae97f48997ad06600236466e13bdc4c094aabf1b0b888bc576dee5fcc3f"
     },
     {
       "path": "src/zombie/skills.ts",
@@ -256,8 +301,8 @@
     },
     {
       "path": "src/zombie/syllabus.ts",
-      "bytes": 7542,
-      "sha256": "b564b2cb1e02c1e45f222b40cd39f2bf4d2b52a5fe01b7ff4b543d518a0f29ac"
+      "bytes": 11329,
+      "sha256": "d9b1fd37fe7f67458b360ad53bad580fdb55e6c23ff1991e0dc6c0ff8925321f"
     },
     {
       "path": "src/zombie/transform.ts",
@@ -271,13 +316,33 @@
     },
     {
       "path": "test/context.test.ts",
-      "bytes": 28054,
-      "sha256": "18edcdccfb82c5dc16dbc675064291d94009d214e3cbb405646affb5388bb297"
+      "bytes": 30441,
+      "sha256": "6b93ddb4534444c009390cf069734c30d19263f667e413e9ce7c71467fbb4883"
+    },
+    {
+      "path": "test/focus.test.ts",
+      "bytes": 4051,
+      "sha256": "47d93d65959c80c0b1ebb99b7cc5445d5dfbef536c9d3bc51bc90937b0e8b3a1"
+    },
+    {
+      "path": "test/footprint.test.ts",
+      "bytes": 2690,
+      "sha256": "6c053dfca81fe65da03e216d72bea79abbd015ec73f2f714aeb1769db705b8e3"
+    },
+    {
+      "path": "test/goalContract.test.ts",
+      "bytes": 2925,
+      "sha256": "25c20c0bce6857558634f96fa8de4ad5e62ef438028c898cab9e49ecd8abc813"
+    },
+    {
+      "path": "test/identity.test.ts",
+      "bytes": 2053,
+      "sha256": "8e94dcbe93c41730398021122f5c55a180843e748154291177c4bb6e9c2da134"
     },
     {
       "path": "test/install.test.ts",
-      "bytes": 21970,
-      "sha256": "74f1c5c9d8b00c9a991427a960dd2c46849aac789cbb6d9d2ae47411e1566b30"
+      "bytes": 24059,
+      "sha256": "6b823ce34b1e98e9b2b16b1f27d1bab872ff3629bfce5e45f58f9f1bb925d230"
     },
     {
       "path": "test/io.test.ts",
@@ -305,9 +370,14 @@
       "sha256": "7be693ccf8cba4111b8f4a0a7d70d13f83934b20a0c085a9bb44eafd7315c7b8"
     },
     {
+      "path": "test/memoryDialogue.test.ts",
+      "bytes": 2567,
+      "sha256": "b0be0a18a3e547f4452f18a50a8110964fbf366cd90833370f759dcbcac96b05"
+    },
+    {
       "path": "test/models.test.ts",
-      "bytes": 12312,
-      "sha256": "33b913d0cb4fb196d540c6b317f46c8618bcdb63d3e10225fb0be545d46102ba"
+      "bytes": 13588,
+      "sha256": "e95627522ea45b911d3d53221fe23d1cdc25fe32604b17c3a312d95d380c4510"
     },
     {
       "path": "test/modes.test.ts",
@@ -321,13 +391,23 @@
     },
     {
       "path": "test/plugin.test.ts",
-      "bytes": 45194,
-      "sha256": "f251fb87db8954780df1af58b95f759ef35b70c1624275a5b4d62fc3e18ae758"
+      "bytes": 55916,
+      "sha256": "9911e979f32554ca3b286eba1d9f92b98caa27030619a927510467d50c4291c3"
     },
     {
       "path": "test/repo.test.ts",
       "bytes": 2891,
       "sha256": "dfe11cfde7963d84f580a12d49c6acbf81494a9087e4dbe1c04ebca4e9c0427e"
+    },
+    {
+      "path": "test/roster.test.ts",
+      "bytes": 2895,
+      "sha256": "4c2d42977c3ecf1ab57342771628e91e963449c21d95c9fbd8689be92cf022a1"
+    },
+    {
+      "path": "test/sanitize.test.ts",
+      "bytes": 1479,
+      "sha256": "3007467c56d4af5e853e60ec08cddbeaf4f7f9281822cf8f1199e1618d7ae870"
     },
     {
       "path": "test/skillCatalog.test.ts",

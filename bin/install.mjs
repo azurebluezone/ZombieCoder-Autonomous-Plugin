@@ -290,6 +290,16 @@ const initialProvider =
         previous.customProviderUrl !== DEFAULT_PROVIDER_URL
           ? previous.customProviderUrl
           : "");
+// Per-agent model pins are opt-in and live in the seeded config. Read them at
+// each use instead of caching, because the seed step runs later than this line.
+function modelPinsEnabled() {
+  try {
+    return JSON.parse(fs.readFileSync(ZOMBIE_CONFIG, "utf8")).agentModelPins === true;
+  } catch {
+    return false;
+  }
+}
+
 const initialMcp =
   mcpFlag !== null
     ? cleanUrl(mcpFlag, DEFAULT_MCP_URL)
@@ -845,6 +855,7 @@ await step("declare @opencode/plugin dependency", () => {
   const dep = PKG.dependencies?.["@opencode/plugin"] ?? "beta";
   const merged = mergeJson(file, {
     name: "zombiecoder-opencode-runtime",
+    version: PKG.version,
     private: true,
     type: "module",
     dependencies: { "@opencode/plugin": dep },
@@ -954,6 +965,7 @@ await step("seed zombiecoder config", () => {
     modelStrategy: INSTALL_MODEL_STRATEGY,
     responseGate: existing.responseGate ?? true,
     autoSkills: existing.autoSkills ?? true,
+    agentModelPins: existing.agentModelPins ?? false,
     skillRepo: existing.skillRepo ?? DEFAULT_SKILL_REPO,
     createdAt: existing.createdAt ?? new Date().toISOString(),
   };
@@ -1160,6 +1172,15 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
       settings,
       models,
     };
+  } else if (next.providers?.[providerID]) {
+    // No provider URL configured: keep no dead endpoint behind. Only the
+    // installer-generated OpenAI-compatible entry is removed; a catalog provider
+    // the owner configured by hand is never touched.
+    const entry = next.providers[providerID];
+    if (entry?.package === "@opencode/ai/providers/openai-compatible") {
+      delete next.providers[providerID];
+      if (Object.keys(next.providers).length === 0) delete next.providers;
+    }
   }
 
   // The runtime resolves the free catalog at setup and may already have written a
@@ -1194,8 +1215,15 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
       delete agents[id];
     }
   }
-  for (const [id, entry] of Object.entries(roster.renderAgentsConfig(roster.ROSTER, installAssignment))) {
+  // Per-agent model pins are opt-in. With pins off (default) the agent entries
+  // carry no `model`: the model chosen in /models governs the session and a
+  // subagent inherits it. With pins on, the fixed agent -> model mapping wins.
+  const modelPins = modelPinsEnabled();
+  for (const [id, entry] of Object.entries(
+    roster.renderAgentsConfig(roster.ROSTER, installAssignment, modelPins),
+  )) {
     agents[id] = { ...(agents[id] ?? {}), ...entry };
+    if (!modelPins) delete agents[id].model;
   }
   next.agents = agents;
 
@@ -1217,9 +1245,13 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
     : null;
   const existingModel = typeof existing.model === "string" ? existing.model : null;
   const effectiveStrategy = INSTALL_MODEL_STRATEGY;
-  if (effectiveStrategy === "free") {
-    // Per-agent models are authoritative. A global `model` pins every agent to
-    // one model, which defeats the agent -> model mapping.
+  if (!modelPins) {
+    // No per-agent pin: the root `model` is the single default. A session that
+    // picks another model in /models still wins, and subagents inherit it.
+    next.model = providerReachable ? firstCandidate ?? BASELINE_MODEL : BASELINE_MODEL;
+  } else if (effectiveStrategy === "free") {
+    // Pins on: per-agent models are authoritative, so a global `model` would
+    // defeat the agent -> model mapping.
     delete next.model;
   } else if (providerReachable) {
     next.model =
@@ -1286,7 +1318,7 @@ await step("write agent markdown", async () => {
   let written = 0;
   for (const agent of mod.ROSTER) {
     const file = path.join(AGENTS_DIR, agent.id + ".md");
-    if (writeIfChanged(file, mod.agentMarkdown(agent, installAssignment[agent.id]))) written += 1;
+    if (writeIfChanged(file, mod.agentMarkdown(agent, installAssignment[agent.id], modelPinsEnabled()))) written += 1;
   }
   // Remove legacy persona files after a rename so two personas cannot coexist.
   let pruned = 0;

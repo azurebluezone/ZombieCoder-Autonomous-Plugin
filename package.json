@@ -20,8 +20,10 @@
     "quick-install": "node bin/quick-install.mjs",
     "integrity": "node scripts/integrity.mjs",
     "integrity:check": "node scripts/integrity.mjs --check",
+    "identity": "node scripts/identity.mjs --write",
+    "identity:check": "node scripts/identity.mjs",
     "lsp:probe": "node scripts/lsp-probe.mjs",
-    "check": "npm run typecheck && npm test && npm run integrity:check"
+    "check": "npm run typecheck && npm test && npm run identity:check && npm run integrity:check"
   },
   "engines": {
     "node": ">=22.6.0"

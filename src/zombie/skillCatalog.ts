@@ -55,6 +55,46 @@ export const DEFAULT_SKILL_REPO =
 
 export const SKILL_CATALOG: SkillSpec[] = [
   {
+    id: "typescript",
+    name: "TypeScript",
+    description:
+      "Type-safe JavaScript with strict types, interfaces, generics, type guards and tooling; use for API contracts and safe refactors.",
+    file: "typescript.md",
+    tags: ["typescript", "javascript", "types"],
+  },
+  {
+    id: "bootstrap",
+    name: "Bootstrap",
+    description:
+      "Bootstrap grid, components, utilities and responsive layouts; use for rapid prototyping and admin UIs.",
+    file: "bootstrap.md",
+    tags: ["css", "bootstrap", "ui", "responsive"],
+  },
+  {
+    id: "tailwind",
+    name: "Tailwind CSS",
+    description:
+      "Utility-first CSS with design tokens, responsive, states and component patterns; use for design-system-driven UIs.",
+    file: "tailwind.md",
+    tags: ["css", "tailwind", "ui", "design-tokens"],
+  },
+  {
+    id: "ollama",
+    name: "Ollama",
+    description:
+      "Local LLM inference with Ollama, model management, API usage and integration; use for local/edge AI workflows.",
+    file: "ollama.md",
+    tags: ["ai", "llm", "ollama", "local"],
+  },
+  {
+    id: "llama-cpu",
+    name: "Llama CPU",
+    description:
+      "Efficient LLaMA inference on CPU via GGUF/llama.cpp, quantization, threading and memory tuning; use for CPU-only environments.",
+    file: "llama-cpu.md",
+    tags: ["ai", "llm", "llama", "cpu", "gguf"],
+  },
+  {
     id: "laravel",
     name: "Laravel",
     description:

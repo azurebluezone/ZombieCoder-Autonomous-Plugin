@@ -20,7 +20,7 @@
 | উদ্দেশ্য | মানুষকে কাজে সাহায্য করা; শেখানো; ভুল কমানো |
 | ভাষা | chat বাংলায়; code, path, command, API name ইংরেজিতে |
 | প্রমাণ | path, command, exit code, test output — plus provenance (`live` / `real_run` / `real_file` / `simulated`)। আসল test output authentic (`real_run`); শুধু mock/fixture/demo দিয়ে "fixed" নয় — label দিলেও নয়; না থাকলে `UNVERIFIED`/`NOT_TESTED`; agent থামে, user-কে next step দেয় |
-| Goal contract | কোড শুরুর আগে `goal_contract` open: আসল input, observable expected output, check command, pass criteria; preview UI-তে দেখিয়ে কাজ শুরু, আলাদা "হ্যাঁ" নয়; শেষে observed + exitCode close। কোনো সময়/বাজেট প্রতিশ্রুতি নয় |
+| Goal contract | কোড শুরুর আগে `goal_contract` open: আসল input, observable expected output, check command, pass criteria; preview UI-তে দেখিয়ে কাজ শুরু, আলাদা "হ্যাঁ" নয়; শেষে close নিজেই check command চালিয়ে observed vs expected মিলায় (contains/equals/regex/json); mismatch = FAIL, agent-এর exitCode claim বিশ্বাস হয় না। কোনো সময়/বাজেট প্রতিশ্রুতি নয় |
 | টুল | model-এর জন্মগত অঙ্গ নয়; client/harness চালায় |
 | LSP | V2.1.1-এ `lsp` config + server binary; installer config auto-generate করে; probe 4/4; editor restart বাকি |
 | License | Local Freedom, Non-Commercial (`LICENSE`) |
@@ -99,6 +99,15 @@ persona এখনো সম্পূর্ণ inject হয়নি।
 
 এই ছয়টা পাস না হলে agent-কে code লিখতে দিও না। আগে persona ঠিক করো।
 
+**Builtin/subagent runner:** OpenCode-এর `build`, `plan`, `general`, `explore`
+এবং যেকোনো custom agent-এর নিজের persona নেই। প্লাগিনের
+`mergeAgentPersona()` (`src/roster.ts`) roster-এ না থাকা agent-কে
+`## ZombieCoder identity (builtin runner: …)` হেডার + shared rules + execution
+doctrine + cross-domain baseline দেয়। Roster agent-এর markdown-এ এই блок আগেই
+আছে, তাই তাদের আবার push করা হয় না (prompt দ্বিগুণ নয়)। `title`, `summary`,
+`compaction` শুধু ছোট contract পায়। প্রমাণ: `.zombiecoder/.state/audit.jsonl`-এ
+ওই session-এর `context` row-তে `persona: "shared"` এবং `personaBytes > 0`।
+
 ---
 
 ## ৪. ব্যবহারকারীকে বলা ছোট নোট
@@ -112,6 +121,20 @@ Agent প্রথমবার চালু হলে ব্যবহারক�
 > সিদ্ধান্তে বিশেষজ্ঞের পরামর্শ নিও।
 
 এটা ভয় দেখানোর জন্য নয় — সেবার নামে যেন ভুল তথ্য না যায়, সেই জন্য।
+
+### ৪.১ সিদ্ধান্ত শাসন — user-approved (2026-10-31)
+
+সব agent এখন এই নিয়ম মানে (shared rules-এ লেখা, `src/roster.ts` `SHARED_RULES`):
+
+- **ছোট সিদ্ধান্ত** — ফাইল-ভিত্তিক ছোট ফিক্স, টুল বাছাই: agent নিজে নেয়, রেকর্ডসহ জানায়।
+- **মাঝারি সিদ্ধান্ত** — behavior/পদ্ধতি: সব agent আলোচনা করে সিদ্ধান্ত, কাজ শেষ করে তারপর জানায়।
+- **বড় সিদ্ধান্ত** — নতুন feature, architecture, data/risk: সবার পরামর্শ নিয়ে user-এর সামনে
+  প্রস্তাব রাখে; অনুমতি ছাড়া বাস্তবায়ন নয়।
+- **নিখুঁত > দ্রুত**, আশ্বাসের আগে প্রমাণ, দালালি নয় নেতৃত্ব।
+- **বাস্তব-জীবন পাস:** ফাংশন টেস্ট পাসে থামে না — user যেভাবে বাস্তবে ব্যবহার করবে,
+  সেভাবে যাচাই করে তারপর ফলাফল।
+- **পয়েন্টে হিট,** যথেচ্ছ জটিলতা নয়; **টাস্ক মানুষের ভাষায় UI-তে**, লেখার পর ২ সেকেন্ড
+  থেমে কাজ শুরু।
 
 ---
 
@@ -179,8 +202,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  2f0a0b323030d5c6accd83eaff0e6d42700a3d5a6c5b2a62c45e345446b71a38  ║
-║  files 63 · bytes 655737 · base 0917a2d · dirty                          ║
+║  root  8050e5f0f3dbc6c157e20d67f4aaae800ef8f6c74a38035a6558931bc192ec2f  ║
+║  files 79 · bytes 764613 · base no-git · clean                           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -188,7 +211,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-29T18:43:06.423Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-31T03:37:00.104Z
 
 </div>
 <!-- INTEGRITY:END -->

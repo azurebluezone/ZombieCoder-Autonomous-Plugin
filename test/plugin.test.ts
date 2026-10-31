@@ -17,14 +17,27 @@ process.env.ZOMBIECODER_ORIGIN_URL = "off";
 
 type Fake = ReturnType<typeof makeContext>;
 
-function makeContext(root: string) {
+const DEFAULT_TEST_MODELS = [
+  {
+    providerID: "opencode",
+    modelID: "big-pickle",
+    cost: [{ input: 0, output: 0 }],
+    status: "active",
+    capabilities: { tools: true },
+    enabled: true,
+  },
+];
+
+function makeContext(root: string, options: { models?: any[] } = {}) {
+  const catalog = options.models ?? DEFAULT_TEST_MODELS;
   const tools: any[] = [];
   const skills: any[] = [];
   const hooks: string[] = [];
   const toolHooks: Record<string, (event: any) => any> = {};
   const sessionHooks: Record<string, (event: any) => any> = {};
   const agentSwitches: Array<{ sessionID: string; agent: string }> = [];
-  const switchState = { fail: false };
+  const modelSwitches: Array<{ sessionID: string; model: any }> = [];
+  const switchState = { fail: false, failModel: false };
   const synthetics: Array<{ sessionID: string; text: string; description?: string }> = [];
   const prompts: Array<{ sessionID: string; text: string; delivery?: string }> = [];
   const storage = new Map<string, unknown>();
@@ -35,18 +48,7 @@ function makeContext(root: string) {
     location: { directory: root },
     provider: { list: async () => ({ data: [] }) },
     model: {
-      list: async () => ({
-        data: [
-          {
-            providerID: "opencode",
-            modelID: "big-pickle",
-            cost: [{ input: 0, output: 0 }],
-            status: "active",
-            capabilities: { tools: true },
-            enabled: true,
-          },
-        ],
-      }),
+      list: async () => ({ data: catalog }),
       default: async () => ({ data: { providerID: "opencode", modelID: "big-pickle" } }),
     },
     agent: {
@@ -101,6 +103,10 @@ function makeContext(root: string) {
         if (switchState.fail) throw new Error("agent not found");
         agentSwitches.push(input);
       },
+      switchModel: async (input: { sessionID: string; model: any }) => {
+        if (switchState.failModel) throw new Error("model not found");
+        modelSwitches.push(input);
+      },
       synthetic: async (input: { sessionID: string; text: string; description?: string }) => {
         synthetics.push(input);
       },
@@ -117,6 +123,7 @@ function makeContext(root: string) {
     toolHooks,
     sessionHooks,
     agentSwitches,
+    modelSwitches,
     synthetics,
     prompts,
     storage,
@@ -173,7 +180,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.ok(agents.includes("zombiecoder.md"), "renamed agent markdown missing");
   assert.ok(!agents.includes("kobir.md"), "old agent markdown must not survive the rename");
   const manu = fs.readFileSync(path.join(root, ".opencode", "agents", "manu.md"), "utf8");
-  assert.match(manu, /^model: opencode\/big-pickle$/m);
+  assert.doesNotMatch(manu, /^model:/m, "pins are off by default: markdown must not pin a model");
   assert.match(manu, /ZombieCoder Shared Rules/);
   assert.match(manu, /Cross-Domain Baseline/);
   assert.match(manu, /ভাইয়া/);
@@ -188,12 +195,55 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.match(manu, /current mode: `all`/);
   assert.match(manu, /V2-তে `scout` নেই/);
   assert.match(manu, /নিজের mode নিজে বদলাতে পারো না/);
+  // The provider is a third party: owner PII from identity.ts must never ride
+  // along in an agent prompt or config. The persona travels, the person does not.
+  for (const secret of [
+    "Sahon Srabon",
+    "+880 1323-626282",
+    "infi@zombiecoder.my.id",
+    "235 South Pirarbag",
+  ]) {
+    assert.ok(!manu.includes(secret), `agent markdown leaked identity field: ${secret}`);
+  }
 
   // V2 config is the second agent door: provider, agents, models, permissions.
   const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+  for (const secret of [
+    "Sahon Srabon",
+    "+880 1323-626282",
+    "infi@zombiecoder.my.id",
+    "235 South Pirarbag",
+  ]) {
+    assert.ok(
+      !JSON.stringify(config.agents).includes(secret),
+      `agent config leaked identity field: ${secret}`,
+    );
+  }
+  // Our plugin must not decorate provider requests with its own identity
+  // headers. The model provider sees the bearer token OpenCode already sends,
+  // nothing added by ZombieCoder.
+  const modelRequest = fake.sessionHooks["model.request"];
+  assert.equal(typeof modelRequest, "function", "model.request hook was not registered");
+  const requestEvent = {
+    sessionID: "ses_headers",
+    agent: "manu",
+    model: { providerID: "opencode", id: "big-pickle" },
+    kind: "primary",
+    headers: { authorization: "Bearer test" } as Record<string, string>,
+  };
+  await modelRequest(requestEvent);
+  assert.deepEqual(requestEvent.headers, { authorization: "Bearer test" });
+  assert.ok(
+    !Object.keys(requestEvent.headers).some((key) => /zombie/i.test(key)),
+    "provider request must not carry a ZombieCoder identity header",
+  );
+
   assert.equal(config.$schema, "https://opencode.ai/config.json");
   assert.equal(config.agents.zombiecoder.mode, "all");
-  assert.equal(config.agents.zombiecoder.model, "opencode/big-pickle");
+  // Pins off (default): no agent model, one root default. A /models choice still
+  // wins for the session, and subagents inherit it.
+  assert.equal(config.agents.zombiecoder.model, undefined);
+  assert.equal(config.model, "opencode/big-pickle");
   assert.equal(config.agents.manu.mode, "all");
   for (const agent of Object.values(config.agents) as any[]) {
     assert.equal(agent.mode, "all", "every agent must be a main agent, not a subagent");
@@ -323,21 +373,45 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
     /observable outcome/,
     "a test status is not an expected outcome",
   );
+  await assert.rejects(
+    () =>
+      goalTool.execute({
+        action: "open",
+        goal: "checkout",
+        input: "src/real-input.txt",
+        expected: "not-json",
+        check: "node check-order.mjs",
+        pass: "json",
+        match: "json",
+      }),
+    /valid JSON/,
+    "match=json must reject an invalid expectation at open",
+  );
+
+  // The contract's check is a real command; close runs it. The agent's own
+  // observed/exitCode is a claim and must never decide PASS.
+  fs.writeFileSync(
+    path.join(root, "check-order.mjs"),
+    'console.log(JSON.stringify({ id: 7, total: 42 }));\n',
+  );
+
   const opened = (await goalTool.execute(
     {
       action: "open",
       goal: "checkout returns an order id",
-      input: "src/real-input.txt",
-      expected: "POST /checkout returns 201 with an order id",
-      check: "npm test",
-      pass: "201 + order id in the body",
+      input: "check-order.mjs",
+      expected: '{"id":7,"total":42}',
+      check: "node check-order.mjs",
+      pass: "exit 0 and the exact JSON body",
+      match: "json",
     },
     { sessionID: "ses_goal" },
   )).output;
   assert.equal(opened.status, "open");
   assert.equal(opened.uiShown, true, "the preview must be pushed to the session UI");
   assert.match(opened.preview, /তুমি চাইছ/);
-  assert.match(opened.preview, /POST \/checkout returns 201/);
+  assert.match(opened.preview, /\{"id":7,"total":42\}/);
+  assert.match(opened.preview, /মিলানোর নিয়ম: json/);
   assert.doesNotMatch(opened.preview, /বাজেট|budget/i, "no time/budget line in the preview");
   const previewCard = fake.synthetics.find(
     (entry) => entry.description === "goal contract preview",
@@ -348,22 +422,75 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(previewCard.text, /"হ্যাঁ"/, "no confirmation word is requested");
   const syllabusAfterOpen = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
   assert.match(syllabusAfterOpen, new RegExp(`Goal Contract ${opened.id}`));
-  assert.match(syllabusAfterOpen, /expected: POST \/checkout returns 201/);
+  assert.match(syllabusAfterOpen, /expected: \{"id":7,"total":42\}/);
+  assert.match(syllabusAfterOpen, /- match: json/);
 
-  const closed = (await goalTool.execute({
+  // A lying claim (observed 500, exitCode 1) is recorded but ignored.
+  const closed = (await goalTool.execute(
+    {
+      action: "close",
+      id: opened.id,
+      observed: "HTTP 500 it broke",
+      exitCode: 1,
+    },
+    { sessionID: "ses_goal" },
+  )).output;
+  assert.equal(closed.status, "PASS", "the real check output wins over the agent claim");
+  assert.equal(closed.exitCode, 0);
+  assert.match(closed.observed, /"id":7/);
+  assert.equal(closed.uiShown, true, "the result must be pushed to the session UI");
+  const resultCard = fake.synthetics.find(
+    (entry) => entry.description === "goal contract result",
+  );
+  assert.ok(resultCard, "goal_contract close must show a synthetic result card");
+  assert.match(resultCard.text, /PASS/);
+  const syllabusAfterClose = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
+  assert.match(syllabusAfterClose, /claimExitCode: 1/);
+  assert.match(syllabusAfterClose, /- exitCode: 0/);
+
+  // The real output must match the recorded expectation, not the agent's word.
+  const mismatch = (await goalTool.execute(
+    {
+      action: "open",
+      goal: "checkout returns order 999",
+      input: "check-order.mjs",
+      expected: '{"id":999,"total":0}',
+      check: "node check-order.mjs",
+      pass: "order 999",
+      match: "json",
+    },
+    { sessionID: "ses_goal" },
+  )).output;
+  const mismatchClose = (await goalTool.execute({
     action: "close",
-    id: opened.id,
-    observed: "HTTP 201 {\"orderId\":7}",
+    id: mismatch.id,
+    observed: '{"id":999,"total":0}',
     exitCode: 0,
   })).output;
-  assert.equal(closed.status, "PASS");
-  const failedClose = (await goalTool.execute({
+  assert.equal(mismatchClose.status, "FAIL");
+  assert.match(mismatchClose.reason, /does not match/);
+
+  // A failing command stays FAIL regardless of the agent's exitCode claim.
+  const failing = (await goalTool.execute(
+    {
+      action: "open",
+      goal: "failing check",
+      input: "check-order.mjs",
+      expected: "anything",
+      check: 'node -e "process.exit(3)"',
+      pass: "must not pass",
+    },
+    { sessionID: "ses_goal" },
+  )).output;
+  const failingClose = (await goalTool.execute({
     action: "close",
-    id: opened.id,
-    observed: "HTTP 500",
-    exitCode: 1,
+    id: failing.id,
+    observed: "all good",
+    exitCode: 0,
   })).output;
-  assert.equal(failedClose.status, "FAIL");
+  assert.equal(failingClose.status, "FAIL");
+  assert.match(failingClose.reason, /exited with 3/);
+
   await assert.rejects(
     () => goalTool.execute({ action: "close", id: "gc-never", observed: "x", exitCode: 0 }),
     /never opened/,
@@ -541,6 +668,56 @@ test("three consecutive tool errors hand the session to the next roster agent on
   await cleanup();
 });
 
+test("a write without an open goal contract shows one warning card and audits it", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const after = fake.toolHooks["execute.after"];
+  assert.equal(typeof after, "function", "tool hook was not registered");
+
+  await after({
+    status: "completed",
+    sessionID: "ses_nocontract",
+    agent: "manu",
+    tool: "edit",
+    id: "call-1",
+  });
+  const warnings = fake.synthetics.filter((entry) => entry.description === "goal contract missing");
+  assert.equal(warnings.length, 1, "a write before the contract must produce one visible card");
+  assert.match(warnings[0].text, /goal contract ছাড়া কাজ শুরু হয়েছে/);
+  assert.match(warnings[0].text, /goal_contract open/);
+  const audit = fs.readFileSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl"), "utf8");
+  assert.match(audit, /"kind":"goal\.missing"/);
+  assert.match(audit, /"tool":"edit"/);
+
+  await after({
+    status: "completed",
+    sessionID: "ses_nocontract",
+    agent: "manu",
+    tool: "write",
+    id: "call-2",
+  });
+  assert.equal(
+    fake.synthetics.filter((entry) => entry.description === "goal contract missing").length,
+    1,
+    "the warning is once per session, not per write",
+  );
+
+  await after({
+    status: "completed",
+    sessionID: "ses_readonly",
+    agent: "manu",
+    tool: "read",
+    id: "call-3",
+  });
+  assert.equal(
+    fake.synthetics.filter((entry) => entry.description === "goal contract missing").length,
+    1,
+    "a read-only tool must not warn",
+  );
+  await cleanup();
+});
+
 test("session.idle archives the complete OpenCode session context", async () => {
   const root = tempProject();
   assert.equal(fs.existsSync(path.join(root, ".zombiecoder")), false);
@@ -628,6 +805,36 @@ test("context hook archives overflow without waiting for session.idle", async ()
   assert.match(injected, /Pack \d+B/);
   assert.match(injected, /Decision rule:/);
   assert.match(injected, /Start every response with "ভাইয়া"/);
+
+  // Builtin OpenCode agents (explore/general/build/plan) have no roster entry.
+  // They must still receive the ZombieCoder identity, not a generic prompt.
+  const builtinEvent = {
+    agent: "explore",
+    sessionID: "ses_builtin",
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    messages: [message(0)],
+    system: [] as Array<{ type: string; text: string }>,
+  };
+  await hook(builtinEvent);
+  const builtinText = builtinEvent.system.map((part) => part.text).join("\n");
+  assert.match(builtinText, /ZombieCoder identity \(builtin runner: explore\)/);
+  assert.match(builtinText, /ZombieCoder Shared Rules/);
+  assert.match(builtinText, /Execution Doctrine/);
+  assert.match(builtinText, /Start every response with "ভাইয়া"/);
+  assert.doesNotMatch(builtinText, /unknown agent/);
+
+  // The audit must record which merge branch ran, not just "context".
+  const auditRows = fs
+    .readFileSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const rosterAudit = auditRows.find((row) => row.sessionID === "ses_ctx" && row.kind === "context");
+  const builtinAudit = auditRows.find((row) => row.sessionID === "ses_builtin" && row.kind === "context");
+  assert.equal(rosterAudit.persona, "roster", "roster agents keep their own markdown");
+  assert.equal(rosterAudit.personaBytes, 0, "roster persona must not be pushed twice");
+  assert.equal(builtinAudit.persona, "shared", "builtin runner uses the merged persona");
+  assert.ok(builtinAudit.personaBytes > 5000, "the merged persona is the full block");
 
   const { readArchive, readIndex } = await import("../src/zombie/memory.ts");
   const archivedTexts = () =>
@@ -734,6 +941,7 @@ test("global install keeps global agent models when a project plan falls back to
       opencodeApiUrl: "",
       ssotRefreshMs: 300000,
       modelStrategy: "auto",
+      agentModelPins: true,
     }),
   );
 
@@ -788,6 +996,7 @@ test("global install falls back to free models when the configured provider is d
       opencodeApiUrl: "",
       ssotRefreshMs: 300000,
       modelStrategy: "auto",
+      agentModelPins: true,
     }),
   );
 
@@ -997,6 +1206,11 @@ test("a gate-blocked answer escalates through three agents and then opens the br
   assert.match(await first.response.text(), /UNVERIFIED/, "the blocked answer must stay truthful");
   await (first as any).zombiecoderSettled;
   assert.deepEqual(fake.agentSwitches, [{ sessionID: "ses_gate", agent: "jarin" }]);
+  assert.equal(
+    fake.modelSwitches.length,
+    0,
+    "pins off by default: switching agent must leave the /models choice untouched",
+  );
   assert.equal(fake.prompts.length, 1);
   assert.equal(fake.prompts[0].delivery, "queue");
   assert.match(fake.prompts[0].text, /circuit breaker/);
@@ -1026,6 +1240,82 @@ test("a gate-blocked answer escalates through three agents and then opens the br
   assert.equal(breaker.failures.length, 3);
   assert.deepEqual(breaker.agents, ["manu", "jarin", "brishti"]);
   assert.match(breaker.failures[0].context.blockedPreview, /I fixed the login bug/);
+
+  await cleanup();
+});
+
+test("pins on: the breaker moves the model with the agent, never a random one", async () => {
+  const root = tempProject();
+  fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "config.json"),
+    JSON.stringify({
+      version: "0.0.0-test",
+      customProviderUrl: "",
+      customProviderID: "missionbarisal",
+      mcpUrl: "",
+      opencodeApiUrl: "",
+      ssotRefreshMs: 300000,
+      modelStrategy: "free",
+      agentModelPins: true,
+    }),
+  );
+  const fake = makeContext(root, {
+    models: [
+      {
+        providerID: "opencode",
+        modelID: "big-pickle",
+        cost: [{ input: 0, output: 0 }],
+        status: "active",
+        capabilities: { tools: true },
+        enabled: true,
+      },
+      {
+        providerID: "opencode",
+        modelID: "second-free",
+        cost: [{ input: 0, output: 0 }],
+        status: "active",
+        capabilities: { tools: true },
+        enabled: true,
+      },
+    ],
+  });
+  const cleanup = await setup(fake.ctx);
+  const hook = fake.sessionHooks["http.response"];
+  assert.equal(typeof hook, "function", "http.response hook was not registered");
+
+  const unproven =
+    [
+      `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: "I fixed the login bug, the issue was the poll timer and the stale HTML." } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}`,
+      "data: [DONE]",
+    ].join("\n") + "\n";
+
+  const event = {
+    kind: "primary",
+    sessionID: "ses_pins",
+    agent: "manu",
+    model: { providerID: "opencode", modelID: "big-pickle" },
+    response: new Response(unproven, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }),
+  };
+  await hook(event);
+  await event.response.text();
+  await (event as any).zombiecoderSettled;
+
+  assert.deepEqual(fake.agentSwitches, [{ sessionID: "ses_pins", agent: "jarin" }]);
+  const config = JSON.parse(fs.readFileSync(path.join(root, "opencode.json"), "utf8"));
+  const pinned = config.agents.jarin.model as string;
+  assert.equal(pinned, "opencode/second-free", "the pinned mapping must resolve deterministically");
+  assert.equal(fake.modelSwitches.length, 1, "pins on: the model must follow the agent");
+  // Model.Ref wire shape is { id, providerID, variant? } — not
+  // { providerID, model }. Verified against @opencode/schema/dist/model.d.ts.
+  assert.deepEqual(fake.modelSwitches[0], {
+    sessionID: "ses_pins",
+    model: { providerID: "opencode", id: "second-free" },
+  });
 
   await cleanup();
 });

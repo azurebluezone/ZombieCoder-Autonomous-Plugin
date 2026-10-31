@@ -6,20 +6,24 @@
 // available through tools; the pack is the cheap default.
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { readText, sha256 } from "./io.ts";
 import { readIndex, type MemoryMessage } from "./memory.ts";
 import { readSyllabus } from "./syllabus.ts";
 import { memoryIndexFile, ssotFile, syllabusFile } from "./paths.ts";
+import { FOCUS_LIMITS, listProjectFiles, resolveFocus, type FocusPlan } from "./focus.ts";
+import { openContracts } from "./goalContract.ts";
 
 export const CONTEXT_LIMITS = {
   // Only the slices an agent needs for the current task. The full SSOT and
   // syllabus stay on disk and are read on demand through tools.
   ssot: 1200,
   syllabus: 650,
+  focus: 700,
   memoryPerMessage: 220,
   memoryTotal: 700,
-  total: 2800,
+  total: 3600,
 } as const;
 
 // Which SSOT sections each role actually needs. A documentation agent does not
@@ -82,9 +86,42 @@ export type ContextPack = {
   ssotExcerptBytes: number;
   /** Bytes of the syllabus excerpt actually prepared for the prompt, not the file. */
   syllabusExcerptBytes: number;
+  /** Target files resolved from the user's message, when one was available. */
+  focus: FocusPlan | null;
+  /** Goal contracts opened in this session whose result is not recorded yet. */
+  openContractIDs: string[];
   memory: MemoryStatus;
   owners: ContextOwners;
 };
+
+// Provider-facing text must not carry the OS home directory. `/home/<user>` (or
+// `C:\Users\<user>`) reveals the account name and device layout on every
+// request, and a model provider is a third party. Tools still receive the real
+// absolute paths — evidence quality is unchanged; only the copy that leaves the
+// machine is rewritten to `~`.
+const HOME_DIR = (() => {
+  try {
+    return os.homedir();
+  } catch {
+    return "";
+  }
+})();
+
+export function stripHomePath(text: string, home = HOME_DIR): string {
+  const value = String(text ?? "");
+  const target = String(home ?? "").trim();
+  if (!target || target === "/" || target === "\\") return value;
+  const variants = new Set([
+    target,
+    target.replace(/\\/g, "/"),
+    target.replace(/\//g, "\\"),
+  ]);
+  let out = value;
+  for (const variant of variants) {
+    if (variant) out = out.split(variant).join("~");
+  }
+  return out;
+}
 
 function clip(text: string, limit: number, from: "head" | "tail" = "head"): string {
   const value = String(text ?? "").trim();
@@ -161,10 +198,24 @@ function ssotExcerpt(text: string, agentID: string): string {
 }
 
 function syllabusExcerpt(text: string): string {
-  // Lessons are the only syllabus content that changes per turn. Scope and the
-  // agent list are already in the system prompt, so do not pay for them twice.
-  const lessons = section(text, "## 5. Lessons", CONTEXT_LIMITS.syllabus);
-  return clip(lessons, CONTEXT_LIMITS.syllabus, "tail");
+  // Lessons are the only syllabus content that changes per turn. The seed puts
+  // its placeholder and signature above the first lesson, so slicing the raw
+  // section used to send "_Nothing recorded yet_" to the model even when the
+  // file had 12 lessons. Split on lesson headings instead and keep the newest.
+  const at = text.search(/^## \d+\. Lessons[^\n]*$/m);
+  if (at < 0) return "No lessons yet; read the full syllabus with read_syllabus before work.";
+  const body = text.slice(at).replace(/^## \d+\. Lessons[^\n]*\n/, "");
+  const lessons = body
+    .split(/^### /m)
+    .slice(1)
+    .map((entry) => entry.trimEnd())
+    .filter((entry) => entry.length > 0 && !/^Goal Contract /i.test(entry));
+  if (lessons.length === 0) {
+    return "No lessons yet; read the full syllabus with read_syllabus before work.";
+  }
+  const newest = lessons[lessons.length - 1].trim();
+  const header = `Newest of ${lessons.length} lessons (newest last). Full history: read_syllabus.`;
+  return clip(`${header}\n### ${newest}`, CONTEXT_LIMITS.syllabus);
 }
 
 function memorySummary(recent: MemoryMessage[]): string {
@@ -194,6 +245,8 @@ export function buildContextPack(
   projectRoot: string,
   agentID: string,
   recent: MemoryMessage[] = [],
+  userMessage = "",
+  sessionID = "",
 ): ContextPack {
   const ssotPath = ssotFile(projectRoot);
   const syllabusPath = syllabusFile(projectRoot);
@@ -220,6 +273,35 @@ export function buildContextPack(
   const ssotExcerptBytes = ssot.exists ? Buffer.byteLength(ssotBody, "utf8") : 0;
   const syllabusExcerptBytes = syllabus.exists ? Buffer.byteLength(syllabusBody, "utf8") : 0;
 
+  // The gate is derived from the syllabus ledger, not from the model's memory.
+  // An open contract without a result block means work was pre-registered; no
+  // open contract means the agent is about to start unregistered.
+  const openContractsForSession = openContracts(syllabusText ?? "", sessionID);
+  const gate = openContractsForSession.length
+    ? [
+        `- open: ${openContractsForSession
+          .map((contract) => `${contract.id} — ${contract.goal || "(no goal recorded)"}`)
+          .join("; ")}`,
+        "- close it with the recorded check before claiming success; without that result the claim is UNVERIFIED.",
+      ]
+    : [
+        "- none for this session.",
+        "- Before the first write/edit/shell that changes the project, call `goal_contract` open: real input, observable expected output, check command, pass criteria.",
+      ];
+
+  // Focus: turn the user's sentence into the smallest truthful file set. This is
+  // what stops the "plan first, scan everything" loop the audit found.
+  let focusPlan: FocusPlan | null = null;
+  if (String(userMessage ?? "").trim().length > 0) {
+    try {
+      const files = listProjectFiles(projectRoot);
+      if (files.length > 0) focusPlan = resolveFocus(files, userMessage);
+    } catch {
+      focusPlan = null;
+    }
+  }
+  const focusBody = focusPlan ? clip(focusPlan.text, CONTEXT_LIMITS.focus) : "";
+
   const lines = [
     "## ZombieCoder Compact Context Pack",
     "",
@@ -237,6 +319,10 @@ export function buildContextPack(
       : "### Syllabus (missing)",
     syllabusBody,
     "",
+    "### Pre-work gate — goal contract",
+    ...gate,
+    "",
+    ...(focusBody ? [`### Focus files — from the user's message (${Buffer.byteLength(focusBody, "utf8")}B)`, focusBody, ""] : []),
     `### Session memory (${memory.recent} recent, ${memory.archives} archives) — owner: ${CONTEXT_OWNERS.memory.agent}`,
     memorySummary(recent),
     "",
@@ -247,12 +333,14 @@ export function buildContextPack(
     `- Skills → ${CONTEXT_OWNERS.skills.agent} (${CONTEXT_OWNERS.skills.role})`,
     `- Evidence gate → ${CONTEXT_OWNERS.gate.agent} (${CONTEXT_OWNERS.gate.role})`,
   ];
-  const text = clip(lines.join("\n"), CONTEXT_LIMITS.total);
+  const text = stripHomePath(clip(lines.join("\n"), CONTEXT_LIMITS.total));
   const uiLine = `Context: SSOT ${ssot.exists ? "OK" : "MISSING"} (${CONTEXT_OWNERS.ssot.agent}) | Syllabus ${
     syllabus.exists ? "OK" : "MISSING"
   } (${CONTEXT_OWNERS.syllabus.agent}) | Memory ${memory.recent} recent / ${memory.archives} archives (${
     CONTEXT_OWNERS.memory.agent
-  }) | Pack ${Buffer.byteLength(text, "utf8")}B`;
+  }) | Focus ${focusPlan ? `${focusPlan.primary.length}+${focusPlan.related.length} files` : "off"} | Contract ${
+    openContractsForSession.length ? openContractsForSession[0].id : "none"
+  } | Pack ${Buffer.byteLength(text, "utf8")}B`;
   return {
     text,
     bytes: Buffer.byteLength(text, "utf8"),
@@ -262,6 +350,8 @@ export function buildContextPack(
     syllabus,
     ssotExcerptBytes,
     syllabusExcerptBytes,
+    focus: focusPlan,
+    openContractIDs: openContractsForSession.map((contract) => contract.id),
     memory,
     owners: CONTEXT_OWNERS,
   };

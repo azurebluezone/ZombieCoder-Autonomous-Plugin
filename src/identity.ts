@@ -1,12 +1,44 @@
 // ZombieCoder — Identity Specification generator
 // Source of truth is THIS FILE. The markdown and identity.json are build artifacts.
 
+import { createHash } from "node:crypto";
+
 const F = String.fromCharCode(96, 96, 96);
 
 export type IdCtx = { generatedAt: string; version: string; versionSource: string };
 
+// Canonical JSON: object keys sorted, no whitespace, UTF-8. Written down because
+// "canonical" without a definition cannot be verified — the audit found a stored
+// checksum that no serializer could reproduce.
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  const body = Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(",");
+  return `{${body}}`;
+}
+
+export function identityChecksum(payload: { system_identity?: Record<string, any> }): string {
+  const clone: Record<string, any> = JSON.parse(JSON.stringify(payload?.system_identity ?? {}));
+  if (clone.manifest && typeof clone.manifest === "object") delete clone.manifest.checksum;
+  return createHash("sha256").update(canonicalJson(clone), "utf8").digest("hex");
+}
+
+export function verifyIdentityChecksum(payload: { system_identity?: Record<string, any> }): {
+  ok: boolean;
+  stored: string;
+  computed: string;
+} {
+  const stored = String(payload?.system_identity?.manifest?.checksum ?? "");
+  const computed = identityChecksum(payload);
+  return { ok: stored.length > 0 && stored === computed, stored, computed };
+}
+
 export function identityPayload(ctx: IdCtx) {
-  return {
+  const payload = {
     system_identity: {
       name: "ZombieCoder",
       version: ctx.version,
@@ -29,9 +61,12 @@ export function identityPayload(ctx: IdCtx) {
         read_only: true,
         checksum_algorithm: "sha256",
         checksum_scope: "canonical JSON of this object, checksum field removed",
+        checksum: "",
       },
     },
   };
+  payload.system_identity.manifest.checksum = identityChecksum(payload);
+  return payload;
 }
 
 export function renderIdentity(ctx: IdCtx): string {

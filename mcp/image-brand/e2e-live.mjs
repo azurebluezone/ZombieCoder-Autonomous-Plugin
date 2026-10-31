@@ -16,7 +16,7 @@ try {
   assert.equal(init.serverInfo.name, "image-brand");
 
   const list = await client.request("tools/list", {});
-  assert.equal(list.tools.length, 4);
+  assert.equal(list.tools.length, 5);
 
   const search = await client.callTool("image_search", { query: "tea caddy", provider: "met", limit: 2 });
   assert.ok(search.results?.length > 0, "Met search returned no PD images");
@@ -49,7 +49,18 @@ try {
   assert.equal(sidecar.title, "চায়ের কাপে ইতিহাস");
   assert.equal(sidecar.license, "Public Domain");
 
-  console.log(`tools=4 source=met image=ok bytes=${branded.output_bytes} sha=${branded.output_sha256.slice(0, 12)}`);
+  const fitted = await client.callTool("image_fit", {
+    input: fetched.file,
+    output: path.join(dir, "fit-1200x630.jpg"),
+    width: 1200,
+    height: 630,
+    fit: "cover",
+    quality: 88,
+    source: { provider: hit.provider, license: hit.license, page: hit.page_url, creator: hit.creator },
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(fitted.sidecar, "utf8")).canvas, [1200, 630]);
+
+  console.log(`tools=5 source=met image=ok fit=${fitted.width}x${fitted.height} bytes=${branded.output_bytes} sha=${branded.output_sha256.slice(0, 12)}`);
   console.log(`hit=${hit.title} | ${hit.creator} | ${hit.license}`);
   console.log(`output=${branded.output}`);
 } finally {

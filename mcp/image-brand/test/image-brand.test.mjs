@@ -62,8 +62,8 @@ test("provider normalizers keep PD/CC0 and drop the rest", () => {
   assert.equal(normalizeNasa({ data: [{ nasa_id: "PIA1", title: "Earth" }], links: [{ href: "https://images-assets.nasa.gov/x.jpg" }] }).provider, "nasa");
 });
 
-test("stdio MCP exposes four tools and brands a real fixture", async () => {
-  assert.equal(TOOLS.length, 4);
+test("stdio MCP exposes five tools and brands a real fixture", async () => {
+  assert.equal(TOOLS.length, 5);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "image-brand-test-"));
   execFileSync("python3", [path.join(HERE, "..", "fixtures.py"), "--dir", dir], { stdio: "ignore" });
   const client = await startServer();
@@ -71,7 +71,7 @@ test("stdio MCP exposes four tools and brands a real fixture", async () => {
     const init = await client.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } });
     assert.equal(init.serverInfo.name, "image-brand");
     const list = await client.request("tools/list", {});
-    assert.deepEqual(list.tools.map((tool) => tool.name).sort(), ["image_batch", "image_brand", "image_fetch", "image_search"]);
+    assert.deepEqual(list.tools.map((tool) => tool.name).sort(), ["image_batch", "image_brand", "image_fetch", "image_fit", "image_search"]);
 
     const branded = await client.callTool("image_brand", {
       input: path.join(dir, "input.jpg"),
@@ -98,6 +98,31 @@ test("stdio MCP exposes four tools and brands a real fixture", async () => {
     });
     assert.equal(batch.count, 2);
     assert.ok(fs.existsSync(batch.manifest));
+
+    const covered = await client.callTool("image_fit", {
+      input: path.join(dir, "input.jpg"),
+      output: path.join(dir, "fit-cover.png"),
+      width: 640,
+      height: 480,
+      fit: "cover",
+      format: "png",
+    });
+    assert.equal(covered.fit, "cover");
+    const contain = await client.callTool("image_fit", {
+      input: path.join(dir, "input.jpg"),
+      output: path.join(dir, "fit-contain.jpg"),
+      width: 500,
+      height: 500,
+      fit: "contain",
+      background: "#112233",
+    });
+    const dims = (file) =>
+      execFileSync("python3", ["-c", `from PIL import Image;print(Image.open(${JSON.stringify(file)}).size)`], {
+        encoding: "utf8",
+      }).trim();
+    assert.equal(dims(covered.output), "(640, 480)");
+    assert.equal(dims(contain.output), "(500, 500)");
+    assert.deepEqual(JSON.parse(fs.readFileSync(contain.sidecar, "utf8")).canvas, [500, 500]);
   } finally {
     await client.close();
   }

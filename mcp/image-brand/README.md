@@ -11,6 +11,7 @@
 | `image_search` | Met (PD), Cleveland (CC0), NASA (PD), Wikimedia Commons (PD/CC0 filter) — licence, creator, source page সহ |
 | `image_fetch` | একটি image URL নামিয়ে sha256 + licence sidecar লেখে; https ছাড়া/private host বন্ধ |
 | `image_brand` | cover-crop (aspect+focus বা normalized rect), bottom band, বাংলা title/subtitle, PNG logo/wordmark, attribution, JSON sidecar |
+| `image_fit` | নির্দিষ্ট `width`×`height`-এ clean output (কোনো text নয়): `cover` (ধার কাটে) বা `contain` (background pad), JPEG/PNG/WebP + sidecar |
 | `image_batch` | একাধিক item-এ `image_brand`, শেষে batch manifest |
 
 `image_search`-এ `provider: "auto" | "met" | "cleveland" | "nasa" | "commons"`, `limit` 1–12।
@@ -40,6 +41,26 @@ download-এর পাশে `.json` sidecar থাকে: `source_url`, `licens
 `bottom`, `left`, `right`, চার কোণ) অথবা `crop.rect: [x, y, w, h]` (0–1 normalized)।
 `canvas.width` না দিলে 1080; height aspect থেকে। `logo` PNG path; না দিলে text wordmark
 (`theme.brand`, default `ZombieCoder`)। Band height/opacity/colors `theme`-এ override করা যায়।
+
+## নির্দিষ্ট সাইজ (image_fit)
+
+Product slide, OG card, thumbnail বা logo canvas-এর জন্য text ছাড়া exact-size crop:
+
+```jsonc
+{
+  "input": "/path/photo.jpg",
+  "output": "assets/cards/product-42.jpg",
+  "width": 1200, "height": 630,
+  "fit": "cover",                 // cover = ভরাট করে ধার কাটে; contain = পুরো ছবি + background pad
+  "background": "#0b1220",        // contain-এ ব্যবহৃত
+  "format": "jpg",                // jpg | png | webp
+  "crop": { "aspect": "16:9", "focus": "top" }   // ঐচ্ছিক, তারপর fit
+}
+```
+
+Output sidecar-এ `op: "fit"`, `width`, `height`, `fit`, `crop_box`, `source_sha256`,
+`output_sha256` থাকে — কোন ছবি থেকে কীভাবে কী সাইজে এসেছে তা পরে যাচাই করা যায়।
+`fit=cover` pixel dimension guarantee করে; `contain` letterbox/pillarbox দেয়।
 
 ## চালানো
 

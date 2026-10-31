@@ -18,7 +18,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, features
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps, features
 
 VERSION = "1.0.0"
 BENGALI = re.compile(r"[\u0980-\u09FF]")
@@ -373,13 +373,95 @@ def compose(spec: dict) -> dict:
     return fixture
 
 
+def parse_color(value: str) -> tuple[int, int, int]:
+    try:
+        return ImageColor.getrgb(str(value))
+    except ValueError:
+        fail(f"invalid background color {value!r}; use #rrggbb")
+
+
+def save_image(canvas: Image.Image, output_path: Path, quality: int, format_hint: str | None) -> str:
+    suffix = output_path.suffix.lower()
+    if format_hint:
+        suffix = {"jpg": ".jpg", "jpeg": ".jpg", "png": ".png", "webp": ".webp"}.get(format_hint.lower(), suffix)
+    if suffix in (".jpg", ".jpeg"):
+        canvas.convert("RGB").save(output_path, quality=quality, subsampling=1)
+    elif suffix == ".png":
+        canvas.save(output_path)
+    elif suffix == ".webp":
+        canvas.convert("RGB").save(output_path, quality=quality, method=4)
+    else:
+        fail(f"unsupported output extension {suffix}; use .jpg/.jpeg/.png/.webp")
+    return suffix
+
+
+def fit_image(spec: dict) -> dict:
+    """Exact-size delivery crop: cover (fill, crop edges) or contain (pad)."""
+    input_path = Path(spec["input"]).expanduser()
+    if not input_path.is_file():
+        fail(f"input image not found: {input_path}")
+    width = int(spec.get("width") or 0)
+    height = int(spec.get("height") or 0)
+    if not (1 <= width <= 8000 and 1 <= height <= 8000):
+        fail("width and height must be between 1 and 8000")
+    mode = str(spec.get("fit") or "cover").lower()
+    if mode not in ("cover", "contain"):
+        fail("fit must be cover or contain")
+
+    output_path = Path(spec.get("output") or input_path.with_name(f"{input_path.stem}-{width}x{height}.jpg")).expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    source = ImageOps.exif_transpose(Image.open(input_path)).convert("RGB")
+    crop_spec = spec.get("crop") or {}
+    box = crop_box(source.size, crop_spec) if crop_spec else (0, 0, source.width, source.height)
+    cropped = source.crop(box)
+
+    if mode == "cover":
+        focus = str(spec.get("focus") or crop_spec.get("focus") or "center")
+        fx, fy = focus_offsets(focus)
+        canvas = ImageOps.fit(cropped, (width, height), method=Image.LANCZOS, centering=(fx, fy))
+    else:
+        inner = ImageOps.contain(cropped, (width, height), method=Image.LANCZOS)
+        canvas = Image.new("RGB", (width, height), parse_color(spec.get("background") or "#000000"))
+        canvas.paste(inner, ((width - inner.width) // 2, (height - inner.height) // 2))
+
+    quality = max(60, min(100, int(spec.get("quality") or 92)))
+    save_image(canvas, output_path, quality, spec.get("format"))
+
+    sidecar_path = output_path.with_suffix(".json")
+    source_meta = spec.get("source") or {}
+    fixture = {
+        "ok": True,
+        "version": VERSION,
+        "op": "fit",
+        "output": str(output_path),
+        "output_bytes": output_path.stat().st_size,
+        "output_sha256": sha256_file(output_path),
+        "sidecar": str(sidecar_path),
+        "width": width,
+        "height": height,
+        "fit": mode,
+        "canvas": [width, height],
+        "crop_box": list(box),
+        "source_size": list(source.size),
+        "source_sha256": sha256_file(input_path),
+        "provider": source_meta.get("provider"),
+        "source_page": source_meta.get("page"),
+        "license": source_meta.get("license"),
+        "creator": source_meta.get("creator"),
+        "created": datetime.now(timezone.utc).isoformat(),
+    }
+    sidecar_path.write_text(json.dumps(fixture, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return fixture
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--spec", required=True, help="path to the JSON composition spec")
     args = parser.parse_args()
     try:
         spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
-        result = compose(spec)
+        result = fit_image(spec) if spec.get("op") == "fit" else compose(spec)
     except SystemExit:
         raise
     except Exception as error:  # noqa: BLE001 - surface one JSON error to the MCP caller

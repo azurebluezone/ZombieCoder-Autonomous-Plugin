@@ -475,6 +475,16 @@ function normalizeModes(dir, fileMode = 0o644, dirMode = 0o755) {
   return files;
 }
 
+function listMcpServers(root) {
+  if (!fs.existsSync(root)) return [];
+  return fs
+    .readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({ name: entry.name, entry: path.join(root, entry.name, "server.mjs") }))
+    .filter((server) => fs.existsSync(server.entry))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function listFiles(dir, rel = "") {
   const out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -847,6 +857,28 @@ await step("copy runtime assets", () => {
     }
   }
   return `${assets.length + skillFiles} files -> ${path.relative(TARGET, RUNTIME_ASSETS_DIR)}/{docs,tools,tls,model.mjs,skills-catalog}`;
+});
+
+// ---- 2c. in-repo MCP servers -------------------------------------------------
+// The package ships stdio MCP servers under mcp/. Copy them into the install
+// root so the clone can be deleted, and register each one in opencode.json in
+// the config step below. A fresh remote clone therefore gets the tooling
+// without hand-written JSON.
+await step("copy MCP servers", () => {
+  const source = path.join(PACKAGE_ROOT, "mcp");
+  if (!fs.existsSync(source)) return "none (this package has no mcp/ directory)";
+  const target = path.join(CONFIG_DIR, "mcp");
+  fs.cpSync(source, target, {
+    recursive: true,
+    force: true,
+    filter: (entry) => {
+      const parts = entry.split(path.sep);
+      return !parts.includes("node_modules") && !parts.includes(".git");
+    },
+  });
+  const servers = listMcpServers(target);
+  if (servers.length === 0) return "0 server(s) with server.mjs";
+  return `${servers.length} server(s) -> mcp/: ${servers.map((server) => server.name).join(", ")}`;
 });
 
 // ---- 3. declare the dependency ------------------------------------------------
@@ -1263,15 +1295,27 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
     next.model = BASELINE_MODEL;
   }
 
-  // Only register an MCP server we actually reached. A dead default URL in
+  // Local stdio servers copied from mcp/ are always registered: they ship with
+  // the install and need no network. The remote ZombieCoder MCP is registered
+  // only when the probe actually reached it — a dead default URL in
   // opencode.json slows every boot and teaches the user to ignore errors.
-  if (mcpProbe?.ok) {
+  const localMcp = listMcpServers(path.join(CONFIG_DIR, "mcp"));
+  if (mcpProbe?.ok || localMcp.length > 0) {
     next.mcp = { ...(existing.mcp ?? {}) };
     next.mcp.servers = { ...(next.mcp.servers ?? {}) };
+  }
+  if (mcpProbe?.ok) {
     next.mcp.servers.zombiecoder = {
       ...(next.mcp.servers.zombiecoder ?? {}),
       type: "remote",
       url: MCP_URL,
+    };
+  }
+  for (const server of localMcp) {
+    next.mcp.servers[server.name] = {
+      ...(next.mcp.servers[server.name] ?? {}),
+      type: "local",
+      command: ["node", server.entry],
     };
   }
 
@@ -1290,8 +1334,13 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
         : `provider ${providerID} saved but not selected: ${
             chatProbe?.error ?? toolProbe?.error ?? providerProbe?.error ?? "not probed"
           }`;
-  const mcpSummary = mcpProbe?.ok ? `MCP zombiecoder (${mcpProbe.tools.length} tools)` : "MCP not registered";
-  return `${providerSummary}; ${roster.ROSTER.length} agents + ${next.permissions.length} permission rules; ${mcpSummary}`;
+  const mcpSummary = [
+    localMcp.length ? `local MCP: ${localMcp.map((server) => server.name).join(", ")}` : null,
+    mcpProbe?.ok ? `remote MCP zombiecoder (${mcpProbe.tools.length} tools)` : null,
+  ]
+    .filter(Boolean)
+    .join("; ");
+  return `${providerSummary}; ${roster.ROSTER.length} agents + ${next.permissions.length} permission rules; ${mcpSummary || "MCP not registered"}`;
 });
 
 // ---- 8b. LSP config ----------------------------------------------------------

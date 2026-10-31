@@ -21,7 +21,7 @@ try {
   assert.equal(init.serverInfo.name, "image-brand");
 
   const list = await client.request("tools/list", {});
-  assert.equal(list.tools.length, 4);
+  assert.equal(list.tools.length, 5);
 
   const result = await client.callTool("image_brand", {
     input: path.join(dir, "input.jpg"),
@@ -40,8 +40,19 @@ try {
   assert.equal(sidecar.license, "CC0");
   assert.equal(sidecar.fonts.raqm, true, "Pillow must have raqm for Bengali conjuncts");
 
-  console.log(`tools=4 pipeline=ok bytes=${result.output_bytes} sha=${result.output_sha256.slice(0, 12)}`);
+  const fit = await client.callTool("image_fit", {
+    input: path.join(dir, "input.jpg"),
+    output: path.join(dir, "fit.png"),
+    width: 320,
+    height: 200,
+    format: "png",
+  });
+  assert.equal(fit.width, 320);
+  assert.equal(fit.height, 200);
+
+  console.log(`tools=5 pipeline=ok fit=${fit.width}x${fit.height} bytes=${result.output_bytes} sha=${result.output_sha256.slice(0, 12)}`);
   console.log(`output=${result.output}`);
+  console.log(`fit=${fit.output}`);
 } finally {
   await client.close();
 }

@@ -100,6 +100,40 @@ export const TOOLS = [
     },
   },
   {
+    name: "image_fit",
+    description:
+      "Produce an exact-size delivery image with no text: cover (fill and crop edges) or contain (pad with a background colour), optional crop rect/aspect, JPEG/PNG/WebP output and a sidecar. Use for product slides, OG cards, thumbnails and logo canvases.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        input: { type: "string" },
+        output: { type: "string" },
+        width: { type: "number" },
+        height: { type: "number" },
+        fit: { type: "string", enum: ["cover", "contain"], default: "cover" },
+        background: { type: "string", default: "#000000" },
+        format: { type: "string", enum: ["jpg", "png", "webp"] },
+        quality: { type: "number", minimum: 60, maximum: 100, default: 92 },
+        crop: {
+          type: "object",
+          properties: {
+            aspect: { type: "string" },
+            focus: {
+              type: "string",
+              enum: ["center", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"],
+              default: "center",
+            },
+            rect: { type: "array", items: { type: "number" }, minItems: 4, maxItems: 4 },
+          },
+          additionalProperties: false,
+        },
+        source: { type: "object" },
+      },
+      required: ["input", "width", "height"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "image_batch",
     description: "Run image_brand over a list of items and write one batch manifest JSON. Each item takes the same fields as image_brand.",
     inputSchema: {
@@ -437,12 +471,35 @@ export async function brandImage(input = {}) {
     spec.logo = path.resolve(spec.logo);
     if (!fs.existsSync(spec.logo)) throw new Error(`logo not found: ${spec.logo}`);
   }
-  const outDir = spec.output ? path.dirname(path.resolve(spec.output)) : DEFAULT_OUT;
-  await fsp.mkdir(outDir, { recursive: true });
-  const output = spec.output
+  spec.output = spec.output
     ? path.resolve(spec.output)
     : path.join(DEFAULT_OUT, `${path.basename(spec.input, path.extname(spec.input))}-branded.jpg`);
-  spec.output = output;
+  return runPipeline(spec);
+}
+
+export async function fitImage(input = {}) {
+  const spec = { ...input, op: "fit" };
+  delete spec.logo;
+  delete spec.title;
+  if (!spec.input) throw new Error("input is required");
+  spec.input = path.resolve(spec.input);
+  if (!fs.existsSync(spec.input)) throw new Error(`input image not found: ${spec.input}`);
+  const width = Number(spec.width);
+  const height = Number(spec.height);
+  if (!Number.isInteger(width) || width < 1 || width > 8000) throw new Error("width must be an integer 1..8000");
+  if (!Number.isInteger(height) || height < 1 || height > 8000) throw new Error("height must be an integer 1..8000");
+  spec.width = width;
+  spec.height = height;
+  const ext = { jpg: "jpg", png: "png", webp: "webp" }[String(spec.format ?? "").toLowerCase()] ?? "jpg";
+  spec.output = spec.output
+    ? path.resolve(spec.output)
+    : path.join(DEFAULT_OUT, `${path.basename(spec.input, path.extname(spec.input))}-${width}x${height}.${ext}`);
+  return runPipeline(spec);
+}
+
+async function runPipeline(spec) {
+  const outDir = path.dirname(spec.output);
+  await fsp.mkdir(outDir, { recursive: true });
   const specFile = path.join(outDir, `.image-brand-${Date.now()}-${process.pid}.json`);
   await fsp.writeFile(specFile, JSON.stringify(spec, null, 2) + "\n");
   try {
@@ -514,6 +571,7 @@ export async function handleRpc(request) {
       if (name === "image_search") result = await searchImages(args);
       else if (name === "image_fetch") result = await fetchImage(args);
       else if (name === "image_brand") result = await brandImage(args);
+      else if (name === "image_fit") result = await fitImage(args);
       else if (name === "image_batch") result = await brandBatch(args);
       else throw new Error(`unknown tool ${JSON.stringify(name)}`);
       return {

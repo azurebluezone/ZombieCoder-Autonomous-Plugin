@@ -23,9 +23,15 @@
     "identity": "node scripts/identity.mjs --write",
     "identity:check": "node scripts/identity.mjs",
     "lsp:probe": "node scripts/lsp-probe.mjs",
+    "install:audit": "node scripts/audit-install.mjs",
     "mcp:image-brand": "node mcp/image-brand/server.mjs",
     "mcp:image-brand:check": "node mcp/image-brand/selfcheck.mjs",
     "mcp:image-brand:test": "node --test mcp/image-brand/test/*.test.mjs",
+    "mcp:public-api": "node mcp/public-api/server.mjs",
+    "mcp:public-api:check": "node mcp/public-api/selfcheck.mjs",
+    "mcp:public-api:test": "node --test mcp/public-api/test/*.test.mjs",
+    "mcp:test": "node --test mcp/image-brand/test/*.test.mjs mcp/public-api/test/*.test.mjs",
+    "mcp:live": "node mcp/image-brand/e2e-live.mjs && node mcp/public-api/selfcheck.mjs",
     "check": "npm run typecheck && npm test && npm run identity:check && npm run integrity:check"
   },
   "engines": {

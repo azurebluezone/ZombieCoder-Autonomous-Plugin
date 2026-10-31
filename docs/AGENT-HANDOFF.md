@@ -22,7 +22,8 @@
 | প্রমাণ | path, command, exit code, test output — plus provenance (`live` / `real_run` / `real_file` / `simulated`)। আসল test output authentic (`real_run`); শুধু mock/fixture/demo দিয়ে "fixed" নয় — label দিলেও নয়; না থাকলে `UNVERIFIED`/`NOT_TESTED`; agent থামে, user-কে next step দেয় |
 | Goal contract | কোড শুরুর আগে `goal_contract` open: আসল input, observable expected output, check command, pass criteria; preview UI-তে দেখিয়ে কাজ শুরু, আলাদা "হ্যাঁ" নয়; শেষে close নিজেই check command চালিয়ে observed vs expected মিলায় (contains/equals/regex/json); mismatch = FAIL, agent-এর exitCode claim বিশ্বাস হয় না। কোনো সময়/বাজেট প্রতিশ্রুতি নয় |
 | টুল | model-এর জন্মগত অঙ্গ নয়; client/harness চালায় |
-| LSP | V2.1.1-এ `lsp` config + server binary; installer config auto-generate করে; probe 4/4; editor restart বাকি |
+| LSP | V2.1.1-এ `lsp` config + server binary; installer 7/7 auto-generate করে; `npm run lsp:probe`; editor restart বাকি |
+| MCP | দুটি local stdio server: `image-brand` (5 tools: PD/CC0 ছবি + branding + exact-size fit), `public-api` (8 tools: Wikipedia feeds, weather, currency, country, QR)। Installer `mcp/` কপি করে `opencode.json`-এ register করে; যাচাই `node scripts/audit-install.mjs` |
 | License | Local Freedom, Non-Commercial (`LICENSE`) |
 
 ---
@@ -202,8 +203,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  2ca71ed471c647edc5f356642ec91b71fae6af3b645e18426014269786eb7259  ║
-║  files 88 · bytes 840843 · base 36ccefa · clean                          ║
+║  root  738bd938930c72a6b9c8402165a021729380709754f69bd727ae1ec56eed410e  ║
+║  files 95 · bytes 888384 · base 8b9110a · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -211,7 +212,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:21:01.829Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:35:51.622Z
 
 </div>
 <!-- INTEGRITY:END -->

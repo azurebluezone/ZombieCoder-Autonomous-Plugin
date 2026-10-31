@@ -831,13 +831,21 @@ Persona inject না হলে model generic উত্তর দেবে — �
 
 Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
 
-### MCP — image-brand (আলাদা local server)
+### MCP — দুটি local server (installer নিজেই register করে)
 
-`mcp/image-brand/` একটি আলাদা local stdio MCP server: PD/CC0 ছবি search, download,
-crop, বাংলা title + logo branding, provenance sidecar — কোনো LLM বা API key নেই।
-চারটি tool: `image_search`, `image_fetch`, `image_brand`, `image_batch`। Project
-`opencode.json`-এ registered; `opencode mcp list` → `✓ image-brand connected`।
-বিস্তারিত: [`mcp/image-brand/README.md`](mcp/image-brand/README.md)।
+`mcp/` ফোল্ডারে দুটি আলাদা local stdio MCP server আছে; কোনো LLM বা API key নেই।
+Installer clone থেকে চালালে এগুলো install root-এ কপি হয় এবং `opencode.json`-এর
+`mcp.servers`-এ absolute path সহ নিজে থেকেই বসে (`node bin/install.mjs --yes`)।
+
+| Server | Tools | কাজ |
+|---|---|---|
+| `image-brand` | 5 | PD/CC0 ছবি search (`image_search`), provenance সহ download (`image_fetch`), বাংলা title+logo branding (`image_brand`), exact-size clean crop (`image_fit`), batch (`image_batch`) |
+| `public-api` | 8 | Wikipedia search/page/onthisday/featured, weather, currency, country, QR PNG |
+
+`opencode mcp list` → `✓ image-brand connected`, `✓ public-api connected`।
+Install-এর পরে কনফিগ যাচাই: `node scripts/audit-install.mjs`।
+বিস্তারিত: [`mcp/image-brand/README.md`](mcp/image-brand/README.md),
+[`mcp/public-api/README.md`](mcp/public-api/README.md)।
 
 ---
 
@@ -1203,8 +1211,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  2ca71ed471c647edc5f356642ec91b71fae6af3b645e18426014269786eb7259  ║
-║  files 88 · bytes 840843 · base 36ccefa · clean                          ║
+║  root  738bd938930c72a6b9c8402165a021729380709754f69bd727ae1ec56eed410e  ║
+║  files 95 · bytes 888384 · base 8b9110a · dirty                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1212,7 +1220,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:21:01.829Z
+> Base commit is the code tree before this seal commit. Generated: 2026-10-31T04:35:51.622Z
 
 </div>
 <!-- INTEGRITY:END -->

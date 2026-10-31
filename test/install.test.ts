@@ -622,3 +622,33 @@ test("installer passes the provider key to the probe and to opencode.json", asyn
     },
   );
 });
+
+test("installer copies and registers the in-repo MCP servers", async () => {
+  await withServer(
+    (_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ object: "list", data: [] }));
+    },
+    async (base) => {
+      const result = await installProject(base);
+      try {
+        assert.equal(result.status, 0, String(result.stderr || result.stdout || ""));
+        const config = JSON.parse(
+          fs.readFileSync(path.join(result.root, "opencode.json"), "utf8"),
+        );
+        for (const name of ["image-brand", "public-api"]) {
+          const entry = config.mcp?.servers?.[name];
+          assert.ok(entry, `mcp.${name} missing`);
+          assert.equal(entry.type, "local");
+          assert.ok(
+            fs.existsSync(entry.command[1]),
+            `mcp.${name} command points at a missing file: ${entry.command[1]}`,
+          );
+          assert.match(entry.command[1], new RegExp(`[\\\\/]mcp[\\\\/]${name}[\\\\/]server\\.mjs$`));
+        }
+      } finally {
+        fs.rmSync(result.root, { recursive: true, force: true });
+      }
+    },
+  );
+});

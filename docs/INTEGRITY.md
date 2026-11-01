@@ -7,21 +7,21 @@
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  f3ab8c210e0c30e2a702e4074e33d3692d981f564732cc1a3f3193d650fe9d09  ║
-║  files 119 · bytes 1204885 · base 7b9d1e2 · dirty                        ║
+║  root  d13bee2b8c34425f7957cfbcc6ea98cd6196c83c8920315456edbdc424ac405f  ║
+║  files 119 · bytes 1204879 · base 6ef802c · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-11-01T21:21:34.706Z` |
-| Base commit | `7b9d1e2` |
+| Generated (UTC) | `2026-11-01T21:29:27.777Z` |
+| Base commit | `6ef802c` |
 | Branch | `murubbi` |
 | Code tree | `dirty` |
 | Files | 119 |
-| Bytes | 1204885 |
-| Root SHA-256 | `f3ab8c210e0c30e2a702e4074e33d3692d981f564732cc1a3f3193d650fe9d09` |
+| Bytes | 1204879 |
+| Root SHA-256 | `d13bee2b8c34425f7957cfbcc6ea98cd6196c83c8920315456edbdc424ac405f` |
 
 ## Scope
 
@@ -103,7 +103,7 @@ npm run integrity:check
 | `src/identity.ts` | 11774 | `c604e580cb428f9ae2650dca6fca9434d774861aaa25d5c1aeb0f0a9245d6ce3` |
 | `src/install/space.ts` | 3813 | `098fe34dfe34003f1ad66cb1e6aa32f4ef8415bc9d81f198c61776fbd31f4931` |
 | `src/plugin.ts` | 79783 | `c31e7f16f521d42608d7771ab06e727dbbf5333faf6a2215465c88464aa30e88` |
-| `src/roster.ts` | 48802 | `92a242cebbeb87e423a423dfa8271294d610077d75c151fc20b92e9284b5ffe8` |
+| `src/roster.ts` | 48796 | `6cb0fbe77f47cfb9245f764f8fc1c742b890c0bcb84368eeb43114ec6329192a` |
 | `src/runtime.ts` | 16105 | `e1c0ed06475af247a55da955b1b2af13966e2c5229081d45de4f742ea14ff80e` |
 | `src/zombie/circuitBreaker.ts` | 7589 | `c240197b45c7278721245811e0e2fa423e1081c3afb1d5314bba1f1f4493c1c8` |
 | `src/zombie/context.ts` | 16996 | `73caa204d6e71a4a32260c543caacfc1822756d5884ac7bd3cfefc8a96ca67e0` |

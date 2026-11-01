@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-11-01T21:21:34.706Z",
+  "generated_at": "2026-11-01T21:29:27.777Z",
   "scope": [
     "src",
     "bin",
@@ -12,11 +12,11 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "f3ab8c210e0c30e2a702e4074e33d3692d981f564732cc1a3f3193d650fe9d09",
+  "root_sha256": "d13bee2b8c34425f7957cfbcc6ea98cd6196c83c8920315456edbdc424ac405f",
   "file_count": 119,
-  "total_bytes": 1204885,
+  "total_bytes": 1204879,
   "git": {
-    "commit": "7b9d1e2",
+    "commit": "6ef802c",
     "branch": "murubbi",
     "dirty": true
   },
@@ -303,8 +303,8 @@
     },
     {
       "path": "src/roster.ts",
-      "bytes": 48802,
-      "sha256": "92a242cebbeb87e423a423dfa8271294d610077d75c151fc20b92e9284b5ffe8"
+      "bytes": 48796,
+      "sha256": "6cb0fbe77f47cfb9245f764f8fc1c742b890c0bcb84368eeb43114ec6329192a"
     },
     {
       "path": "src/runtime.ts",

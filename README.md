@@ -946,7 +946,7 @@ VS Code-এ OpenCode session দেখতে [`formulahendry.acp-client`](https:
 {
   "acp.agents": {
     "OpenCode": {
-      "command": "/absolute/path/to/opencode", // `which opencode` 결과
+      "command": "/absolute/path/to/opencode", // `which opencode`-এর ফল
       "args": ["acp"],
       "env": {}
     }
@@ -1431,7 +1431,7 @@ Test labels:
 - `CONFIG_VALIDATED` — OpenCode config load pass
 - `LIVE_PROBE_PASSED` — live provider/models or LSP initialize probe pass
 - `END_TO_END_TESTED` — setup + inference path pass
-- `NOT_TESTED` — 해당 path এখনো probe করা হয়নি
+- `NOT_TESTED` — সেই path এখনো probe করা হয়নি
 - `UNVERIFIED` — প্রমাণ নেই
 
 ---
@@ -1481,8 +1481,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  f3ab8c210e0c30e2a702e4074e33d3692d981f564732cc1a3f3193d650fe9d09  ║
-║  files 119 · bytes 1204885 · base 7b9d1e2 · dirty                        ║
+║  root  d13bee2b8c34425f7957cfbcc6ea98cd6196c83c8920315456edbdc424ac405f  ║
+║  files 119 · bytes 1204879 · base 6ef802c · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1490,7 +1490,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T21:21:34.706Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T21:29:27.777Z
 
 </div>
 <!-- INTEGRITY:END -->

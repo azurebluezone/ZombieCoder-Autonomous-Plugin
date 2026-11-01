@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   canonicalJson,
   identityChecksum,
@@ -60,4 +60,14 @@ test("identity version is the product version, never a runtime build", () => {
   const newRuntime = identityPayload({ ...base, runtime: { version: "2.2.4", source: "test" } });
   assert.equal(oldRuntime.system_identity.version, newRuntime.system_identity.version);
   assert.notEqual(oldRuntime.system_identity.runtime.version, newRuntime.system_identity.runtime.version);
+});
+
+test("doc/identity.js is rebuilt from identity.json, not hand-written", async () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, "doc", "identity.json"), "utf8")).system_identity;
+  const mod: any = await import(pathToFileURL(path.join(ROOT, "doc", "identity.js")).href);
+  assert.equal(mod.IDENTITY.version, pkg.version, "installed identity.js drifted from package.json");
+  assert.equal(mod.IDENTITY.version, shipped.version);
+  assert.equal(mod.IDENTITY.runtime?.version, shipped.runtime.version);
+  assert.equal(mod.IDENTITY_MANIFEST.checksum, shipped.manifest.checksum);
 });

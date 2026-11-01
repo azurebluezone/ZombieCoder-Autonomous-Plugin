@@ -11,6 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { renderIdentity, identityPayload } from "./identity.ts";
 import { renderAgents } from "./agents.ts";
 import { renderEthics } from "./ethics.ts";
@@ -150,6 +151,23 @@ async function main(): Promise<void> {
     "checksum:" + withChecksum.system_identity.manifest.checksum.slice(0, 12) +
     (identityBacked ? "   backup: " + identityBacked : "   backup: (new file)")
   );
+
+  // identity.js is the runtime view of identity.json. Writing only the JSON left
+  // the installed copy showing an old version; rebuild both in the same step.
+  if (path.resolve(OUT) === path.resolve(path.join(ROOT, "doc"))) {
+    const rebuild = spawnSync(process.execPath, [path.join(ROOT, "scripts", "identity.mjs"), "--write"], {
+      encoding: "utf8",
+    });
+    if (rebuild.status !== 0) {
+      throw new Error(`identity.js rebuild failed: ${String(rebuild.stderr || rebuild.stdout).trim()}`);
+    }
+    const identityJs = path.join(OUT, "identity.js");
+    report.push(
+      "  " + "identity.js".padEnd(30) +
+      String(fs.statSync(identityJs).size).padStart(8) + " B  " +
+      "rebuilt from identity.json"
+    );
+  }
 
   console.log("ZombieCoder doc generator");
   for (const line of report) console.log(line);

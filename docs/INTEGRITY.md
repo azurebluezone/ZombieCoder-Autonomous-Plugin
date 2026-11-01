@@ -7,21 +7,21 @@
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  03149d0913cf55e7ed8de55b10c244004640e065cfcc46de065807b33917de99  ║
-║  files 103 · bytes 975104 · base 350f848 · dirty                         ║
+║  root  083d0b49457369ca18b2cb490f4fb0db52062fcf8934a1f1367e7140c82b9d17  ║
+║  files 103 · bytes 976585 · base 9d8234c · dirty                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-11-01T09:28:10.759Z` |
-| Base commit | `350f848` |
+| Generated (UTC) | `2026-11-01T09:30:28.558Z` |
+| Base commit | `9d8234c` |
 | Branch | `murubbi` |
 | Code tree | `dirty` |
 | Files | 103 |
-| Bytes | 975104 |
-| Root SHA-256 | `03149d0913cf55e7ed8de55b10c244004640e065cfcc46de065807b33917de99` |
+| Bytes | 976585 |
+| Root SHA-256 | `083d0b49457369ca18b2cb490f4fb0db52062fcf8934a1f1367e7140c82b9d17` |
 
 ## Scope
 
@@ -95,7 +95,7 @@ npm run integrity:check
 | `scripts/setup.mjs` | 12807 | `f991bf440bbcd38819a40978e201817004e5574c4c45ed4f4921fa9ec0353d5f` |
 | `src/agents.ts` | 13479 | `0e9fc2b22e375579fb2e77d8772717aec58cf31bd0bad91795cbd0dd4b46574e` |
 | `src/ethics.ts` | 12947 | `0869cf72ec8665b130f1abb31c85c1d11c93d97cabd7e6387e7684d7e70c5ff3` |
-| `src/generate.ts` | 6141 | `76e2a527e0f4b913e46e32c5c51447e9350c82c4fc0f5c4fb9cd08bafa295973` |
+| `src/generate.ts` | 6924 | `be7e240994d953a8fb8e3864558f6609389e1780556b7182a58a0e21a7827be6` |
 | `src/identity.ts` | 10286 | `1abe79135f822b8e4435cbad45e949e4411305b4d915b0faecb132fe9e703d47` |
 | `src/install/space.ts` | 3813 | `098fe34dfe34003f1ad66cb1e6aa32f4ef8415bc9d81f198c61776fbd31f4931` |
 | `src/plugin.ts` | 72440 | `df05c7a3714417d36e9a2521cad7d21cc2eda3a8bbaa2009246ea85acb4d6db1` |
@@ -131,7 +131,7 @@ npm run integrity:check
 | `test/focus.test.ts` | 4051 | `47d93d65959c80c0b1ebb99b7cc5445d5dfbef536c9d3bc51bc90937b0e8b3a1` |
 | `test/footprint.test.ts` | 2690 | `6c053dfca81fe65da03e216d72bea79abbd015ec73f2f714aeb1769db705b8e3` |
 | `test/goalContract.test.ts` | 4268 | `0b06a8bb735d99d4bd732d27989a3523e3622a53a700e5cdaa784fbdeb833da5` |
-| `test/identity.test.ts` | 3246 | `5c87c33e698a62defa80191f475ad05a261be73090d9ccf9bb8125791474dbb3` |
+| `test/identity.test.ts` | 3944 | `ee835ab860ef3efd03cc9f2eefdba10fdeeda791e2f18b1453fa6f1e75fc03fe` |
 | `test/install.test.ts` | 25183 | `ac1ed0842a77134293e96887fd633fa89bf928d191d8caa02711278cf157603c` |
 | `test/installSpace.test.ts` | 2234 | `8d589c1d8e2423869c788c11435e0fc23be6abc5145d7b66c9fb54cc09671c71` |
 | `test/io.test.ts` | 959 | `c483a9c9f9a4ca51e595df125fb36a8a23627a331ac9fbe871f1c404f858fe4a` |

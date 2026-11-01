@@ -3,8 +3,12 @@
 
 export const IDENTITY = Object.freeze({
   "name": "ZombieCoder",
-  "version": "2.2.1",
+  "version": "0.1.0",
   "tagline": "যেখানে কোড ও কথা বলে",
+  "runtime": {
+    "version": "2.2.3",
+    "source": "GET /api/info (observed at generation time)"
+  },
   "owner": "Sahon Srabon",
   "organization": "Developer Zone",
   "location": "Dhaka, Bangladesh",
@@ -16,11 +20,11 @@ export const IDENTITY = Object.freeze({
 });
 
 export const IDENTITY_MANIFEST = Object.freeze({
-  version: "2.2.1",
-  generated_at: "2026-10-29T18:06:25.244Z",
+  version: "0.1.0",
+  generated_at: "2026-11-01T09:30:06.359Z",
   algorithm: "sha256",
   scope: "canonical JSON of this object, checksum field removed",
-  checksum: "31a024d40d333bd8c797e59b91783430bea297787257c89d061ef4ebbee2cf96",
+  checksum: "25245d01320dcb09ebab3518609a9d0e286e72e3df8047cbdd38bc74d3c6d1d5",
 });
 
 export const HEADER = Object.freeze({ name: "X-ZombieCoder-Powered-By", value: "ZombieCoder-by-SahonSrabon" });

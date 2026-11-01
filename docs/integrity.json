@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-11-01T09:28:10.759Z",
+  "generated_at": "2026-11-01T09:30:28.558Z",
   "scope": [
     "src",
     "bin",
@@ -12,11 +12,11 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "03149d0913cf55e7ed8de55b10c244004640e065cfcc46de065807b33917de99",
+  "root_sha256": "083d0b49457369ca18b2cb490f4fb0db52062fcf8934a1f1367e7140c82b9d17",
   "file_count": 103,
-  "total_bytes": 975104,
+  "total_bytes": 976585,
   "git": {
-    "commit": "350f848",
+    "commit": "9d8234c",
     "branch": "murubbi",
     "dirty": true
   },
@@ -263,8 +263,8 @@
     },
     {
       "path": "src/generate.ts",
-      "bytes": 6141,
-      "sha256": "76e2a527e0f4b913e46e32c5c51447e9350c82c4fc0f5c4fb9cd08bafa295973"
+      "bytes": 6924,
+      "sha256": "be7e240994d953a8fb8e3864558f6609389e1780556b7182a58a0e21a7827be6"
     },
     {
       "path": "src/identity.ts",
@@ -443,8 +443,8 @@
     },
     {
       "path": "test/identity.test.ts",
-      "bytes": 3246,
-      "sha256": "5c87c33e698a62defa80191f475ad05a261be73090d9ccf9bb8125791474dbb3"
+      "bytes": 3944,
+      "sha256": "ee835ab860ef3efd03cc9f2eefdba10fdeeda791e2f18b1453fa6f1e75fc03fe"
     },
     {
       "path": "test/install.test.ts",

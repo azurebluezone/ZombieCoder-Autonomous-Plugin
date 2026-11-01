@@ -21,6 +21,7 @@ import { scanProject } from "./scan.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
 import { buildContextPack, resolveAllowedPath } from "./context.ts";
 import {
+  contractStatus,
   matches,
   normalizeMatch,
   parseContract,
@@ -398,7 +399,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "goal_contract",
       description:
-        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code, with the user's explicit consent. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and a match mode (contains|equals|regex|json); it shows a Bengali preview card in the session UI, then asks the user through the native permission door. Yes approves this goal; Always yes approves goals in this project; Reject writes nothing and returns status=rejected. close asks again (per contract), then RUNS the recorded check command in the project root (120s cap) and matches the real output against the recorded expected value; PASS only when the exit code is 0 and the output matches. Agent-supplied observed/exitCode are saved as a claim and never trusted. A mismatch, empty output or failed command is FAIL, so a mock cannot be tuned to the expected result afterwards. Without an approval the tool writes and runs nothing; the agent must hand over instead of self-closing.",
+        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code, with the user's explicit consent. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and a match mode (contains|equals|regex|json); it shows a Bengali preview card in the session UI, then asks the user through the native permission door. In that dialog Allow once approves this goal, Allow always approves later opens in this project, and Reject writes nothing and returns status=rejected. close shows its own preview and asks again (per contract), then RUNS the recorded check command in the project root (120s cap) and matches the real output against the recorded expected value; PASS only when the exit code is 0 and the output matches. close proposes no saved pattern, so Allow always cannot skip the next close. Agent-supplied observed/exitCode are saved as a claim and never trusted. A mismatch, empty output or failed command is FAIL, so a mock cannot be tuned to the expected result afterwards. Without an approval the tool writes and runs nothing; the agent must hand over instead of self-closing.",
       input: {
         type: "object" as const,
         properties: {
@@ -468,9 +469,10 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             `যাচাই: \`${check}\` → ${pass}`,
             `মিলানোর নিয়ম: ${mode}`,
             "",
-            "👍 দেখে নাও — Yes দিলে এই গোল শুরু; Always yes দিলে এই প্রজেক্টে পরেরবার আর জিজ্ঞেস করব না।",
-            "✋ ভুল মনে হলে Reject দাও; কিছু লেখা হবে না, নতুন করে লিখব।",
+            "👍 permission dialog-এ: Allow once = শুধু এইবার; Allow always = এই প্রজেক্টে পরেরবার আর জিজ্ঞেস করব না; Reject = কিছুই লেখা হবে না।",
+            "✋ ভুল মনে হলে Reject দাও; কোনো ফাইল লেখা হবে না, নতুন করে বলব।",
           ].join("\n");
+          const sessionID = String(context?.sessionID ?? "").trim();
           let uiShown = false;
           if (context?.sessionID && deps.synthetic) {
             try {
@@ -501,17 +503,32 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
               goal,
               reason: approval.reason,
             });
+            appendSyllabus(
+              projectRoot,
+              "Goal Contract — consent",
+              [
+                `- status: ${approval.status}`,
+                ...(sessionID ? [`- session: ${sessionID}`] : []),
+                `- goal: ${goal}`,
+                `- reason: ${approval.reason}`,
+                "",
+                "Nothing was written and no check ran. The contract was not opened.",
+              ].join("\n"),
+              auditFile(projectRoot),
+            );
             return {
               status: approval.status,
               wrote: false,
               uiShown,
               preview,
               reason: approval.reason,
-              next: "Ask the user to rephrase the goal or hand over; do not retry the same goal silently.",
+              next: [
+                ...(uiShown ? [] : ["Paste the preview above into the chat verbatim; the session UI did not show it."]),
+                "Ask the user to rephrase the goal or hand over; do not retry the same goal silently.",
+              ].join(" "),
             };
           }
           const id = `gc-${Date.now().toString(36)}`;
-          const sessionID = String(context?.sessionID ?? "").trim();
           const summary = [
             `- status: open`,
             ...(sessionID ? [`- session: ${sessionID}`] : []),
@@ -546,17 +563,54 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           if (expectedError) {
             throw new Error(`goal_contract ${id} is invalid: ${expectedError}`);
           }
+          const prior = contractStatus(syllabus, id);
+          if (prior === "PASS") {
+            return {
+              id,
+              status: "closed",
+              ran: false,
+              reason: "this contract already passed; a verdict cannot be overwritten",
+              next: "Do not ask for consent again. Open a new contract for a new goal.",
+            };
+          }
+          // The user must see what will be executed before the native dialog.
+          const closePreview = [
+            "🧭 শেষ ধাপ — গোল বন্ধ করার আগে",
+            "",
+            `গোল: ${contract.goal}`,
+            `আইডি: ${id}`,
+            `যাচাই চলবে: \`${contract.check}\``,
+            `প্রত্যাশা: ${contract.expected}`,
+            `মিলানোর নিয়ম: ${mode}`,
+            "",
+            "👍 permission dialog-এ: Allow once = চেক চালাও; Allow always চাপলেও close-এর জন্য কিছু সেভ হয় না, পরের close-এ আবার জিজ্ঞেস করব; Reject = চেক চলবে না।",
+            "✋ Reject দিলে contract খোলাই থাকবে, ফল লেখা হবে না।",
+          ].join("\n");
+          const sessionID = String(context?.sessionID ?? "").trim();
+          let previewShown = false;
+          if (sessionID && deps.synthetic) {
+            try {
+              await deps.synthetic({
+                sessionID,
+                text: closePreview,
+                description: "goal contract close preview",
+              });
+              previewShown = true;
+            } catch {
+              previewShown = false;
+            }
+          }
           // Closing is never self-service: the user approves this specific
-          // contract id every time. "always" only ever covers that id.
+          // contract id every time. `save: []` proposes no durable pattern, so
+          // "Allow always" cannot skip the next close.
           const approval = await ask(
             context,
             "goal_contract.close",
             [id],
             { id, goal: contract.goal, expected: contract.expected, check: contract.check },
-            [id],
+            [],
           );
           if (!approval.ok) {
-            const sessionID = String(context?.sessionID ?? "").trim();
             audit(projectRoot, "goal_contract", {
               kind: "goal_contract.close",
               status: approval.status,
@@ -580,8 +634,13 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
               id,
               status: approval.status,
               ran: false,
+              uiShown: previewShown,
+              preview: closePreview,
               reason: approval.reason,
-              next: "Hand over to the user; do not claim this task is done.",
+              next: [
+                ...(previewShown ? [] : ["Paste the close preview above into the chat verbatim; the session UI did not show it."]),
+                "Hand over to the user; do not claim this task is done.",
+              ].join(" "),
             };
           }
           // The agent's own numbers are a claim, not proof. The verdict comes
@@ -622,7 +681,6 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const written = appendSyllabus(projectRoot, `Goal Contract ${id} — result`, summary, auditFile(projectRoot));
 
           // The UI must show the verdict too, not only the file.
-          const sessionID = String(context?.sessionID ?? "").trim();
           let uiShown = false;
           if (sessionID && deps.synthetic) {
             try {
@@ -657,6 +715,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             match: mode,
             reason: reason || undefined,
             uiShown,
+            previewShown,
           };
         }
 

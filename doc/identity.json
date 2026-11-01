@@ -1,8 +1,12 @@
 {
   "system_identity": {
     "name": "ZombieCoder",
-    "version": "2.2.3",
-    "version_source": "GET /api/info (observed at generation time)",
+    "version": "0.1.0",
+    "version_source": "package.json",
+    "runtime": {
+      "version": "2.2.3",
+      "source": "GET /api/info (observed at generation time)"
+    },
     "tagline": "যেখানে কোড ও কথা বলে",
     "branding": {
       "owner": "Sahon Srabon",
@@ -16,12 +20,12 @@
       },
       "license": "Proprietary - Local Freedom Protocol"
     },
-    "generated_at": "2026-11-01T09:00:10.391Z",
+    "generated_at": "2026-11-01T09:24:14.663Z",
     "manifest": {
       "read_only": true,
       "checksum_algorithm": "sha256",
       "checksum_scope": "canonical JSON of this object, checksum field removed",
-      "checksum": "4e2bbe06f98b12ae1d44bcda5523a62fecad81ba6d146bbc43ac1b989de54e35"
+      "checksum": "40241462110d94d21894a9b6b3d77e14006b625c0f6c45ab875131c9e7fc8c74"
     }
   }
 }

@@ -106,6 +106,10 @@ const { DEFAULT_SKILL_REPO } = await import(
 const { lspPackageList, resolveLspServers, syncLspConfig } = await import(
   pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "lspConfig.ts")).href
 );
+// Pure install-space planner; the installer supplies live filesystem numbers.
+const { planInstallSpace, formatMb } = await import(
+  pathToFileURL(path.join(PACKAGE_ROOT, "src", "install", "space.ts")).href
+);
 
 const argv = process.argv.slice(2);
 function flag(name) {
@@ -143,6 +147,10 @@ Options:
   --origin-url <url>     optional public origin handshake URL
   --no-install           skip npm install
   --no-lsp               skip LSP server install + lsp config generation
+  --no-space-check       skip the free-space preflight
+  --keep-cache           never clean the npm cache automatically
+  --force-low-space      proceed even when the preflight says space is short
+  --force-install        reinstall dependencies even when already satisfied
   --no-provider-config   skip opencode.json provider/agent merge
   --yes, --defaults      non-interactive install
   --help, -h             show this help and exit
@@ -195,6 +203,142 @@ if (typeof process.getuid === "function" && process.getuid() === 0 && !process.e
 const DO_INSTALL = !flag("--no-install");
 const DO_PROVIDER_CONFIG = !flag("--no-provider-config");
 const DO_LSP = !flag("--no-lsp");
+const DO_SPACE_CHECK = !flag("--no-space-check");
+const KEEP_CACHE = flag("--keep-cache");
+const FORCE_LOW_SPACE = flag("--force-low-space");
+const FORCE_INSTALL = flag("--force-install");
+
+// ---- disk preflight -----------------------------------------------------------
+// A live USB can die halfway through npm and leave a tree that looks installed.
+// Check before the first write; a shortfall stops with numbers, not a stack trace.
+function parseSemver(text) {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(text ?? "").trim());
+  return m ? { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) } : null;
+}
+
+function satisfiesRange(version, range) {
+  const v = parseSemver(version);
+  if (!v) return false;
+  const wanted = String(range ?? "").trim();
+  if (!wanted || wanted === "*" || wanted === "latest") return true;
+  if (wanted.startsWith("^")) {
+    const base = parseSemver(wanted.slice(1));
+    if (!base || v.major !== base.major) return false;
+    if (v.minor !== base.minor) return v.minor > base.minor;
+    return v.patch >= base.patch;
+  }
+  const exact = parseSemver(wanted);
+  return Boolean(exact && v.major === exact.major && v.minor === exact.minor && v.patch === exact.patch);
+}
+
+function installedDependencyVersion() {
+  try {
+    const file = path.join(CONFIG_DIR, "node_modules", "@opencode", "plugin", "package.json");
+    return String(JSON.parse(fs.readFileSync(file, "utf8")).version ?? "");
+  } catch {
+    return "";
+  }
+}
+
+function nearestExistingDir(target) {
+  let dir = path.resolve(target);
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+  return dir;
+}
+
+function freeBytesAt(target) {
+  // Test seam for scripts/e2e-install.mjs: a 7 GB /tmp cannot simulate a full
+  // USB. Only a plain integer is accepted; a real user has no reason to set it.
+  const fake = process.env.ZOMBIECODER_FAKE_FREE_BYTES;
+  if (fake && /^\d+$/.test(fake)) return Number(fake);
+  try {
+    const stat = fs.statfsSync(nearestExistingDir(target));
+    return Number(stat.bsize) * Number(stat.bavail);
+  } catch {
+    return -1;
+  }
+}
+
+function npmCacheDir() {
+  return process.env.npm_config_cache || path.join(os.homedir(), ".npm");
+}
+
+function dirBytes(dir) {
+  try {
+    if (process.platform === "win32") return 0;
+    const result = spawnSync("du", ["-sb", dir], { encoding: "utf8" });
+    if (result.status !== 0) return 0;
+    return Number(String(result.stdout).trim().split(/\s+/)[0]) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+const DEPENDENCY_RANGE = PKG.dependencies?.["@opencode/plugin"] ?? "";
+const INSTALLED_DEPENDENCY = installedDependencyVersion();
+const NEEDS_DEPS = DO_INSTALL && (FORCE_INSTALL || !satisfiesRange(INSTALLED_DEPENDENCY, DEPENDENCY_RANGE));
+const NEEDS_LSP = DO_LSP && DO_INSTALL && resolveLspServers(CONFIG_DIR).missing.length > 0;
+let NPM_CACHE = null;
+
+if (DO_SPACE_CHECK) {
+  const free = freeBytesAt(CONFIG_DIR);
+  if (free < 0) {
+    console.warn("[zc] free space measure করা যায়নি; disk preflight skipped.");
+  } else {
+    let plan = planInstallSpace({
+      freeBytes: free,
+      needDeps: NEEDS_DEPS,
+      needLsp: NEEDS_LSP,
+      cacheBytes: 0,
+      keepCache: KEEP_CACHE,
+      force: FORCE_LOW_SPACE,
+    });
+    // Only pay for measuring the cache when the first pass says space is short.
+    if (plan.shortfallBytes > 0 && !KEEP_CACHE) {
+      plan = planInstallSpace({
+        freeBytes: free,
+        needDeps: NEEDS_DEPS,
+        needLsp: NEEDS_LSP,
+        cacheBytes: dirBytes(npmCacheDir()),
+        keepCache: KEEP_CACHE,
+        force: FORCE_LOW_SPACE,
+      });
+    }
+    for (const line of plan.messages) console.log("[zc] " + line);
+    if (!plan.ok) {
+      console.error("[zc] ইনস্টল বন্ধ — জায়গা যথেষ্ট নয়। উপরের বিকল্প দেখে আবার চালান।");
+      process.exit(3);
+    }
+    if (plan.cleanCache) {
+      const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+      const cleaned = spawnSync(npm, ["cache", "clean", "--force"], {
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf8",
+        shell: process.platform === "win32",
+      });
+      if (cleaned.status !== 0) {
+        console.warn("[zc] npm cache পরিষ্কার করা যায়নি: " + String(cleaned.stderr ?? "").trim().slice(0, 200));
+      }
+      const after = freeBytesAt(CONFIG_DIR);
+      console.log(`[zc] cache পরিষ্কারের পর খালি ${formatMb(after)} / দরকার ≈ ${formatMb(plan.requiredBytes)}.`);
+      if (after < plan.requiredBytes && !FORCE_LOW_SPACE) {
+        console.error("[zc] ইনস্টল বন্ধ — cache পরিষ্কারের পরেও জায়গা কম। কিছুই লেখা হয়নি।");
+        process.exit(3);
+      }
+      // Keep the next npm download off the USB: a temporary cache that is
+      // removed when the process exits.
+      NPM_CACHE = path.join(os.tmpdir(), `zombiecoder-npm-cache-${process.pid}`);
+      process.on("exit", () => {
+        try {
+          fs.rmSync(NPM_CACHE, { recursive: true, force: true });
+        } catch {
+          /* cleanup is best effort */
+        }
+      });
+    }
+  }
+}
+
 const FAST_MODE = flag("--fast");
 const ALLOW_SLOW = flag("--allow-slow");
 const PROBE_TOOLS = !flag("--no-probe-tools");
@@ -896,12 +1040,20 @@ await step("declare @opencode/plugin dependency", () => {
 });
 
 // ---- 4. npm install ----------------------------------------------------------
-if (DO_INSTALL) {
+if (DO_INSTALL && !NEEDS_DEPS) {
+  report.steps.push({
+    step: "npm install",
+    ok: true,
+    detail: `already satisfied (@opencode/plugin ${INSTALLED_DEPENDENCY}); skipped (--force-install to redo)`,
+  });
+} else if (DO_INSTALL) {
   await step("npm install", () => {
     // Windows resolves npm through npm.cmd, and spawning a .cmd file needs a
     // shell. Without this, a fresh Windows install fails here.
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-    const result = spawnSync(npm, ["install", "--no-audit", "--no-fund"], {
+    const args = ["install", "--no-audit", "--no-fund", "--omit=dev", "--prefer-offline"];
+    if (NPM_CACHE) args.push("--cache", NPM_CACHE);
+    const result = spawnSync(npm, args, {
       cwd: CONFIG_DIR,
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8",
@@ -1423,6 +1575,39 @@ await step("write entrypoint", () => {
 
 // ---- 12. one self-contained root for the global loader -----------------------
 await step("link self-contained root to global loader", linkSelfContainedGlobal);
+
+// ---- 13. self-check ----------------------------------------------------------
+// The installer used to report step OKs and exit; nothing re-read the result.
+// Run the same structural audit a user can run after the install, so "done"
+// means the config, agents, entrypoint, LSP and MCP were observed together.
+if (DO_INSTALL && DO_PROVIDER_CONFIG && DO_LSP) {
+  await step("self-check", () => {
+    const audit = path.join(PACKAGE_ROOT, "scripts", "audit-install.mjs");
+    if (!fs.existsSync(audit)) return "skipped (scripts/audit-install.mjs missing)";
+    // Global/self-contained: one directory holds config and install. --dir and
+    // --home keep opencode.json at the project/home root and the plugin graph in
+    // .opencode, so the audit needs both paths.
+    const auditArgs =
+      path.resolve(CONFIG_DIR) === path.resolve(TARGET)
+        ? [audit, "--config", CONFIG_DIR]
+        : [audit, "--config", TARGET, "--install", CONFIG_DIR];
+    const result = spawnSync(process.execPath, auditArgs, {
+      encoding: "utf8",
+      env: { ...process.env, HOME: os.homedir() },
+    });
+    if (result.status !== 0) {
+      const detail = String(result.stdout || result.stderr || "").trim().split("\n").slice(-4).join(" ");
+      throw new Error(`install audit failed (exit ${result.status}): ${detail}`);
+    }
+    return String(result.stdout || "").trim().split("\n").slice(-1)[0] || "PASS";
+  });
+} else {
+  report.steps.push({
+    step: "self-check",
+    ok: true,
+    detail: "skipped (--no-install, --no-provider-config or --no-lsp)",
+  });
+}
 
 // ---- report ------------------------------------------------------------------
 const failed = report.steps.filter((s) => !s.ok);

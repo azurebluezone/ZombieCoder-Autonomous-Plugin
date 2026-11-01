@@ -100,6 +100,24 @@ export function parseContract(syllabus: string, id: string): GoalContractFields 
   };
 }
 
+/**
+ * Verdict already recorded for `id` by a previous close, or null.
+ * A PASS is final: closing again must not re-run the check or ask for consent.
+ */
+export function contractStatus(syllabus: string, id: string): "PASS" | "FAIL" | null {
+  const text = String(syllabus ?? "");
+  const key = String(id ?? "").trim();
+  if (!key) return null;
+  const heading = new RegExp(`^### Goal Contract ${escapeRegex(key)} — result[ \\t]*$`, "m");
+  const match = heading.exec(text);
+  if (!match || match.index === undefined) return null;
+  const start = match.index;
+  const next = text.indexOf("\n### ", start + match[0].length);
+  const block = text.slice(start, next < 0 ? undefined : next);
+  const status = /^- status: (PASS|FAIL)$/m.exec(block)?.[1];
+  return status === "PASS" || status === "FAIL" ? status : null;
+}
+
 export type OpenContract = {
   /** Contract id returned by open. */
   id: string;

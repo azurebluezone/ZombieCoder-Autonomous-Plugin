@@ -22,20 +22,20 @@ test("canonicalJson sorts keys and drops whitespace", () => {
 });
 
 test("a new payload verifies against its own checksum", () => {
-  const payload = identityPayload({ generatedAt: "2026-10-25T00:00:00.000Z", version: "0.1.0", versionSource: "test" });
+  const payload = identityPayload({ generatedAt: "2026-10-25T00:00:00.000Z", version: "0.1.0", versionSource: "test", runtime: { version: "2.2.3", source: "test" } });
   const result = verifyIdentityChecksum(payload);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.match(result.stored, /^[0-9a-f]{64}$/);
 });
 
 test("changing one value breaks the checksum", () => {
-  const payload = identityPayload({ generatedAt: "2026-10-25T00:00:00.000Z", version: "0.1.0", versionSource: "test" });
+  const payload = identityPayload({ generatedAt: "2026-10-25T00:00:00.000Z", version: "0.1.0", versionSource: "test", runtime: { version: "2.2.3", source: "test" } });
   payload.system_identity.branding.owner = "someone else";
   assert.equal(verifyIdentityChecksum(payload).ok, false);
 });
 
 test("checksum ignores its own field", () => {
-  const payload = identityPayload({ generatedAt: "2026-10-25T00:00:00.000Z", version: "0.1.0", versionSource: "test" });
+  const payload = identityPayload({ generatedAt: "2026-10-25T00:00:00.000Z", version: "0.1.0", versionSource: "test", runtime: { version: "2.2.3", source: "test" } });
   const before = identityChecksum(payload);
   payload.system_identity.manifest.checksum = "0".repeat(64);
   assert.equal(identityChecksum(payload), before);
@@ -46,4 +46,18 @@ test("shipped doc/identity.json verifies (npm run identity:check contract)", () 
   const payload = JSON.parse(fs.readFileSync(file, "utf8"));
   const result = verifyIdentityChecksum(payload);
   assert.equal(result.ok, true, `stored=${result.stored} computed=${result.computed}`);
+});
+
+test("identity version is the product version, never a runtime build", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, "doc", "identity.json"), "utf8")).system_identity;
+  assert.equal(shipped.version, pkg.version, "identity.version must come from package.json");
+  assert.equal(shipped.version_source, "package.json");
+  assert.ok(shipped.runtime && typeof shipped.runtime.version === "string", "runtime build is recorded separately");
+
+  const base = { generatedAt: "2026-10-25T00:00:00.000Z", version: pkg.version, versionSource: "package.json" };
+  const oldRuntime = identityPayload({ ...base, runtime: { version: "2.2.3", source: "test" } });
+  const newRuntime = identityPayload({ ...base, runtime: { version: "2.2.4", source: "test" } });
+  assert.equal(oldRuntime.system_identity.version, newRuntime.system_identity.version);
+  assert.notEqual(oldRuntime.system_identity.runtime.version, newRuntime.system_identity.runtime.version);
 });

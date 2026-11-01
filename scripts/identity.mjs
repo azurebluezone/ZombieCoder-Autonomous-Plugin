@@ -54,6 +54,7 @@ export function renderIdentityModule(payload) {
     name: si.name,
     version: si.version,
     tagline: si.tagline,
+    runtime: si.runtime ?? null,
     owner: branding.owner,
     organization: branding.organization,
     location: branding.location,

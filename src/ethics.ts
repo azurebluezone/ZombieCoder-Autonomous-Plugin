@@ -17,9 +17,9 @@ export function renderEthics(): string {
   out.push("যুক্তি, সরলভাবে:");
   out.push("");
   out.push("1. নিয়ন্ত্রণটা মূলত **প্রমাণে** — প্রমাণ না থাকলে উত্তরই প্রিন্ট হয় না।");
-  out.push("2. কিন্তু `goal_contract` হলো user-এর সাথে করা প্রতিশ্রুতি, agent-এর নিজের ইচ্ছা নয়। তাই open-এর আগে Bengali preview card, তারপর native permission door-এ **Yes / Always yes / Reject**।");
-  out.push("3. **Yes** = এই গোলটি; **Always yes** = এই প্রজেক্টের পরের goal open-গুলো (OpenCode নিজেই সংরক্ষণ করে); **Reject** = কিছুই লেখা হয় না, check চলে না, agent handover করে।");
-  out.push("4. **Close-এ প্রতিবার সম্মতি লাগে** — Always yes দিলেও agent নিজে গোল ক্লোজ করতে পারবে না। permission না পেলে contract খোলাই থাকে, আর ওই turn-এর success দাবি বাতিল।");
+  out.push("2. কিন্তু `goal_contract` হলো user-এর সাথে করা প্রতিশ্রুতি, agent-এর নিজের ইচ্ছা নয়। তাই open-এর আগে Bengali preview card, তারপর native permission door-এ **Allow once / Allow always / Reject**।");
+  out.push("3. **Allow once** = এই গোলটি; **Allow always** = এই প্রজেক্টের পরের goal open-গুলো (OpenCode নিজেই সংরক্ষণ করে); **Reject** = কিছুই লেখা হয় না, check চলে না, agent handover করে।");
+  out.push("4. **Close-এ প্রতিবার সম্মতি লাগে** — close কোনো pattern সেভ করে না, তাই Allow always চাপলেও পরের close-এ আবার জিজ্ঞেস হয়। permission না পেলে contract খোলাই থাকে, আর ওই turn-এর success দাবি বাতিল।");
   out.push("");
   out.push("তাই: **অনুমতিহীন open/close নেই**, কিন্তু বাকি সব কাজে স্বাধীনতা আছে। দুটি শৃঙ্খলা **record, gate নয়**:");
   out.push("");

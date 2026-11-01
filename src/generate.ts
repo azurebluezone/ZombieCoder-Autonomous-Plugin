@@ -94,10 +94,21 @@ function footer(
 async function main(): Promise<void> {
   const stamp = generatedAt.replace(/[:.]/g, "-");
   const rt = await readRuntimeVersion();
-  const identity = identityPayload({ generatedAt, version: rt.version, versionSource: rt.source });
+  // The product version and the live runtime build are different facts. Keeping
+  // them in one field made every OpenCode upgrade look like an identity change.
+  const productVersion = String(
+    JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version ?? "0.0.0",
+  );
+  const identityCtx = {
+    generatedAt,
+    version: productVersion,
+    versionSource: "package.json",
+    runtime: rt,
+  };
+  const identity = identityPayload(identityCtx);
 
   const docs: { name: string; body: string }[] = [
-    { name: "Identity Specification.md", body: renderIdentity({ generatedAt, version: rt.version, versionSource: rt.source }) },
+    { name: "Identity Specification.md", body: renderIdentity(identityCtx) },
     { name: "Agent Architecture.md", body: renderAgents() },
     { name: "Persona & Ethics.md", body: renderEthics() },
     { name: "Runtime Operations.md", body: renderRuntime() },
@@ -105,6 +116,7 @@ async function main(): Promise<void> {
 
   const report: string[] = [];
   report.push("target : " + OUT);
+  report.push("product: " + productVersion + "  (package.json)");
   report.push("runtime: " + rt.version + "  (" + rt.source + ")");
   report.push("");
 

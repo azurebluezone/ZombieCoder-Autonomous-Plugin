@@ -450,13 +450,17 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const openConsent = fake.permissions.filter((entry) => entry.action === "goal_contract.open");
   assert.ok(openConsent.length >= 1, "goal_contract open must ask the native permission door");
   assert.equal(openConsent[openConsent.length - 1].sessionID, "ses_goal");
-  assert.deepEqual(openConsent[openConsent.length - 1].save, [root], "Always yes must remember this project");
+  assert.deepEqual(openConsent[openConsent.length - 1].save, [root], "Allow always must remember this project");
   assert.equal(openConsent[openConsent.length - 1].metadata?.goal, "checkout returns an order id");
   const previewCard = fake.synthetics.find(
     (entry) => entry.description === "goal contract preview",
   );
   assert.ok(previewCard, "goal_contract open must show a synthetic preview card");
-  assert.match(previewCard.text, /👍 দেখে নাও/);
+  assert.match(previewCard.text, /👍 দেখে নাও|permission dialog/);
+  assert.match(previewCard.text, /Allow once/);
+  assert.match(previewCard.text, /Allow always/);
+  assert.match(previewCard.text, /Reject/);
+  assert.doesNotMatch(previewCard.text, /Yes দিলে/, "the preview must use the real permission labels");
   assert.match(previewCard.text, /✋ ভুল মনে হলে/);
   assert.doesNotMatch(previewCard.text, /"হ্যাঁ"/, "no confirmation word is requested");
   const syllabusAfterOpen = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
@@ -481,6 +485,19 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const closeConsent = fake.permissions.filter((entry) => entry.action === "goal_contract.close");
   assert.ok(closeConsent.length >= 1, "goal_contract close must ask the native permission door");
   assert.deepEqual(closeConsent[closeConsent.length - 1].resources, [opened.id]);
+  assert.deepEqual(
+    closeConsent[closeConsent.length - 1].save,
+    [],
+    "close must propose no durable pattern, so every close asks again",
+  );
+  const closePreview = fake.synthetics.find(
+    (entry) => entry.description === "goal contract close preview",
+  );
+  assert.ok(closePreview, "goal_contract close must show its own preview card");
+  assert.match(closePreview.text, /শেষ ধাপ/);
+  assert.match(closePreview.text, /Allow once/);
+  assert.match(closePreview.text, /সেভ হয় না/);
+  assert.match(closePreview.text, new RegExp(opened.id));
   const resultCard = fake.synthetics.find(
     (entry) => entry.description === "goal contract result",
   );
@@ -489,6 +506,20 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const syllabusAfterClose = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
   assert.match(syllabusAfterClose, /claimExitCode: 1/);
   assert.match(syllabusAfterClose, /- exitCode: 0/);
+
+  // A PASS is final: closing the same id again must not ask or run the check.
+  const closeAsksBefore = fake.permissions.filter((entry) => entry.action === "goal_contract.close").length;
+  const closedAgain = (await goalTool.execute(
+    { action: "close", id: opened.id },
+    { sessionID: "ses_goal" },
+  )).output;
+  assert.equal(closedAgain.status, "closed");
+  assert.equal(closedAgain.ran, false);
+  assert.equal(
+    fake.permissions.filter((entry) => entry.action === "goal_contract.close").length,
+    closeAsksBefore,
+    "an already-passed contract must not ask for consent again",
+  );
 
   // The real output must match the recorded expectation, not the agent's word.
   const mismatch = (await goalTool.execute(
@@ -549,8 +580,12 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(rejectedOpen.status, "rejected");
   assert.equal(rejectedOpen.wrote, false);
   assert.match(rejectedOpen.reason, /rejected/);
+  assert.match(rejectedOpen.preview, /Allow once/);
   const syllabusAfterReject = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
-  assert.doesNotMatch(syllabusAfterReject, /rejected goal must not be recorded/);
+  const rejectedConsent = syllabusAfterReject.split("### Goal Contract — consent")[1]?.split(/\n### /)[0] ?? "";
+  assert.match(rejectedConsent, /rejected goal must not be recorded/, "the refusal is recorded, not hidden");
+  assert.match(rejectedConsent, /- status: rejected/);
+  assert.match(rejectedConsent, /Nothing was written/);
 
   // A rejected close must not run the check either.
   fake.permissionState.mode = "allow";

@@ -36,6 +36,7 @@ const SCOPE = [
   "test",
   "mcp",
   "docs/skills",
+  "install.sh",
   "package.json",
   "LICENSE",
 ];
@@ -70,7 +71,7 @@ function isIncluded(file) {
   const p = file.split(sep).join("/");
   if (SKIP.has(p)) return false;
   if (p.startsWith("node_modules/") || p.startsWith(".git/")) return false;
-  if (p === "package.json" || p === "LICENSE") return true;
+  if (p === "package.json" || p === "LICENSE" || p === "install.sh") return true;
   return (
     p.startsWith("src/") ||
     p.startsWith("bin/") ||

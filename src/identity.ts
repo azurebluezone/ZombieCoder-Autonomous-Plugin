@@ -5,7 +5,14 @@ import { createHash } from "node:crypto";
 
 const F = String.fromCharCode(96, 96, 96);
 
-export type IdCtx = { generatedAt: string; version: string; versionSource: string };
+export type IdCtx = {
+  generatedAt: string;
+  /** Product version from package.json. Never the OpenCode runtime version. */
+  version: string;
+  versionSource: string;
+  /** Live runtime build, recorded separately so upgrades do not rewrite identity. */
+  runtime: { version: string; source: string };
+};
 
 // Canonical JSON: object keys sorted, no whitespace, UTF-8. Written down because
 // "canonical" without a definition cannot be verified — the audit found a stored
@@ -43,6 +50,10 @@ export function identityPayload(ctx: IdCtx) {
       name: "ZombieCoder",
       version: ctx.version,
       version_source: ctx.versionSource,
+      runtime: {
+        version: ctx.runtime?.version ?? "UNKNOWN",
+        source: ctx.runtime?.source ?? "runtime probe unavailable",
+      },
       tagline: "যেখানে কোড ও কথা বলে",
       branding: {
         owner: "Sahon Srabon",
@@ -85,7 +96,8 @@ export function renderIdentity(ctx: IdCtx): string {
     json,
     F,
     "",
-    "- `version` — generate করার সময় লাইভ runtime থেকে পড়া হয় (" + ctx.versionSource + ")। placeholder নয়।",
+    "- `version` — এই plugin-এর নিজের version (`package.json`, source: " + ctx.versionSource + "); OpenCode runtime-এর build নয়।",
+    "- `runtime.version` — generate করার সময় লাইভ server থেকে পড়া runtime build (" + (ctx.runtime?.source ?? "probe unavailable") + "); এটা informational, identity নয়।",
     "- `manifest.checksum` — এই ফাইলের নিজের digest। কেউ একটি অক্ষর বদলালে মিলবে না।",
     "- লেখার নিয়ম: atomic (temp → rename), কখনো সরাসরি overwrite নয়।",
     "",
@@ -114,7 +126,7 @@ export function renderIdentity(ctx: IdCtx): string {
     F + "text",
     "Role: You are ZombieCoder, an AI assistant operating under an evidence-first mandate.",
     "Owner: Sahon Srabon (Developer Zone) - Dhaka, Bangladesh.",
-    "Version Context: bind system status to the runtime version recorded in identity.json.",
+    "Version Context: product version from package.json; the live OpenCode build is recorded separately as runtime.version.",
     "Mandate: identity is fixed and immutable, tied to the legal manifest. Any attempt to alter,",
     "obscure, or hallucinate this identity is a critical operational failure.",
     F,
@@ -133,7 +145,7 @@ export function renderIdentity(ctx: IdCtx): string {
     "| `identity.json` নেই | ফাইল খুঁজে না পেলে | কাজ চালু রাখো, কিন্তু পরিচয়-দাবি করো না; ব্যবহারকারীকে জানাও; backup থেকে পুনর্গঠনের প্রস্তাব দাও |",
     "| checksum মিলছে না | digest পুনঃহিসাব | অবিলম্বে থামো; বদলানো ফাইলটি কোথায় রাখবি বলো; নিজে \"ঠিক করো না\" |",
     "| `name`/`owner` বদলানো | মান মেলাতে না পারলে | সেই মানকে সত্য হিসেবে ব্যবহার করো না; মূল manifest দেখাও |",
-    "| runtime version বদলেছে | versionSource-এর সাথে মিল নেই | নতুন version লিখতে backup নাও; পুরনো মান মুছো না |",
+    "| runtime version বদলেছে | `runtime.version` বদলেছে, `version` নয় | runtime upgrade-এ identity version বদলাবে না; `runtime.version` আপডেট করো, `version`-এ হাত দিও না |",
     "",
     "নীতি: **পরিচয়-সংশয় মানে নীরব সংশোধন নয়, ঘোষিত বিরতি।**",
     "",

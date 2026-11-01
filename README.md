@@ -202,7 +202,45 @@ npm --version
 
 ## ৪. সরাসরি ক্লোন ও ইনস্টল
 
-### ৪.০ নতুনদের জন্য এক-কমান্ড ইনস্টল (recommended)
+### ৪.০ এক-ক্লিক রিমোট ইনস্টল / আপডেট (কোনো clone নেই)
+
+নতুন computer-এ শুধু একটি command — source tarball নিজেই নামবে, integrity
+manifest যাচাই হবে, তারপর install হবে:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/azurebluezone/ZombieCoder-Autonomous-Plugin/murubbi/install.sh | bash
+```
+
+আবার একই command চালালে **update** হয়: `opencode.json`-এর অজানা key, provider
+config ও user data merge হয়, মুছে যায় না; already-satisfied dependency আবার
+ডাউনলোড হয় না (`--force-install` দিলে হবে)।
+
+| Environment variable | ডিফল্ট | কাজ |
+|---|---|---|
+| `ZOMBIECODER_DIR` | `~/.opencode` | install root |
+| `ZOMBIECODER_REPO` | `azurebluezone/ZombieCoder-Autonomous-Plugin` | GitHub repo |
+| `ZOMBIECODER_REF` | `murubbi` | branch/tag |
+| `ZOMBIECODER_TARBALL` | — | offline/local tarball (download skip) |
+
+উদাহরণ: LSP ছাড়া (≈180 MB কম জায়গা):
+
+```bash
+curl -fsSL .../install.sh | bash -s -- --no-lsp
+```
+
+Installer প্রথমে জায়গা যাচাই করে: base ≈32 MB + deps ≈180 MB + LSP ≈180 MB
+(+10% headroom)। জায়গা কম হলে শুধু পুনরায় ডাউনলোডযোগ্য `~/.npm` cache
+পরিষ্কার করে; তারপরও কম হলে **কিছুই লেখার আগে** exit code `3` দিয়ে থামে এবং
+`--no-lsp`, `--no-install`, `--config-dir` বিকল্প দেখায়। `--no-space-check`
+দিয়ে check বন্ধ করা যায়, আর `--keep-cache` দিয়ে cache পরিষ্কার বন্ধ।
+
+উপরের bootstrap-টি `install.sh`; একই installer সরাসরি চালাতে চাইলে:
+
+```bash
+node --experimental-strip-types bin/install.mjs --config-dir "$HOME/.opencode" --yes
+```
+
+### ৪.০.১ নতুনদের জন্য এক-কমান্ড ইনস্টল (clone করা repo থেকে)
 
 কোডিং না জানলেও চলবে। শুধু terminal-এ তিনটি লাইন:
 
@@ -334,6 +372,7 @@ foreach ($item in @("opencode.json","agents","plugins","zombiecoder","node_modul
 | Windows-এ symlink error | symlink privilege নেই | নতুন installer junction/copy fallback ব্যবহার করে; Developer Mode বাধ্যতামূলক নয়। Copy হলে update-এর পর installer আবার চালান। |
 | `python3: not found` | Python 3 নেই | Python 3 ইনস্টল করুন (`evidence_gate`, `syntax_check` helper ব্যবহার করবে)। |
 | `npm: not found` | Node-এর bundled npm PATH-এ নেই | Node LTS ইনস্টল/repair করুন, নতুন terminal খুলুন। |
+| `space` / exit code `3` | live USB-এ জায়গা কম | `--no-lsp` (≈180 MB বাঁচে), `--config-dir` দিয়ে বেশি জায়গার path, অথবা npm cache পরিষ্কার হতে দিন (`--keep-cache` দিলে হবে না)। installer কিছু লেখার আগেই থামে। |
 
 Installer প্রতিটি step-এর শেষে `OK`/`FAIL` লাইন দেখায় এবং `installed: N/M steps ok`
 প্রিন্ট করে; কোনো FAIL থাকলে exit code `1`।
@@ -345,8 +384,11 @@ Installer নিচের কাজগুলো ধাপে ধাপে সম
 1. Install root তৈরি করে।
 2. Plugin runtime graph copy করে (files `0644`, dirs `0755`; checked-out mode যাই হোক)।
 3. `zombiecoder/{docs,tools,tls,model.mjs,skills-catalog}` runtime asset copy করে।
-4. `@opencode/plugin` dependency যোগ করে।
-5. `npm install` চালায় (অথবা `--no-install` দিলে skip করে)।
+5. জায়গা যাচাই করে (base+deps+LSP अनुमान, ১০% headroom); কম হলে শুধু
+   পুনরায় ডাউনলোডযোগ্য npm cache পরিষ্কার করে, তারপরও কম হলে কিছু না লিখে
+   exit `3`। (`--no-space-check`, `--keep-cache`, `--force-low-space` আছে।)
+6. `npm install` চালায়; dependency আগে থেকেই satisfy থাকলে skip করে
+   (`--force-install` দিলে আবার চালায়)। `--no-install` দিলে পুরো step skip।
 6. `<install>/lsp`-এ LSP server toolchain install করে (`typescript-language-server`,
    `pyright`, `bash-language-server`, `vscode-langservers-extracted`); `--no-lsp`
    দিলে skip করে।
@@ -363,6 +405,8 @@ Installer নিচের কাজগুলো ধাপে ধাপে সম
 14. `--config-dir ~/.opencode` হলে `~/.config/opencode`-এর ছয়টি entry-কে
     একটি self-contained root-এ link করে (symlink; Windows-এ junction, না পারলে
     copy); পুরনো regular file/directory `~/.config/opencode/.backups/`-এ সরিয়ে রাখে।
+15. শেষে `scripts/audit-install.mjs` দিয়ে নিজের কাজ যাচাই করে (agents, LSP,
+    MCP, entrypoint, permissions); audit fail হলে install FAIL ও exit code `1`।
 
 Install শেষ হলে কোথায় কী থাকবে:
 
@@ -934,6 +978,10 @@ Plugin-এর `ctx.rpc` door `POST /api/rpc/zombiecoder/<method>`-এ reachable�
 | `--yes` | কোনো prompt ছাড়া install |
 | `--no-install` | `npm install` skip |
 | `--no-lsp` | LSP server install ও `lsp` config generation skip |
+| `--no-space-check` | free-space preflight skip |
+| `--keep-cache` | npm cache স্বয়ংক্রিয়ভাবে পরিষ্কার করবে না |
+| `--force-low-space` | জায়গা কম হলেও install চালিয়ে যাবে (ঝুঁকিসহ) |
+| `--force-install` | dependency satisfy থাকলেও `npm install` আবার চালাবে |
 | `--no-provider-config` | `opencode.json` provider merge skip |
 
 Environment variables:
@@ -956,6 +1004,17 @@ OPENCODE_BASE
 ## ১৩. আপডেট, clean reinstall ও uninstall
 
 ### Update
+
+এক-ক্লিক (clone ছাড়া, recommended):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/azurebluezone/ZombieCoder-Autonomous-Plugin/murubbi/install.sh | bash
+```
+
+এটি নতুন source tarball নামায়, integrity যাচাই করে, existing install update করে
+এবং already-satisfied dependency আবার ডাউনলোড করে না।
+
+Clone করা repo থেকে:
 
 ```bash
 cd ZombieCoder-Autonomous-Plugin
@@ -1211,8 +1270,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  c8575f77313c6fdf6ca983a1059905450b4163ca71c30daa998d6ed664e2e536  ║
-║  files 99 · bytes 939772 · base 95256d2 · dirty                          ║
+║  root  03149d0913cf55e7ed8de55b10c244004640e065cfcc46de065807b33917de99  ║
+║  files 103 · bytes 975104 · base 350f848 · dirty                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1220,7 +1279,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T09:00:15.280Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T09:28:10.759Z
 
 </div>
 <!-- INTEGRITY:END -->

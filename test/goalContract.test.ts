@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  contractStatus,
   extractJson,
   matches,
   normalizeMatch,
@@ -91,4 +92,25 @@ test("runCheck returns plain text even when the caller exports FORCE_COLOR", asy
 
   const painted = await runCheck(root, 'node -e "process.stdout.write(\'\\u001B[33m42\\u001B[39m\')"');
   assert.equal(painted.stdout, "42");
+});
+
+test("contractStatus reads the recorded verdict and ignores the open block", () => {
+  const syllabus = [
+    "### Goal Contract gc-abc — result",
+    "- status: PASS",
+    "- exitCode: 0",
+    "",
+    "### Goal Contract gc-def",
+    "- status: open",
+    "",
+    "### Goal Contract gc-ghi — result",
+    "- status: FAIL",
+    "- reason: mismatch",
+    "",
+    "### Next section",
+  ].join("\n");
+  assert.equal(contractStatus(syllabus, "gc-abc"), "PASS");
+  assert.equal(contractStatus(syllabus, "gc-ghi"), "FAIL");
+  assert.equal(contractStatus(syllabus, "gc-def"), null, "an open contract has no verdict");
+  assert.equal(contractStatus(syllabus, "gc-missing"), null);
 });

@@ -790,7 +790,70 @@ async function livePlugin() {
 }
 await livePlugin();
 
-// 14. Second installer pass produced the same generated state.
+// 14. Every configured MCP server is connected in the running instance.
+async function liveMcp() {
+  if (!samePath(target, path.join(home, ".opencode")) && !samePath(target, globalDir)) {
+    return record("mcp-connected", "NOT_TESTED", `isolated target ${target}; live API was not touched`);
+  }
+  if (skipInstall) {
+    return record("mcp-connected", "NOT_TESTED", "--no-install");
+  }
+  const configured = Object.keys(config?.mcp?.servers ?? {});
+  if (configured.length === 0) {
+    return record("mcp-connected", "NOT_TESTED", "opencode.json has no MCP servers");
+  }
+  const stateHome = process.env.XDG_STATE_HOME || path.join(home, ".local", "state");
+  const serviceFile = path.join(stateHome, "opencode", "service.json");
+  if (!exists(serviceFile)) {
+    return record("mcp-connected", "NOT_TESTED", `no running service file at ${serviceFile}`);
+  }
+  let service;
+  try {
+    service = readJson(serviceFile);
+  } catch (error) {
+    return record("mcp-connected", "NOT_TESTED", `unreadable service file: ${String(error?.message ?? error)}`);
+  }
+  let origin;
+  try {
+    origin = new URL(service.url).origin;
+  } catch (error) {
+    return record("mcp-connected", "NOT_TESTED", `invalid service URL: ${String(error?.message ?? error)}`);
+  }
+  const headers = { authorization: "Basic " + Buffer.from(`opencode:${service.password}`).toString("base64") };
+  try {
+    // A command path on disk proves configuration, not that the server started.
+    // The plugin reload above also restarts MCP servers, so a single read races
+    // their handshake and sees "pending"; poll until every server is connected.
+    let live = new Map();
+    const deadline = Date.now() + 60000;
+    while (true) {
+      const response = await fetch(`${origin}/api/mcp`, { headers, signal: AbortSignal.timeout(15000) });
+      if (!response.ok) {
+        return record("mcp-connected", "NOT_TESTED", `GET /api/mcp -> ${response.status}`, { server: origin });
+      }
+      const body = await response.json();
+      live = new Map((body.data ?? []).map((entry) => [entry.name, entry.status?.status ?? "unknown"]));
+      if (configured.every((name) => live.get(name) === "connected")) break;
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const evidence = { server: origin, configured, live: Object.fromEntries(live) };
+    const missing = configured.filter((name) => !live.has(name));
+    if (missing.length) {
+      return record("mcp-connected", "FAIL", `${missing.length}/${configured.length} configured servers not loaded after 60s: ${missing.join(", ")}`, evidence);
+    }
+    const disconnected = configured.filter((name) => live.get(name) !== "connected");
+    if (disconnected.length) {
+      return record("mcp-connected", "FAIL", `${disconnected.length}/${configured.length} servers not connected after 60s: ${disconnected.join(", ")}`, evidence);
+    }
+    record("mcp-connected", "PASS", `${configured.length}/${configured.length} MCP servers connected: ${configured.join(", ")}`, evidence);
+  } catch (error) {
+    record("mcp-connected", "NOT_TESTED", `live API unavailable: ${String(error?.message ?? error)}`, { server: origin });
+  }
+}
+await liveMcp();
+
+// 15. Second installer pass produced the same generated state.
 const hash1 = process.env.ZC_HASH1;
 const hash2 = process.env.ZC_HASH2;
 if (hash1 && hash1 === hash2) {
@@ -799,7 +862,7 @@ if (hash1 && hash1 === hash2) {
   record("idempotence", "FAIL", `H1=${hash1 || "(missing)"} H2=${hash2 || "(missing)"}`, { hash1, hash2 });
 }
 
-// 15. Target growth stayed inside the declared budget.
+// 16. Target growth stayed inside the declared budget.
 const before = Number(process.env.ZC_BEFORE_BYTES || 0);
 const after = Number(process.env.ZC_AFTER_BYTES || 0);
 const budget = Number(process.env.ZC_SPACE_BUDGET_MB || 800) * 1048576;
@@ -815,7 +878,7 @@ if (delta <= budget) {
   record("space-delta", "FAIL", `${mb(delta)} growth exceeds ${mb(budget)} budget`);
 }
 
-// 16. The staging tree is gone before the proof is written.
+// 17. The staging tree is gone before the proof is written.
 let cleanupError = null;
 try {
   fs.rmSync(work, { recursive: true, force: true });

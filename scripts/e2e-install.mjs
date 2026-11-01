@@ -131,8 +131,10 @@ function assertProof(root) {
       return `${id}: ${byId.get(id)?.status ?? "missing"}`;
     }
   }
-  if (byId.get("live-plugin")?.status !== "NOT_TESTED") {
-    return `live-plugin: ${byId.get("live-plugin")?.status ?? "missing"}`;
+  for (const id of ["live-plugin", "mcp-connected"]) {
+    if (byId.get(id)?.status !== "NOT_TESTED") {
+      return `${id}: ${byId.get(id)?.status ?? "missing"}`;
+    }
   }
   return null;
 }

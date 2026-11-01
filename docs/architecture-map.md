@@ -41,7 +41,7 @@ flowchart TD
 
 নোট: `src/generate.ts` persona বানায় না — এটি `doc/Identity Specification.md`, `doc/Agent Architecture.md` ইত্যাদি markdown generator (`src/generate.ts:94`, `package.json:17`)। Persona-র সত্যিকারের source `src/roster.ts`; runtime agent markdown লেখে `src/roster.ts:516` (`agentMarkdown`) আর `src/plugin.ts:581` (`setup`). LSP config-এর default path `~/.config/opencode/opencode.json` (`scripts/lsp-probe.mjs:41-46`); installer ওখানেই `lsp` block merge করে (`bin/install.mjs:1302`).
 
-`install.sh` install logic duplicate করে না: এটি source staging, integrity, দুই installer pass আর inline verifier চালায়; আসল pipeline সবসময় `bin/install.mjs`। Proof-এর ১৬টি check হলো integrity, staging budget, config JSON, entrypoint, source hash fidelity, single loader, ৯ agent, consent `ask`, dependencies, audit, LSP config, LSP initialize, live `/api/plugin`, idempotence `H1 === H2`, space delta এবং staging cleanup।
+`install.sh` install logic duplicate করে না: এটি source staging, integrity, দুই installer pass আর inline verifier চালায়; আসল pipeline সবসময় `bin/install.mjs`। Proof-এর ১৭টি check হলো integrity, staging budget, config JSON, entrypoint, source hash fidelity, single loader, ৯ agent, consent `ask`, dependencies, audit, LSP config, LSP initialize, live `/api/plugin`, live MCP connectivity (`/api/mcp`), idempotence `H1 === H2`, space delta এবং staging cleanup।
 
 ## ২. Tool map — ১৮টি tool
 

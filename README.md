@@ -231,7 +231,7 @@ curl -fsSL https://raw.githubusercontent.com/azurebluezone/ZombieCoder-Autonomou
 6. **proof** — entrypoint, downloaded source-এর সাথে installed plugin graph-এর
    hash fidelity, এক loader, ৯ agent, consent `ask`, dependencies, audit, LSP
    config, real LSP initialize, live `/api/plugin` (running instance reload করে),
-   space delta ও staging cleanup যাচাই হয়।
+   live MCP connectivity (`/api/mcp`), space delta ও staging cleanup যাচাই হয়।
 
 শেষে stdout-এ `PROOF PASS` এবং এই artifact:
 
@@ -768,6 +768,17 @@ URL `opencode.json`-এ লেখা হয় না। MCP state:
 ```text
 ~/.opencode/zombiecoder/mcp.json
 ```
+
+Running instance-এ server সত্যিই connected কি না:
+
+```bash
+OPENCODE_CONFIG="$HOME/.opencode/opencode.json" opencode mcp list
+```
+
+`/api/mcp` একই status দেয়, আর `install.sh` proof-এ `mcp-connected` check এই
+API-ই পড়ে — server command ফাইল থাকা মানে connected নয়। প্লেইন `opencode mcp
+list` config path না পেলে "No MCP servers configured" বলে, তাই
+`OPENCODE_CONFIG` দিয়ে explicit path দিন।
 
 ---
 
@@ -1320,8 +1331,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  1e401d28cfd4a2541d64528cddbd2607ecd460e3b1f78a1daa67128a9cb3f0a3  ║
-║  files 105 · bytes 1034277 · base bf8c1f3 · dirty                        ║
+║  root  8bcd9e703f0107f8a4e910201872ef73ae91d38d821e8aa2ad4e1dacf4262411  ║
+║  files 105 · bytes 1037542 · base 78bb4d2 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1329,7 +1340,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T10:51:16.423Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T11:18:09.324Z
 
 </div>
 <!-- INTEGRITY:END -->

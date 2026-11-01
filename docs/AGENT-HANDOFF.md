@@ -23,8 +23,8 @@
 | Goal contract | কোড শুরুর আগে `goal_contract` open: আসল input, observable expected output, check command, pass criteria; Bengali preview-র পরে native permission door-এ **Allow once / Allow always / Reject**। Allow once = এই গোল, Allow always = এই project-এর পরের open, Reject = কিছুই লেখা/চালানো হয় না; close-এ প্রতিবার সম্মতি লাগে, agent নিজে close করতে পারে না। close কোনো pattern সেভ করে না, তাই Allow always চাপলেও পরের close-এ আবার জিজ্ঞেস হয়। close নিজেই check command চালিয়ে observed vs expected মিলায় (contains/equals/regex/json); mismatch = FAIL, agent-এর exitCode claim বিশ্বাস হয় না। কোনো সময়/বাজেট প্রতিশ্রুতি নয় |
 | টুল | model-এর জন্মগত অঙ্গ নয়; client/harness চালায় |
 | LSP | V2.2.3-এ `lsp` config + server binary; installer ৭টি server auto-generate করে; `npm run lsp:probe` **7/7**; `npm run lsp:diagnostics` real diagnostic দেয়; desktop editor নেই, managed edit diagnostics `NOT_TESTED` |
-| MCP | দুটি local stdio server: `image-brand` (5 tools: PD/CC0 ছবি + branding + exact-size fit), `public-api` (8 tools: Wikipedia feeds, weather, currency, country, QR)। Installer `mcp/` কপি করে `opencode.json`-এ register করে; যাচাই `node scripts/audit-install.mjs` |
-| Install proof | `install.sh` একমাত্র bootstrap/update/proof entrypoint; tmpfs staging, দুই installer pass (`H1 === H2`), source hash fidelity, এক loader, ৯ agent, consent `ask`, dependencies, audit, LSP probe, live `/api/plugin`, space delta; artifact `$ZOMBIECODER_DIR/zombiecoder/install-proof.json`, stdout-এ `PROOF PASS`/`PROOF FAIL` |
+| MCP | দুটি local stdio server: `image-brand` (5 tools: PD/CC0 ছবি + branding + exact-size fit), `public-api` (8 tools: Wikipedia feeds, weather, currency, country, QR)। Installer `mcp/` কপি করে `opencode.json`-এ register করে; structural যাচাই `node scripts/audit-install.mjs`, live যাচাই `OPENCODE_CONFIG="$HOME/.opencode/opencode.json" opencode mcp list` বা `/api/mcp` |
+| Install proof | `install.sh` একমাত্র bootstrap/update/proof entrypoint; tmpfs staging, দুই installer pass (`H1 === H2`), source hash fidelity, এক loader, ৯ agent, consent `ask`, dependencies, audit, LSP probe, live `/api/plugin`, live MCP connectivity, space delta; artifact `$ZOMBIECODER_DIR/zombiecoder/install-proof.json`, stdout-এ `PROOF PASS`/`PROOF FAIL` |
 | License | Local Freedom, Non-Commercial (`LICENSE`) |
 
 ---
@@ -224,8 +224,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  1e401d28cfd4a2541d64528cddbd2607ecd460e3b1f78a1daa67128a9cb3f0a3  ║
-║  files 105 · bytes 1034277 · base bf8c1f3 · dirty                        ║
+║  root  8bcd9e703f0107f8a4e910201872ef73ae91d38d821e8aa2ad4e1dacf4262411  ║
+║  files 105 · bytes 1037542 · base 78bb4d2 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -233,7 +233,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T10:51:16.423Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T11:18:09.324Z
 
 </div>
 <!-- INTEGRITY:END -->

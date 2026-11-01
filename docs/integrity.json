@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-11-01T10:47:29.264Z",
+  "generated_at": "2026-11-01T10:51:16.423Z",
   "scope": [
     "src",
     "bin",
@@ -12,11 +12,11 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "98bcd4e966029f38c447c6ae857ade4d0dcfb47f912fcb35155d60dd74c59665",
+  "root_sha256": "1e401d28cfd4a2541d64528cddbd2607ecd460e3b1f78a1daa67128a9cb3f0a3",
   "file_count": 105,
-  "total_bytes": 1034007,
+  "total_bytes": 1034277,
   "git": {
-    "commit": "7baeb98",
+    "commit": "bf8c1f3",
     "branch": "murubbi",
     "dirty": true
   },
@@ -243,8 +243,8 @@
     },
     {
       "path": "scripts/integrity.mjs",
-      "bytes": 10209,
-      "sha256": "becd315c0a79043b6b372837fc89174db99393fa4da2561ba9743918e87143df"
+      "bytes": 10479,
+      "sha256": "365f6335c685680a0062f86ea27ee3f10c3181662216a5e9d4ac2cc5a149983a"
     },
     {
       "path": "scripts/lsp-diagnostics.mjs",

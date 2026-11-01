@@ -7,21 +7,21 @@
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  98bcd4e966029f38c447c6ae857ade4d0dcfb47f912fcb35155d60dd74c59665  ║
-║  files 105 · bytes 1034007 · base 7baeb98 · dirty                        ║
+║  root  1e401d28cfd4a2541d64528cddbd2607ecd460e3b1f78a1daa67128a9cb3f0a3  ║
+║  files 105 · bytes 1034277 · base bf8c1f3 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-11-01T10:47:29.264Z` |
-| Base commit | `7baeb98` |
+| Generated (UTC) | `2026-11-01T10:51:16.423Z` |
+| Base commit | `bf8c1f3` |
 | Branch | `murubbi` |
 | Code tree | `dirty` |
 | Files | 105 |
-| Bytes | 1034007 |
-| Root SHA-256 | `98bcd4e966029f38c447c6ae857ade4d0dcfb47f912fcb35155d60dd74c59665` |
+| Bytes | 1034277 |
+| Root SHA-256 | `1e401d28cfd4a2541d64528cddbd2607ecd460e3b1f78a1daa67128a9cb3f0a3` |
 
 ## Scope
 
@@ -91,7 +91,7 @@ npm run integrity:check
 | `scripts/configure.mjs` | 14570 | `53c62929b01c0cc5bddc1a21935e88790c6f67a8d5b7989711b894a6da0faf18` |
 | `scripts/e2e-install.mjs` | 14321 | `d4d2fef4eb0b47e036272ae3f55e753e46f06fd63ee8ec34c91cf05d39cae44f` |
 | `scripts/identity.mjs` | 4840 | `6cd9ec01f95af6a376745b4db047abd8ae77e5867fd5d6a91a99c82f1033f32d` |
-| `scripts/integrity.mjs` | 10209 | `becd315c0a79043b6b372837fc89174db99393fa4da2561ba9743918e87143df` |
+| `scripts/integrity.mjs` | 10479 | `365f6335c685680a0062f86ea27ee3f10c3181662216a5e9d4ac2cc5a149983a` |
 | `scripts/lsp-diagnostics.mjs` | 8920 | `9ee3431929bf4fec4e39d822e0a1876380229fda3408b7fa8c2f326a51ab4121` |
 | `scripts/lsp-probe.mjs` | 7294 | `77f7d44d6529d2d73376c4ca09053c046d3209af0b90ec1da5fda2335c4fe7ae` |
 | `scripts/setup.mjs` | 12807 | `f991bf440bbcd38819a40978e201817004e5574c4c45ed4f4921fa9ec0353d5f` |

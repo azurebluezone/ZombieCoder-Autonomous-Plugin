@@ -57,10 +57,14 @@ function sha256(buffer) {
 
 function git(args) {
   try {
+    // A downloaded tarball has no .git; listFiles() deliberately falls back to
+    // walking the tree. Keep git's "not a repository" fatal lines out of the
+    // install log, or a clean integrity check looks like a failure.
     return execFileSync("git", args, {
       cwd: ROOT,
       encoding: "utf8",
       maxBuffer: 32 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
     }).trim();
   } catch {
     return null;

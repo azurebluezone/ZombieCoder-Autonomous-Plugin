@@ -7,21 +7,21 @@
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  98204656dfbdacb87afb97174887cf4254c184159093c40c18dd9fe3df6dd692  ║
-║  files 105 · bytes 988702 · base ae09518 · dirty                         ║
+║  root  79d6a7d44f651316bd86ede5ee77b483b7cbcab258f495e3f759f00b6d763e3c  ║
+║  files 105 · bytes 1001885 · base de442e8 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-11-01T09:55:14.500Z` |
-| Base commit | `ae09518` |
+| Generated (UTC) | `2026-11-01T10:01:39.719Z` |
+| Base commit | `de442e8` |
 | Branch | `murubbi` |
 | Code tree | `dirty` |
 | Files | 105 |
-| Bytes | 988702 |
-| Root SHA-256 | `98204656dfbdacb87afb97174887cf4254c184159093c40c18dd9fe3df6dd692` |
+| Bytes | 1001885 |
+| Root SHA-256 | `79d6a7d44f651316bd86ede5ee77b483b7cbcab258f495e3f759f00b6d763e3c` |
 
 ## Scope
 
@@ -47,7 +47,7 @@ npm run integrity:check
 
 | Path | Bytes | SHA-256 |
 |---|---:|---|
-| `bin/install.mjs` | 67893 | `17d027c776500599d3396d2ce7932b7ef1f83a69840f04045d3f8a1efaddabe9` |
+| `bin/install.mjs` | 72480 | `baaa81d444cd8d36649389475744718e63826e0ff5b56920c8315c89f2081f72` |
 | `bin/quick-install.mjs` | 5685 | `fa97c3318d7630421e4f596044aa61da60c0f0d8b7533035f1013f462cedc078` |
 | `docs/skills/bootstrap.md` | 574 | `0580d9dff2bf4a466597b5dcb41792ba7bba22175e37ff95dfa716acb057e51c` |
 | `docs/skills/cpanel.md` | 1867 | `f056fa581f9a0fa268556d8769fc2c5389a864fbd552e90b1692efde0c003537` |
@@ -89,7 +89,7 @@ npm run integrity:check
 | `scripts/allow-always-check.mjs` | 3138 | `514642a97a4f3a3a3f67b68789d8b2e1665680d2623e79d14ba640c6d395c257` |
 | `scripts/audit-install.mjs` | 5416 | `171914479782b23b7d19a72b841006865ef9be69e561cbc5a271ef49eb18cf52` |
 | `scripts/configure.mjs` | 14570 | `53c62929b01c0cc5bddc1a21935e88790c6f67a8d5b7989711b894a6da0faf18` |
-| `scripts/e2e-install.mjs` | 9304 | `915686bebd068cd67210f8bf03f580aa38d263873295fcfe7b28c06f4aabc136` |
+| `scripts/e2e-install.mjs` | 12530 | `c7b2af183e341b04495a2a9a1db1e9b59ebec0a3907e50866709eaa09c3ff0b4` |
 | `scripts/identity.mjs` | 4840 | `6cd9ec01f95af6a376745b4db047abd8ae77e5867fd5d6a91a99c82f1033f32d` |
 | `scripts/integrity.mjs` | 10209 | `becd315c0a79043b6b372837fc89174db99393fa4da2561ba9743918e87143df` |
 | `scripts/lsp-diagnostics.mjs` | 8920 | `9ee3431929bf4fec4e39d822e0a1876380229fda3408b7fa8c2f326a51ab4121` |
@@ -134,7 +134,7 @@ npm run integrity:check
 | `test/footprint.test.ts` | 2690 | `6c053dfca81fe65da03e216d72bea79abbd015ec73f2f714aeb1769db705b8e3` |
 | `test/goalContract.test.ts` | 4268 | `0b06a8bb735d99d4bd732d27989a3523e3622a53a700e5cdaa784fbdeb833da5` |
 | `test/identity.test.ts` | 3944 | `ee835ab860ef3efd03cc9f2eefdba10fdeeda791e2f18b1453fa6f1e75fc03fe` |
-| `test/install.test.ts` | 25183 | `ac1ed0842a77134293e96887fd633fa89bf928d191d8caa02711278cf157603c` |
+| `test/install.test.ts` | 30553 | `6fdb3dae8c7aeb1ca6c9e76d7155b83d638ab0771c3a13aa94c4c80810a17da2` |
 | `test/installSpace.test.ts` | 2234 | `8d589c1d8e2423869c788c11435e0fc23be6abc5145d7b66c9fb54cc09671c71` |
 | `test/io.test.ts` | 959 | `c483a9c9f9a4ca51e595df125fb36a8a23627a331ac9fbe871f1c404f858fe4a` |
 | `test/lsp.test.ts` | 2276 | `e6808cbdb5df0d78dd645b1b5a0e73ce64029eb2aa0e09516e585e523b673a6a` |

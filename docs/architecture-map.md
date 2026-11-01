@@ -78,7 +78,7 @@ flowchart TD
 | Goal contract | `src/zombie/goalContract.ts` | `runCheck:215` | contract parse/match/check |
 | Tools | `src/zombie/server.ts` | `toolSpecs:290` | ১৮টি tool-এর একমাত্র registry |
 | Plugin wiring / hooks | `src/plugin.ts` | `setup:581`, `export default:1690` | surface registration ও hook lifecycle |
-| Setup / install | `bin/install.mjs` | `renderAgentsConfig` call `:1224`, LSP sync `:1302` | global/project install |
+| Setup / install | `bin/install.mjs` | `renderAgentsConfig` call `:1224`, LSP sync `:1302`, `retireLegacyDuplicateEntry:734` | global/project install; duplicate loader retire with backup |
 | Project configure | `scripts/configure.mjs` | direct build `:196-206` | OpenCode বন্ধ থাকলেও SSOT+syllabus |
 | LSP config | `src/zombie/lspConfig.ts` | `LSP_SERVERS:52`, `syncLspConfig:168` | server list + `opencode.json` merge |
 | LSP probe | `scripts/lsp-probe.mjs` | `probe:74`, config read `:176` | real JSON-RPC initialize |

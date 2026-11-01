@@ -333,16 +333,19 @@ npm.cmd run install-pack -- --yes
 ```
 
 Self-contained `.opencode` install ব্যবহার করলে OpenCode-এর global loader-এর
-জন্য pointer প্রয়োজন। `--config-dir "$HOME/.opencode"` installer এখন এই ছয়টি
+জন্য pointer প্রয়োজন। `--config-dir "$HOME/.opencode"` installer এখন এই পাঁচটি
 entry নিজেই link করে: Linux/macOS-এ symlink, Windows-এ junction (admin/Developer
-Mode ছাড়াই), আর সেটাও না পারলে copy করে দেয় যাতে install আটকে না যায়। Copy হলে
-পরের update-এর পর installer আবার চালাতে হবে। নিচের manual command শুধু repair-এর জন্য।
+Mode ছাড়াই), আর সেটাও না পারলে copy করে দেয় যাতে install আটকে না যায়। `plugins`
+link করা হয় না: OpenCode দুই config root-ই scan করে, তাই plugins link করলে একই
+entry দুইবার load হয়ে `Duplicate plugin ID` দেয়। Plugin entry শুধু self-contained
+root-এ থাকে। Copy হলে পরের update-এর পর installer আবার চালাতে হবে। নিচের manual
+command শুধু repair-এর জন্য।
 
 Linux:
 
 ```bash
 mkdir -p "$HOME/.config/opencode"
-for item in opencode.json agents plugins zombiecoder node_modules package.json; do
+for item in opencode.json agents zombiecoder node_modules package.json; do
   ln -sfn "$HOME/.opencode/$item" "$HOME/.config/opencode/$item"
 done
 ```
@@ -353,12 +356,16 @@ Windows PowerShell (repair; junction-এর জন্য admin লাগে ন�
 $source = "$env:USERPROFILE\.opencode"
 $target = "$env:USERPROFILE\.config\opencode"
 New-Item -ItemType Directory -Force $target | Out-Null
-foreach ($item in @("opencode.json","agents","plugins","zombiecoder","node_modules","package.json")) {
+foreach ($item in @("opencode.json","agents","zombiecoder","node_modules","package.json")) {
   New-Item -ItemType Junction -Force `
     -Path (Join-Path $target $item) `
     -Target (Join-Path $source $item) | Out-Null
 }
 ```
+
+> পুরনো installer `plugins` symlink বানিয়ে থাকলে সেটি `~/.config/opencode/.backups/`
+> বা `~/.opencode/.backups/duplicate-plugin-*`-এ সরিয়ে রাখে। হাতে `plugins` symlink
+> তৈরি করবেন না; করলে আবার duplicate load হবে।
 
 > Symlink না দিলে `.opencode` config শুধু home directory-এর অধীনস্থ প্রজেক্টে
 > পাওয়া যাবে। Standard global install ব্যবহার করলে symlink প্রয়োজন নেই।
@@ -373,6 +380,7 @@ foreach ($item in @("opencode.json","agents","plugins","zombiecoder","node_modul
 | `python3: not found` | Python 3 নেই | Python 3 ইনস্টল করুন (`evidence_gate`, `syntax_check` helper ব্যবহার করবে)। |
 | `npm: not found` | Node-এর bundled npm PATH-এ নেই | Node LTS ইনস্টল/repair করুন, নতুন terminal খুলুন। |
 | `space` / exit code `3` | live USB-এ জায়গা কম | `--no-lsp` (≈180 MB বাঁচে), `--config-dir` দিয়ে বেশি জায়গার path, অথবা npm cache পরিষ্কার হতে দিন (`--keep-cache` দিলে হবে না)। installer কিছু লেখার আগেই থামে। |
+| `Duplicate plugin ID: zombiecoder` | দুই config root-এ একই plugin loader | installer আবার চালান; generated legacy/symlink entry `~/.opencode/.backups/duplicate-plugin-*`-এ backup হয়ে retire হয়। `~/.config/opencode/plugins` হাতে symlink করবেন না। |
 
 Installer প্রতিটি step-এর শেষে `OK`/`FAIL` লাইন দেখায় এবং `installed: N/M steps ok`
 প্রিন্ট করে; কোনো FAIL থাকলে exit code `1`।
@@ -402,9 +410,11 @@ Installer নিচের কাজগুলো ধাপে ধাপে সম
     লেখে (`syncLspConfig`); আগের entry অক্ষত থাকে।
 12. ৯টি agent markdown লেখে এবং পুরনো legacy agent prune করে।
 13. Project-local legacy install-এ `.zombiecoder` seed করে।
-14. `--config-dir ~/.opencode` হলে `~/.config/opencode`-এর ছয়টি entry-কে
+14. `--config-dir ~/.opencode` হলে `~/.config/opencode`-এর পাঁচটি entry-কে
     একটি self-contained root-এ link করে (symlink; Windows-এ junction, না পারলে
     copy); পুরনো regular file/directory `~/.config/opencode/.backups/`-এ সরিয়ে রাখে।
+    `plugins` link করা হয় না; duplicate loader থাকলে generated entry
+    `<root>/.backups/duplicate-plugin-*`-এ সরিয়ে একটাই loader রাখে।
 15. শেষে `scripts/audit-install.mjs` দিয়ে নিজের কাজ যাচাই করে (agents, LSP,
     MCP, entrypoint, permissions); audit fail হলে install FAIL ও exit code `1`।
 
@@ -1270,8 +1280,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  98204656dfbdacb87afb97174887cf4254c184159093c40c18dd9fe3df6dd692  ║
-║  files 105 · bytes 988702 · base ae09518 · dirty                         ║
+║  root  79d6a7d44f651316bd86ede5ee77b483b7cbcab258f495e3f759f00b6d763e3c  ║
+║  files 105 · bytes 1001885 · base de442e8 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1279,7 +1289,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T09:55:14.500Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T10:01:39.719Z
 
 </div>
 <!-- INTEGRITY:END -->

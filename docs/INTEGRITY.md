@@ -7,21 +7,21 @@
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  79d6a7d44f651316bd86ede5ee77b483b7cbcab258f495e3f759f00b6d763e3c  ║
-║  files 105 · bytes 1001885 · base de442e8 · dirty                        ║
+║  root  98bcd4e966029f38c447c6ae857ade4d0dcfb47f912fcb35155d60dd74c59665  ║
+║  files 105 · bytes 1034007 · base 7baeb98 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Field | Value |
 |---|---|
 | Schema | `zombiecoder-integrity/v1` |
-| Generated (UTC) | `2026-11-01T10:01:39.719Z` |
-| Base commit | `de442e8` |
+| Generated (UTC) | `2026-11-01T10:47:29.264Z` |
+| Base commit | `7baeb98` |
 | Branch | `murubbi` |
 | Code tree | `dirty` |
 | Files | 105 |
-| Bytes | 1001885 |
-| Root SHA-256 | `79d6a7d44f651316bd86ede5ee77b483b7cbcab258f495e3f759f00b6d763e3c` |
+| Bytes | 1034007 |
+| Root SHA-256 | `98bcd4e966029f38c447c6ae857ade4d0dcfb47f912fcb35155d60dd74c59665` |
 
 ## Scope
 
@@ -47,7 +47,7 @@ npm run integrity:check
 
 | Path | Bytes | SHA-256 |
 |---|---:|---|
-| `bin/install.mjs` | 72480 | `baaa81d444cd8d36649389475744718e63826e0ff5b56920c8315c89f2081f72` |
+| `bin/install.mjs` | 73665 | `97ac40449821baa138dbd8191e89dcdcbeb920bf7514d4f2e219305e6549ddc7` |
 | `bin/quick-install.mjs` | 5685 | `fa97c3318d7630421e4f596044aa61da60c0f0d8b7533035f1013f462cedc078` |
 | `docs/skills/bootstrap.md` | 574 | `0580d9dff2bf4a466597b5dcb41792ba7bba22175e37ff95dfa716acb057e51c` |
 | `docs/skills/cpanel.md` | 1867 | `f056fa581f9a0fa268556d8769fc2c5389a864fbd552e90b1692efde0c003537` |
@@ -69,7 +69,7 @@ npm run integrity:check
 | `docs/skills/typescript.md` | 638 | `07d314e2ab542bbfe39b5fdcfd1e4f8ebc255b61ca989c3f9970608e1095cc5e` |
 | `docs/skills/uiux-delivery.md` | 3952 | `c2a66f4f4f3edbee5135b6e4b05ef82165f35baf1f9a7138c0d0f0d268394e15` |
 | `docs/skills/web-delivery.md` | 4247 | `61ce13fc7897d4cb1a7bd59cfaa058ef6d94d6d7e7cb34295b179bc7e72cf0db` |
-| `install.sh` | 3471 | `6890661ad01f1a3624d3fedfe68fbb174af98d19584fe2d9b4ac08240270f4ac` |
+| `install.sh` | 32617 | `2167c31cc9f98d8875de776a67fbe45bf6e9990e527ab6e06be650e43e5fbae1` |
 | `LICENSE` | 1961 | `d06b8b22307bf25fa4e3dba778ad2ccc1350c2e5cd1b5e6ed40c2de25b6cd95a` |
 | `mcp/image-brand/e2e-live.mjs` | 2781 | `8ae7c8c7ce022cbb80f049d56aeec5719dfc69cc90ee87c3aed8006454ebc04f` |
 | `mcp/image-brand/fixtures.py` | 1731 | `bee4ffeed922dafa6a11c47dfca4ff1c9e647dbf12038cc8cff3d6d31ff1ea44` |
@@ -89,7 +89,7 @@ npm run integrity:check
 | `scripts/allow-always-check.mjs` | 3138 | `514642a97a4f3a3a3f67b68789d8b2e1665680d2623e79d14ba640c6d395c257` |
 | `scripts/audit-install.mjs` | 5416 | `171914479782b23b7d19a72b841006865ef9be69e561cbc5a271ef49eb18cf52` |
 | `scripts/configure.mjs` | 14570 | `53c62929b01c0cc5bddc1a21935e88790c6f67a8d5b7989711b894a6da0faf18` |
-| `scripts/e2e-install.mjs` | 12530 | `c7b2af183e341b04495a2a9a1db1e9b59ebec0a3907e50866709eaa09c3ff0b4` |
+| `scripts/e2e-install.mjs` | 14321 | `d4d2fef4eb0b47e036272ae3f55e753e46f06fd63ee8ec34c91cf05d39cae44f` |
 | `scripts/identity.mjs` | 4840 | `6cd9ec01f95af6a376745b4db047abd8ae77e5867fd5d6a91a99c82f1033f32d` |
 | `scripts/integrity.mjs` | 10209 | `becd315c0a79043b6b372837fc89174db99393fa4da2561ba9743918e87143df` |
 | `scripts/lsp-diagnostics.mjs` | 8920 | `9ee3431929bf4fec4e39d822e0a1876380229fda3408b7fa8c2f326a51ab4121` |

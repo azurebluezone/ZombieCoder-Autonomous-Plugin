@@ -62,7 +62,7 @@ function installArgs(root, extra = []) {
   ];
 }
 
-function assertInstall(root, label) {
+function assertInstall(root, label, options = {}) {
   const configFile = path.join(root, "opencode.json");
   const plugin = path.join(root, "plugins", "zombiecoder", "plugin.ts");
   const onboarding = path.join(root, "plugins", "zombiecoder", "zombie", "onboarding.ts");
@@ -84,7 +84,57 @@ function assertInstall(root, label) {
   if (consent.length < 2 || consent.some((rule) => rule.effect !== "ask")) {
     return fail(`${label}: consent rules`, JSON.stringify(consent));
   }
-  pass(`${label}: structure`, `9 agents, plugin graph, consent ask rules`);
+  if (options.proof) {
+    const proofError = assertProof(root);
+    if (proofError) return fail(`${label}: proof`, proofError);
+  }
+  pass(
+    `${label}: structure`,
+    `9 agents, plugin graph, consent ask rules${options.proof ? ", proof PASS" : ""}`,
+  );
+}
+
+function assertProof(root) {
+  const file = path.join(root, "zombiecoder", "install-proof.json");
+  if (!fs.existsSync(file)) return `missing ${file}`;
+  let proof;
+  try {
+    proof = readJson(file);
+  } catch (error) {
+    return `unreadable proof: ${String(error.message ?? error)}`;
+  }
+  if (proof.schema !== "zombiecoder.install-proof/1") return `schema ${proof.schema}`;
+  if (proof.verdict !== "PASS") return `verdict ${proof.verdict}`;
+  if (!proof.idempotence?.equal) return "idempotence hash differs";
+  if (!proof.space?.staging?.cleaned) return "staging tree was not cleaned";
+  const byId = new Map((proof.checks ?? []).map((check) => [check.id, check]));
+  const required = [
+    "staging-budget",
+    "config-json",
+    "entrypoint",
+    "source-fidelity",
+    "single-loader",
+    "agents",
+    "consent",
+    "idempotence",
+    "space-delta",
+    "staging-cleanup",
+  ];
+  for (const id of required) {
+    if (byId.get(id)?.status !== "PASS") {
+      return `${id}: ${byId.get(id)?.status ?? "missing"}`;
+    }
+  }
+  // The bootstrap runs --no-install --no-lsp against an isolated target.
+  for (const id of ["dependencies", "audit", "lsp-config", "lsp-probe"]) {
+    if (byId.get(id)?.status !== "SKIPPED") {
+      return `${id}: ${byId.get(id)?.status ?? "missing"}`;
+    }
+  }
+  if (byId.get("live-plugin")?.status !== "NOT_TESTED") {
+    return `live-plugin: ${byId.get("live-plugin")?.status ?? "missing"}`;
+  }
+  return null;
 }
 
 function freshAndUpdate() {
@@ -180,7 +230,10 @@ function bootstrap() {
     if (result.status !== 0) {
       return fail("remote bootstrap", `exit ${result.status}: ${(result.stderr || result.stdout).trim().slice(-300)}`);
     }
-    assertInstall(root, "remote bootstrap");
+    if (!/PROOF PASS/.test(result.stdout)) {
+      return fail("remote bootstrap", "stdout has no PROOF PASS line");
+    }
+    assertInstall(root, "remote bootstrap", { proof: true });
   } finally {
     if (!KEEP) fs.rmSync(work, { recursive: true, force: true });
   }

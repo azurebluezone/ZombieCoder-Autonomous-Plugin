@@ -1675,6 +1675,37 @@ await step("write entrypoint", () => {
 // ---- 11b. one loader only -----------------------------------------------------
 await step("retire legacy duplicate plugin entry", retireLegacyDuplicateEntry);
 
+// ---- 11c. stale source files -------------------------------------------------
+// Copy with force overwrites files that still exist in the source, but a file
+// deleted from the source would survive forever. Remove those after the legacy
+// backup step so the exact-source proof stays true without eating the backup.
+await step("prune stale plugin graph", () => {
+  const expected = new Set(["plugin.ts", "roster.ts"]);
+  for (const file of listFiles(path.join(PACKAGE_ROOT, "src", "zombie"))) {
+    expected.add(`zombie/${file}`);
+  }
+  const removed = [];
+  for (const file of listFiles(pluginFolder)) {
+    if (expected.has(file)) continue;
+    fs.rmSync(path.join(pluginFolder, file), { force: true });
+    removed.push(file);
+  }
+  const pruneEmpty = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      pruneEmpty(full);
+      try {
+        fs.rmdirSync(full);
+      } catch {
+        /* still has files */
+      }
+    }
+  };
+  pruneEmpty(pluginFolder);
+  return removed.length ? `${removed.length} stale: ${removed.sort().join(", ")}` : "none";
+});
+
 // ---- 12. one self-contained root for the global loader -----------------------
 await step("link self-contained root to global loader", linkSelfContainedGlobal);
 

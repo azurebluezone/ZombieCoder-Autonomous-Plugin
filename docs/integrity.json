@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-11-01T10:01:39.719Z",
+  "generated_at": "2026-11-01T10:47:29.264Z",
   "scope": [
     "src",
     "bin",
@@ -12,19 +12,19 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "79d6a7d44f651316bd86ede5ee77b483b7cbcab258f495e3f759f00b6d763e3c",
+  "root_sha256": "98bcd4e966029f38c447c6ae857ade4d0dcfb47f912fcb35155d60dd74c59665",
   "file_count": 105,
-  "total_bytes": 1001885,
+  "total_bytes": 1034007,
   "git": {
-    "commit": "de442e8",
+    "commit": "7baeb98",
     "branch": "murubbi",
     "dirty": true
   },
   "files": [
     {
       "path": "bin/install.mjs",
-      "bytes": 72480,
-      "sha256": "baaa81d444cd8d36649389475744718e63826e0ff5b56920c8315c89f2081f72"
+      "bytes": 73665,
+      "sha256": "97ac40449821baa138dbd8191e89dcdcbeb920bf7514d4f2e219305e6549ddc7"
     },
     {
       "path": "bin/quick-install.mjs",
@@ -133,8 +133,8 @@
     },
     {
       "path": "install.sh",
-      "bytes": 3471,
-      "sha256": "6890661ad01f1a3624d3fedfe68fbb174af98d19584fe2d9b4ac08240270f4ac"
+      "bytes": 32617,
+      "sha256": "2167c31cc9f98d8875de776a67fbe45bf6e9990e527ab6e06be650e43e5fbae1"
     },
     {
       "path": "LICENSE",
@@ -233,8 +233,8 @@
     },
     {
       "path": "scripts/e2e-install.mjs",
-      "bytes": 12530,
-      "sha256": "c7b2af183e341b04495a2a9a1db1e9b59ebec0a3907e50866709eaa09c3ff0b4"
+      "bytes": 14321,
+      "sha256": "d4d2fef4eb0b47e036272ae3f55e753e46f06fd63ee8ec34c91cf05d39cae44f"
     },
     {
       "path": "scripts/identity.mjs",

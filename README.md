@@ -202,18 +202,49 @@ npm --version
 
 ## ৪. সরাসরি ক্লোন ও ইনস্টল
 
-### ৪.০ এক-ক্লিক রিমোট ইনস্টল / আপডেট (কোনো clone নেই)
+### ৪.০ এক-ক্লিক রিমোট ইনস্টল / আপডেট / প্রমাণ (কোনো clone নেই)
 
-নতুন computer-এ শুধু একটি command — source tarball নিজেই নামবে, integrity
-manifest যাচাই হবে, তারপর install হবে:
+নতুন computer-এ শুধু একটি command — source tarball নিজেই নামবে, staging হবে
+temporary filesystem-এ, integrity manifest যাচাই হবে, installer দুইবার চলবে,
+তারপর environment proof লেখা হবে:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/azurebluezone/ZombieCoder-Autonomous-Plugin/murubbi/install.sh | bash
 ```
 
-আবার একই command চালালে **update** হয়: `opencode.json`-এর অজানা key, provider
-config ও user data merge হয়, মুছে যায় না; already-satisfied dependency আবার
-ডাউনলোড হয় না (`--force-install` দিলে হবে)।
+`install.sh`-ই একমাত্র entrypoint। এটি install logic নকল করে না; source staging
+করে `bin/install.mjs`-কে চালায়। ধাপগুলো:
+
+1. **staging** — `TMPDIR`, `/tmp`, `/dev/shm`-এর মধ্যে সবচেয়ে বেশি খালি জায়গার
+   directory বেছে নেয়; tarball + extracted source মাপে; জায়গা কম হলে install
+   শুরুর আগেই থামে।
+2. **download** — `ZOMBIECODER_TARBALL` না দিলে git tarball নামে; দিলে সেটাই
+   ব্যবহার হয় (offline test)।
+3. **integrity** — `docs/integrity.json`-এর SHA-256 manifest মিলিয়ে দেখে।
+4. **install/update** — generated files overwrite হয়, source থেকে বাদ পড়া stale
+   plugin file prune হয়; `opencode.json`-এর অজানা key, provider config ও user data
+   merge হয়, মুছে যায় না; satisfied dependency আবার download হয় না
+   (`--force-install` দিলে হবে)।
+5. **idempotence** — installer-কে একই target-এ দুইবার চালিয়ে semantic generated
+   state-এর SHA-256 তুলনা করা হয় (`H1 === H2`)। Probe latency/timestamp বাদ যায়,
+   কিন্তু model assignment, config ও agent graph-এর মতো decision field থাকে।
+6. **proof** — entrypoint, downloaded source-এর সাথে installed plugin graph-এর
+   hash fidelity, এক loader, ৯ agent, consent `ask`, dependencies, audit, LSP
+   config, real LSP initialize, live `/api/plugin` (running instance reload করে),
+   space delta ও staging cleanup যাচাই হয়।
+
+শেষে stdout-এ `PROOF PASS` এবং এই artifact:
+
+```text
+~/.opencode/zombiecoder/install-proof.json
+```
+
+`PROOF FAIL` হলে exit code `1`; কোনো check লুকানো হয় না। live OpenCode না চললে
+live check `NOT_TESTED` হয় (মিথ্যা PASS নয়), বাকি checks তবু চলে। `--no-lsp`
+দিলে LSP download/probe হয় না এবং সংশ্লিষ্ট checks `SKIPPED` হয়।
+
+আবার একই command চালালে **update** হয়: একই target-এ overwrite হয়, user config
+merge থাকে, এবং নতুন proof লেখা হয়।
 
 | Environment variable | ডিফল্ট | কাজ |
 |---|---|---|
@@ -221,6 +252,8 @@ config ও user data merge হয়, মুছে যায় না; already-
 | `ZOMBIECODER_REPO` | `azurebluezone/ZombieCoder-Autonomous-Plugin` | GitHub repo |
 | `ZOMBIECODER_REF` | `murubbi` | branch/tag |
 | `ZOMBIECODER_TARBALL` | — | offline/local tarball (download skip) |
+| `ZOMBIECODER_SPACE_BUDGET_MB` | `800` | target growth budget; এর বেশি হলে proof FAIL |
+| `ZOMBIECODER_SKIP_INTEGRITY` | — | development only; `1` দিলে manifest check skip |
 
 উদাহরণ: LSP ছাড়া (≈180 MB কম জায়গা):
 
@@ -234,7 +267,7 @@ Installer প্রথমে জায়গা যাচাই করে: base 
 `--no-lsp`, `--no-install`, `--config-dir` বিকল্প দেখায়। `--no-space-check`
 দিয়ে check বন্ধ করা যায়, আর `--keep-cache` দিয়ে cache পরিষ্কার বন্ধ।
 
-উপরের bootstrap-টি `install.sh`; একই installer সরাসরি চালাতে চাইলে:
+উপরের bootstrap-টি `install.sh`; একই installer সরাসরি চালাতে চাইলে (proof ছাড়া):
 
 ```bash
 node --experimental-strip-types bin/install.mjs --config-dir "$HOME/.opencode" --yes
@@ -269,6 +302,13 @@ node bin/quick-install.mjs
 
 Automation-এর জন্য: `node bin/quick-install.mjs --yes` (option 1) অথবা
 `node bin/quick-install.mjs --choice=2`।
+
+`bin/quick-install.mjs` শুধু menu wrapper — আসল pipeline একই `bin/install.mjs`।
+তাই proof সহ install/update চাইলে `install.sh` চালাও:
+
+```bash
+bash install.sh --no-install --no-lsp   # দ্রুত config-only proof
+```
 
 Install শেষে কোনো project folder-এ verify করতে:
 
@@ -1280,8 +1320,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  79d6a7d44f651316bd86ede5ee77b483b7cbcab258f495e3f759f00b6d763e3c  ║
-║  files 105 · bytes 1001885 · base de442e8 · dirty                        ║
+║  root  98bcd4e966029f38c447c6ae857ade4d0dcfb47f912fcb35155d60dd74c59665  ║
+║  files 105 · bytes 1034007 · base 7baeb98 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1289,7 +1329,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T10:01:39.719Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T10:47:29.264Z
 
 </div>
 <!-- INTEGRITY:END -->

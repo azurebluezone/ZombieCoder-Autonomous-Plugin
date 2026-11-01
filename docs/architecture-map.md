@@ -28,6 +28,11 @@ flowchart TD
   SET --> GEN["src/generate.ts<br/>doc generator (94)<br/>npm run generate"]
   GEN --> DOCS["doc/*.md"]
 
+  SH["install.sh<br/>bootstrap / update / proof"] --> STG["tmpfs staging<br/>space check"]
+  STG --> INST
+  INST --> IDEM["second installer pass<br/>H1 === H2"]
+  IDEM --> VER["inline verifier<br/>install-proof.json"]
+
   P --> LSPC["src/zombie/lspConfig.ts<br/>syncLspConfig() (168)"]
   LSPC --> OC["~/.config/opencode/opencode.json"]
   OC --> PROBE["scripts/lsp-probe.mjs<br/>probe() (74)"]
@@ -35,6 +40,8 @@ flowchart TD
 ```
 
 নোট: `src/generate.ts` persona বানায় না — এটি `doc/Identity Specification.md`, `doc/Agent Architecture.md` ইত্যাদি markdown generator (`src/generate.ts:94`, `package.json:17`)। Persona-র সত্যিকারের source `src/roster.ts`; runtime agent markdown লেখে `src/roster.ts:516` (`agentMarkdown`) আর `src/plugin.ts:581` (`setup`). LSP config-এর default path `~/.config/opencode/opencode.json` (`scripts/lsp-probe.mjs:41-46`); installer ওখানেই `lsp` block merge করে (`bin/install.mjs:1302`).
+
+`install.sh` install logic duplicate করে না: এটি source staging, integrity, দুই installer pass আর inline verifier চালায়; আসল pipeline সবসময় `bin/install.mjs`। Proof-এর ১৬টি check হলো integrity, staging budget, config JSON, entrypoint, source hash fidelity, single loader, ৯ agent, consent `ask`, dependencies, audit, LSP config, LSP initialize, live `/api/plugin`, idempotence `H1 === H2`, space delta এবং staging cleanup।
 
 ## ২. Tool map — ১৮টি tool
 
@@ -78,6 +85,7 @@ flowchart TD
 | Goal contract | `src/zombie/goalContract.ts` | `runCheck:215` | contract parse/match/check |
 | Tools | `src/zombie/server.ts` | `toolSpecs:290` | ১৮টি tool-এর একমাত্র registry |
 | Plugin wiring / hooks | `src/plugin.ts` | `setup:581`, `export default:1690` | surface registration ও hook lifecycle |
+| Bootstrap / update / proof | `install.sh` | staging + two installer passes + inline verifier | `PROOF PASS`/`PROOF FAIL`, `$TARGET/zombiecoder/install-proof.json` |
 | Setup / install | `bin/install.mjs` | `renderAgentsConfig` call `:1224`, LSP sync `:1302`, `retireLegacyDuplicateEntry:734` | global/project install; duplicate loader retire with backup |
 | Project configure | `scripts/configure.mjs` | direct build `:196-206` | OpenCode বন্ধ থাকলেও SSOT+syllabus |
 | LSP config | `src/zombie/lspConfig.ts` | `LSP_SERVERS:52`, `syncLspConfig:168` | server list + `opencode.json` merge |

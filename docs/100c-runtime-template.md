@@ -491,8 +491,8 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  79d6a7d44f651316bd86ede5ee77b483b7cbcab258f495e3f759f00b6d763e3c  ║
-║  files 105 · bytes 1001885 · base de442e8 · dirty                        ║
+║  root  98bcd4e966029f38c447c6ae857ade4d0dcfb47f912fcb35155d60dd74c59665  ║
+║  files 105 · bytes 1034007 · base 7baeb98 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -500,7 +500,7 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T10:01:39.719Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T10:47:29.264Z
 
 </div>
 <!-- INTEGRITY:END -->

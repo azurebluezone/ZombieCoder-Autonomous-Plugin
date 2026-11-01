@@ -48,7 +48,7 @@ export const SHARED_RULES = [
   "",
   "### Task contract",
   "- নতুন substantive task-এ কাজের আগে এক লাইনে Goal, measurable acceptance/output এবং প্রধান risk ঠিক করো; অস্পষ্ট হলে নিরাপদ assumption স্পষ্ট করো.",
-  "- **Pre-registration** — user input পাওয়ার পর, কোড শুরুর আগে `goal_contract` open করো: আসল input, observable expected output (কী status/body/file আসবে — \"tests pass\" নয়), check command, pass criteria। open-এর Bengali preview card ইউজারকে দেখাও (UI synthetic message; না পারলে হুবহু chat-এ) এবং **কাজ শুরু করো** — কার্ড দেখানোই announcement, আলাদা \"হ্যাঁ\" চেয়ো না। user আপত্তি করলে থামো, নতুন contract লিখো। কাজ শেষে `goal_contract` close করো — সে নিজেই check command চালিয়ে observed output-কে expected-এর সাথে মিলিয়ে (contains/equals/regex/json) PASS/FAIL লেখে; agent-এর exitCode claim বিশ্বাস করা হয় না; syllabus-এ এটাই অডিট trail।",
+  "- **Pre-registration with consent** — user input পাওয়ার পর, কোড শুরুর আগে `goal_contract` open করো: আসল input, observable expected output (কী status/body/file আসবে — \"tests pass\" নয়), check command, pass criteria। open-এর Bengali preview card ইউজারকে দেখাও (UI synthetic message; না পারলে হুবহু chat-এ), তারপর native permission door-এ **Yes / Always yes / Reject** চাও। Yes = এই গোল; Always yes = এই প্রজেক্টের পরের গোলগুলো; Reject = কিছুই লেখা/চালানো হয় না, agent handover করবে। permission ছাড়া নিজে open/close নয়। কাজ শেষে `goal_contract` close-এর জন্যও প্রতিবার user-এর সম্মতি লাগবে — agent নিজে গোল ক্লোজ করতে পারবে না। close নিজেই check command চালিয়ে observed output-কে expected-এর সাথে মিলিয়ে (contains/equals/regex/json) PASS/FAIL লেখে; agent-এর exitCode claim বিশ্বাস করা হয় না; syllabus-এ এটাই অডিট trail।",
   "- **No time budget** — কাজের সময়/দিন-এর প্রতিশ্রুতি দিও না, চাইও না। SSOT, user intent আর conversation context থেকে নির্দিষ্ট point-এ কাজ করো; অকারণ exploration বা ঘোরাঘুরি নয়।",
   "- SSOT ও syllabus পড়ে, তারপর নির্দিষ্ট ফাইল/সিম্বল search করে বাস্তব logic দেখো; filename inventory-কে code বোঝার প্রমাণ ভেবো না.",
   "- First principles: input → state → transformation → output → failure path আলাদা করো; user journey, accessibility ও বাস্তব UX-ও acceptance criteria-তে রাখো.",
@@ -64,6 +64,13 @@ export const SHARED_RULES = [
   "- **বাস্তব-জীবন পাস:** ফাংশন টেস্ট পাসে থামবে না — user যেভাবে বাস্তবে ব্যবহার করবে, সেভাবে যাচাই করে তারপর ফলাফল দাবি করো।",
   "- **পয়েন্টে হিট:** টাস্ককে যথেচ্ছ জটিল না করে মূল লক্ষ্যে, ছোট ধাপে কাজ করো.",
   "- **মানুষের ভাষায় টাস্ক:** কাজীয় পদক্ষেপ UI-তে মানুষের বোঝা ভাষায় উপস্থাপন করো; টাস্কটা লিখে ২ সেকেন্ড থেমে তারপর কাজ শুরু করো.",
+  "",
+  "### Consent, onboarding and scope (user-approved 2026-11-01)",
+  "- **First input = project onboarding:** session-এর প্রথম user input-এ `project_onboarding` চালাও; docs, tests, log, TODO/FIXME, audit failure আর stack skill-এর evidence দেখো। তারপর docs যা বলে আর code যা করে — দুটোই পড়ে মিলাও, গ্যাপ syllabus-এ লেখো, দরকারি skill `skill_catalog` দিয়ে install করো। এটা শেষ করার আগে নতুন feature বানাবে না।",
+  "- **User-এর expectation লিখে রাখো:** শুধু \"হ্যাঁ\" বললেও syllabus-এ আগের expectation আছে কিনা দেখো; থাকলে সেটাই এগিয়ে নাও, নতুন কাজ বানিয়ে দেখিও না।",
+  "- **Official documentation = scope boundary:** user যে product/API-র কথা বলে, তার official doc-ই user-approved scope। তার বাইরে নতুন behavior/feature = **extra**; extra কাজের আগে স্পষ্ট consent নাও। কাউকে খুশি করতে scope বানাবে না।",
+  "- **Honest closing confession:** প্রতিটি কাজের শেষে ছোট স্বীকারোক্তি — কী চোখে পড়ল, কী করলাম, কী এখনো গ্যাপ, আর কোথায় user-এর সিদ্ধান্ত দরকার। প্রতিটি উত্তরে নতুন কাজ দেখিয়ে user-কে বিভ্রান্ত করবে না।",
+  "- **Consent is recorded, not assumed:** approval ছাড়া `goal_contract` open/close নয়; rejection হলে audit + syllabus-এ কারণ থাকবে, আর agent handover করবে। বারবার একই অনুমোদন-হীন চেষ্টা failure হিসেবে দেখাবে।",
   "",
   "### Evidence contract",
   "- SSOT First — আগে Single Source of Truth; তারপর logic, তারপর code.",
@@ -139,7 +146,7 @@ export const SHARED_EXPERTISE = [
 export const SHARED_EXECUTION = [
   "## Execution Doctrine (every agent — non-negotiable)",
   "",
-  "- **Planning budget:** ৩ লাইনের বেশি plan নয়। SSOT + syllabus + memory আগেই ম্যাপ দিয়েছে, তাই ইউজার ইনপুট পাওয়ার পর পুরো project আবার scan করা নিষেধ। ইনপুট → নির্দিষ্ট ফাইল → ময়নাতদন্ত → fix → check, এই ক্রম।",
+  "- **Planning budget:** ৩ লাইনের বেশি plan নয়। SSOT + syllabus + memory আগেই ম্যাপ দিয়েছে; প্রথম input-এ একবার bounded `project_onboarding` চালাও, তারপর পুরো project আবার scan করা নিষেধ। ইনপুট → নির্দিষ্ট ফাইল → ময়নাতদন্ত → fix → check, এই ক্রম।",
   "- **Focus on the work:** SSOT = project structure, memory = conversation context, syllabus = activity report — সব আগেই পাওয়া যাচ্ছে। তাই কাজের point-এ হিট করো; অকারণে পুরো repo ঘেঁটে নতুন কিছু বানাতে যেয়ো না।",
   "- **Focus first:** যে ফাইল নিয়ে কথা, সেটি আর তার সংযুক্ত ফাইল (view ↔ controller ↔ model ↔ route ↔ migration ↔ test) ছাড়া অন্য ফাইল খোলা যাবে না। খুললে এক লাইনে কারণ দিতে হবে।",
   "- **Full slice:** যে একটা বাটন বা ফর্ম দেখাচ্ছে, শুধু সেটাই নয়। create/edit/delete/view/list, route, validation, permission, empty/error state — পুরো slice একসাথে। ভিউ ঠিক করার সময় controller, model, policy, migration সব দেখো; একটা ফাইলে সমস্যা থাকলেও বাকিগুলো অসম্পূর্ণ থাকতে পারে।",
@@ -180,6 +187,10 @@ export const GLOBAL_PERMISSIONS: PermissionRule[] = [
   { action: "webfetch", resource: "*", effect: "allow" },
   { action: "websearch", resource: "*", effect: "allow" },
   { action: "external_directory", resource: "*", effect: "ask" },
+  // Commitment gates, not a tool wall: the user approves the goal before work
+  // and approves the close before the result is accepted.
+  { action: "goal_contract.open", resource: "*", effect: "ask" },
+  { action: "goal_contract.close", resource: "*", effect: "ask" },
 ];
 
 // The same block that a roster agent gets in its markdown. Builtin OpenCode

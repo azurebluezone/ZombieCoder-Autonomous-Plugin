@@ -29,6 +29,15 @@ export type CheckResult = {
 
 const MATCH_MODES: MatchMode[] = ["contains", "equals", "regex", "json"];
 
+// Captured check output is evidence, not a terminal rendering. A command that
+// paints colour (or inherits FORCE_COLOR) must still match the text the user
+// pre-registered, otherwise the verdict depends on the caller's TTY.
+const ANSI_ESCAPE = /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[@-Z\\-_])/g;
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_ESCAPE, "");
+}
+
 export function normalizeMatch(value: unknown): MatchMode {
   const mode = String(value ?? "").trim().toLowerCase();
   return (MATCH_MODES as string[]).includes(mode) ? (mode as MatchMode) : "contains";
@@ -240,14 +249,15 @@ export function runCheck(
     const child = spawn(commandText, {
       cwd,
       shell: true,
-      env: process.env,
+      // Keep the child's output plain even when the host exports FORCE_COLOR.
+      env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
       detached: process.platform !== "win32",
     });
     const finish = (exitCode: number | null, signal: string | null, error?: string) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ exitCode, signal, stdout, stderr, timedOut, error });
+      resolve({ exitCode, signal, stdout: stripAnsi(stdout), stderr: stripAnsi(stderr), timedOut, error });
     };
     const timer = setTimeout(() => {
       timedOut = true;

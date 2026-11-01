@@ -157,7 +157,23 @@ test("pre-work gate says none when the session has no open contract", () => {
   const pack = buildContextPack(root, "manu", [], "", "ses_none");
   assert.match(pack.text, /### Pre-work gate/);
   assert.match(pack.text, /- none for this session\./);
+  assert.match(pack.text, /No project onboarding evidence yet/);
   assert.match(pack.uiLine, /\| Contract none/);
+});
+
+test("pre-work gate asks for onboarding until the syllabus records it", () => {
+  const root = seedProject();
+  const syllabus = path.join(root, ".zombiecoder", "syllabus.md");
+  const before = buildContextPack(root, "manu");
+  assert.match(before.text, /No project onboarding evidence yet/);
+
+  fs.appendFileSync(
+    syllabus,
+    "\n### Project onboarding\n\n`onboarding:abcdef123456`\n\n- docs read\n",
+  );
+  const after = buildContextPack(root, "manu");
+  assert.match(after.text, /onboarding evidence: recorded/);
+  assert.doesNotMatch(after.text, /No project onboarding evidence yet/);
 });
 
 test("context pack marks missing SSOT instead of inventing content", () => {

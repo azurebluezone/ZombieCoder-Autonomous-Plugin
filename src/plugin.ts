@@ -39,6 +39,7 @@ import {
 import { scanProject } from "./zombie/scan.ts";
 import { writeSsot } from "./zombie/ssot.ts";
 import { ensureSyllabus, readSyllabus, recordProjectFootprint } from "./zombie/syllabus.ts";
+import { ensureOnboarding } from "./zombie/onboarding.ts";
 import {
   archiveSessionSnapshot,
   keepRecent,
@@ -246,6 +247,15 @@ type Ctx = {
     reload?: () => Promise<void>;
   };
   rpc?: { register: (definition: any, handlers: any) => Promise<any> };
+  permission?: {
+    assert?: (input: {
+      sessionID: string;
+      action: string;
+      resources: string[];
+      save?: string[];
+      metadata?: Record<string, unknown>;
+    }) => Promise<void>;
+  };
   storage: { get: (key: string) => Promise<unknown>; set: (key: string, value: any) => Promise<void> };
   event?: { subscribe?: (options?: { signal?: AbortSignal }) => AsyncIterable<any> };
 };
@@ -606,6 +616,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     // New directory (or changed tree): leave one lesson with the footprint and the
     // failures carried over from the previous audit trail. Deduped by marker.
     recordProjectFootprint(normalized, fingerprint);
+    // First-input evidence: docs, tests, logs, markers, audit failures and the
+    // stack skills this project needs. Idempotent per file tree.
+    ensureOnboarding(normalized, fingerprint, { installRoot: layout.dir });
     scaffoldedRoots.add(normalized);
     projectRoots.add(normalized);
     return normalized;
@@ -1002,6 +1015,17 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       if (typeof door !== "function") throw new Error("session.synthetic unavailable");
       await door(input);
     },
+    assertPermission: async (input: {
+      sessionID: string;
+      action: string;
+      resources: string[];
+      save?: string[];
+      metadata?: Record<string, unknown>;
+    }) => {
+      const door = (ctx as any).permission?.assert;
+      if (typeof door !== "function") throw new Error("permission.assert unavailable");
+      await door(input);
+    },
   };
 
   const rpc = await stepAsync("register-rpc", () => registerRpc(ctx.rpc, deps));
@@ -1029,6 +1053,17 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     return "registered (apply pending)";
   });
   report.outputs.tools = tools;
+
+  // Run the first-input evidence pass after every setup write (opencode.json,
+  // agent markdown, skills). A stale fingerprint would record the tree as it was
+  // before the plugin wrote its own config, then append a second lesson on the
+  // next scan.
+  const onboarding = step("project-onboarding", () =>
+    ensureOnboarding(root!, scanProject(root!), { installRoot: layout.dir }),
+  );
+  report.outputs.onboarding = onboarding
+    ? { created: onboarding.created, marker: onboarding.marker, file: onboarding.file }
+    : null;
 
   // ---- §5 memory + per-agent footprint -------------------------------------
   // Agent switch != model switch. OpenCode V2 keeps the session model when the

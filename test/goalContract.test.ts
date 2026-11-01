@@ -76,3 +76,19 @@ test("runCheck reports exit code, output and timeout from a real process", async
   assert.equal(slow.timedOut, true);
   assert.equal(slow.exitCode, null);
 });
+
+test("runCheck returns plain text even when the caller exports FORCE_COLOR", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-color-"));
+  const previous = process.env.FORCE_COLOR;
+  process.env.FORCE_COLOR = "1";
+  try {
+    const forced = await runCheck(root, 'node -e "console.log(42)"');
+    assert.equal(forced.stdout.trim(), "42");
+  } finally {
+    if (previous === undefined) delete process.env.FORCE_COLOR;
+    else process.env.FORCE_COLOR = previous;
+  }
+
+  const painted = await runCheck(root, 'node -e "process.stdout.write(\'\\u001B[33m42\\u001B[39m\')"');
+  assert.equal(painted.stdout, "42");
+});

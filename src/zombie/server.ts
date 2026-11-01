@@ -14,7 +14,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { auditFile, memoryDir, ssotFile, syllabusFile } from "./paths.ts";
-import { appendJsonl, ensureDir, readJsonl, readText, redactValue, writeAtomic, PLUGIN_VERSION } from "./io.ts";
+import { appendJsonl, ensureDir, readJsonl, readText, redact, redactValue, writeAtomic, PLUGIN_VERSION } from "./io.ts";
 import { readArchive, readIndex, readRecent, archiveSummary, type StorageLike } from "./memory.ts";
 import { appendSyllabus, readSyllabus } from "./syllabus.ts";
 import { scanProject } from "./scan.ts";
@@ -29,6 +29,7 @@ import {
 } from "./goalContract.ts";
 import { isStandInPath } from "./responseGate.ts";
 import { syntaxCheck } from "./lsp.ts";
+import { ensureOnboarding } from "./onboarding.ts";
 import {
   autoInstallSkills,
   installSharedSkill,
@@ -69,6 +70,18 @@ export type SurfaceDeps = {
   reloadTools?: () => Promise<void>;
   /** Show a visible card in the session UI (OpenCode synthetic message). */
   synthetic?: (input: { sessionID: string; text: string; description?: string }) => Promise<unknown>;
+  /**
+   * OpenCode's native permission door. The plugin asks once per contract at open
+   * and once per close; the user's reply ("once" / "always" / "reject") is
+   * handled by the host, not by this plugin. Resolves on approval.
+   */
+  assertPermission?: (input: {
+    sessionID: string;
+    action: string;
+    resources: string[];
+    save?: string[];
+    metadata?: Record<string, unknown>;
+  }) => Promise<void>;
 };
 
 const obj = (properties: Record<string, unknown>) => ({
@@ -290,6 +303,43 @@ type ToolSpec = {
 export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
   const empty = { type: "object" as const, properties: {}, additionalProperties: false };
   const rootFor = (context?: ToolContextLike) => deps.projectRoot(context?.sessionID);
+
+  // Consent is a commitment gate, not a tool wall. `save` is the resource list
+  // OpenCode stores when the user answers "always"; open saves the project root
+  // so one "always yes" covers later goals here, close saves only that contract id
+  // so closing still needs a fresh human answer.
+  const ask = async (
+    context: ToolContextLike | undefined,
+    action: string,
+    resources: string[],
+    metadata: Record<string, unknown>,
+    save?: string[],
+  ): Promise<{ ok: true } | { ok: false; status: "rejected" | "unavailable"; reason: string }> => {
+    const sessionID = String(context?.sessionID ?? "").trim();
+    if (!sessionID) {
+      return { ok: false, status: "unavailable", reason: "no session id: the user cannot be asked" };
+    }
+    if (!deps.assertPermission) {
+      return { ok: false, status: "unavailable", reason: "permission.assert is not available in this runtime" };
+    }
+    try {
+      await deps.assertPermission({
+        sessionID,
+        action,
+        resources,
+        ...(save ? { save } : {}),
+        metadata,
+      });
+      return { ok: true };
+    } catch (error: any) {
+      return {
+        ok: false,
+        status: "rejected",
+        reason: redact(String(error?.message ?? error)).slice(0, 300),
+      };
+    }
+  };
+
   return [
     {
       name: "get_working_directory",
@@ -348,7 +398,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "goal_contract",
       description:
-        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and a match mode (contains|equals|regex|json); it also shows a Bengali preview card in the session UI and returns it as `preview`. The card is the pre-work announcement: the agent starts the work right away and stops only if the user objects — no extra confirmation word. No time budget is asked or promised. close RUNS the recorded check command in the project root (120s cap) and matches the real output against the recorded expected value; PASS only when the exit code is 0 and the output matches. Agent-supplied observed/exitCode are saved as a claim and never trusted. A mismatch, empty output or failed command is FAIL, so a mock cannot be tuned to the expected result afterwards.",
+        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code, with the user's explicit consent. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and a match mode (contains|equals|regex|json); it shows a Bengali preview card in the session UI, then asks the user through the native permission door. Yes approves this goal; Always yes approves goals in this project; Reject writes nothing and returns status=rejected. close asks again (per contract), then RUNS the recorded check command in the project root (120s cap) and matches the real output against the recorded expected value; PASS only when the exit code is 0 and the output matches. Agent-supplied observed/exitCode are saved as a claim and never trusted. A mismatch, empty output or failed command is FAIL, so a mock cannot be tuned to the expected result afterwards. Without an approval the tool writes and runs nothing; the agent must hand over instead of self-closing.",
       input: {
         type: "object" as const,
         properties: {
@@ -406,19 +456,6 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const mode = normalizeMatch(text("match"));
           const expectedError = validateExpected(expected, mode);
           if (expectedError) throw new Error(expectedError);
-          const id = `gc-${Date.now().toString(36)}`;
-          const sessionID = String(context?.sessionID ?? "").trim();
-          const summary = [
-            `- status: open`,
-            ...(sessionID ? [`- session: ${sessionID}`] : []),
-            `- goal: ${goal}`,
-            `- input: ${realInput}`,
-            `- expected: ${expected}`,
-            `- check: \`${check}\``,
-            `- pass: ${pass}`,
-            `- match: ${mode}`,
-          ].join("\n");
-          const written = appendSyllabus(projectRoot, `Goal Contract ${id}`, summary, auditFile(projectRoot));
           // Human-readable card: the user must see what the agent understood
           // before any code is written. Shown as a synthetic session message so
           // it appears in the UI, not only inside a file.
@@ -431,14 +468,14 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             `যাচাই: \`${check}\` → ${pass}`,
             `মিলানোর নিয়ম: ${mode}`,
             "",
-            "👍 দেখে নাও — আপত্তি না থাকলে কাজ শুরু করছি।",
-            "✋ ভুল মনে হলে থামাও; নতুন করে লিখব, কিছু বদলাবে না।",
+            "👍 দেখে নাও — Yes দিলে এই গোল শুরু; Always yes দিলে এই প্রজেক্টে পরেরবার আর জিজ্ঞেস করব না।",
+            "✋ ভুল মনে হলে Reject দাও; কিছু লেখা হবে না, নতুন করে লিখব।",
           ].join("\n");
           let uiShown = false;
-          if (sessionID && deps.synthetic) {
+          if (context?.sessionID && deps.synthetic) {
             try {
               await deps.synthetic({
-                sessionID,
+                sessionID: String(context.sessionID),
                 text: preview,
                 description: "goal contract preview",
               });
@@ -447,7 +484,53 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
               uiShown = false;
             }
           }
-          return { id, file: written.file, status: "open", uiShown, preview };
+          // The preview is an announcement, not consent. The user's answer is
+          // collected through the native permission door; without it, nothing is
+          // written and the agent must hand over.
+          const approval = await ask(
+            context,
+            "goal_contract.open",
+            [projectRoot],
+            { goal, input: realInput, expected, check, pass, match: mode },
+            [projectRoot],
+          );
+          if (!approval.ok) {
+            audit(projectRoot, "goal_contract", {
+              kind: "goal_contract.open",
+              status: approval.status,
+              goal,
+              reason: approval.reason,
+            });
+            return {
+              status: approval.status,
+              wrote: false,
+              uiShown,
+              preview,
+              reason: approval.reason,
+              next: "Ask the user to rephrase the goal or hand over; do not retry the same goal silently.",
+            };
+          }
+          const id = `gc-${Date.now().toString(36)}`;
+          const sessionID = String(context?.sessionID ?? "").trim();
+          const summary = [
+            `- status: open`,
+            ...(sessionID ? [`- session: ${sessionID}`] : []),
+            ...(sessionID ? [`- consent: approved (goal_contract.open)`] : []),
+            `- goal: ${goal}`,
+            `- input: ${realInput}`,
+            `- expected: ${expected}`,
+            `- check: \`${check}\``,
+            `- pass: ${pass}`,
+            `- match: ${mode}`,
+          ].join("\n");
+          const written = appendSyllabus(projectRoot, `Goal Contract ${id}`, summary, auditFile(projectRoot));
+          audit(projectRoot, "goal_contract", {
+            kind: "goal_contract.open",
+            status: "approved",
+            id,
+            goal,
+          });
+          return { id, file: written.file, status: "open", approved: true, uiShown, preview };
         }
 
         if (action === "close") {
@@ -462,6 +545,44 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const expectedError = validateExpected(contract.expected, mode);
           if (expectedError) {
             throw new Error(`goal_contract ${id} is invalid: ${expectedError}`);
+          }
+          // Closing is never self-service: the user approves this specific
+          // contract id every time. "always" only ever covers that id.
+          const approval = await ask(
+            context,
+            "goal_contract.close",
+            [id],
+            { id, goal: contract.goal, expected: contract.expected, check: contract.check },
+            [id],
+          );
+          if (!approval.ok) {
+            const sessionID = String(context?.sessionID ?? "").trim();
+            audit(projectRoot, "goal_contract", {
+              kind: "goal_contract.close",
+              status: approval.status,
+              id,
+              reason: approval.reason,
+            });
+            appendSyllabus(
+              projectRoot,
+              `Goal Contract ${id} — consent`,
+              [
+                `- status: ${approval.status}`,
+                ...(sessionID ? [`- session: ${sessionID}`] : []),
+                `- goal: ${contract.goal}`,
+                `- reason: ${approval.reason}`,
+                "",
+                "The contract stays open. The check did not run.",
+              ].join("\n"),
+              auditFile(projectRoot),
+            );
+            return {
+              id,
+              status: approval.status,
+              ran: false,
+              reason: approval.reason,
+              next: "Hand over to the user; do not claim this task is done.",
+            };
           }
           // The agent's own numbers are a claim, not proof. The verdict comes
           // from running the recorded command in the project root.
@@ -488,6 +609,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const artifact = text("artifact");
           const summary = [
             `- status: ${status}`,
+            `- consent: approved (goal_contract.close)`,
             `- command: \`${contract.check}\``,
             `- exitCode: ${run.exitCode === null ? "none" : run.exitCode}`,
             `- observed: ${singleLine(output) || "(empty)"}`,
@@ -546,6 +668,28 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       description: "Scan the project live and return its machine-readable fingerprint. No fingerprint file is created.",
       input: empty,
       run: (_input: any, context?: ToolContextLike) => scanProject(rootFor(context)),
+    },
+    {
+      name: "project_onboarding",
+      description:
+        "First-input project audit. Reads the tree, manifests, docs, tests, log files, open TODO/FIXME markers and recent audit failures; checks which stack skills are installed; appends ONE evidence lesson per file tree to the syllabus (idempotent by an onboarding:<hash> marker) and returns the evidence plus the manual checklist. Call it on the first user input of a session, then read the docs/code yourself, compare the user's expectation with the documented scope, append the human judgement with append_syllabus and install missing skills before the first goal_contract. The tool records facts; it cannot judge whether the docs are true.",
+      input: empty,
+      run: (_input: any, context?: ToolContextLike) => {
+        const projectRoot = rootFor(context);
+        const fingerprint = scanProject(projectRoot);
+        const result = ensureOnboarding(projectRoot, fingerprint, { installRoot: deps.installRoot() });
+        return {
+          created: result.created,
+          marker: result.marker,
+          file: result.file,
+          evidence: result.evidence,
+          next: [
+            "Read the docs and the code; the scanner cannot tell whether the docs are true.",
+            "Record the user's expectation, contradictions and remaining gaps with append_syllabus.",
+            "Install missing stack skills with skill_catalog, then open goal_contract for the user's approval.",
+          ],
+        };
+      },
     },
     {
       name: "context_status",

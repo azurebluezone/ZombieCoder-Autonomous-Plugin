@@ -288,6 +288,14 @@ export function buildContextPack(
         "- none for this session.",
         "- Before the first write/edit/shell that changes the project, call `goal_contract` open: real input, observable expected output, check command, pass criteria.",
       ];
+  const onboardingRecorded = /onboarding:[a-f0-9]{12}/.test(syllabusText ?? "");
+  const onboardingGate = onboardingRecorded
+    ? [
+        "- onboarding evidence: recorded. On the first input of a session, read the docs/code, compare them with the user's expectation and append the human judgement before opening a contract.",
+      ]
+    : [
+        "- ⛔ No project onboarding evidence yet: call `project_onboarding`, then record the docs-vs-reality gaps and needed skills before any goal contract.",
+      ];
 
   // Focus: turn the user's sentence into the smallest truthful file set. This is
   // what stops the "plan first, scan everything" loop the audit found.
@@ -321,6 +329,7 @@ export function buildContextPack(
     "",
     "### Pre-work gate — goal contract",
     ...gate,
+    ...onboardingGate,
     "",
     ...(focusBody ? [`### Focus files — from the user's message (${Buffer.byteLength(focusBody, "utf8")}B)`, focusBody, ""] : []),
     `### Session memory (${memory.recent} recent, ${memory.archives} archives) — owner: ${CONTEXT_OWNERS.memory.agent}`,

@@ -39,6 +39,14 @@ function makeContext(root: string, options: { models?: any[] } = {}) {
   const modelSwitches: Array<{ sessionID: string; model: any }> = [];
   const switchState = { fail: false, failModel: false };
   const synthetics: Array<{ sessionID: string; text: string; description?: string }> = [];
+  const permissions: Array<{
+    sessionID: string;
+    action: string;
+    resources: string[];
+    save?: string[];
+    metadata?: Record<string, unknown>;
+  }> = [];
+  const permissionState: { mode: "allow" | "reject" } = { mode: "allow" };
   const prompts: Array<{ sessionID: string; text: string; delivery?: string }> = [];
   const storage = new Map<string, unknown>();
   const sessionLocations = new Map<string, string>();
@@ -84,6 +92,18 @@ function makeContext(root: string, options: { models?: any[] } = {}) {
       },
     },
     rpc: { register: async () => ({ ...registration, events: { emit: async () => undefined } }) },
+    permission: {
+      assert: async (input: {
+        sessionID: string;
+        action: string;
+        resources: string[];
+        save?: string[];
+        metadata?: Record<string, unknown>;
+      }) => {
+        permissions.push(input);
+        if (permissionState.mode === "reject") throw new Error("user rejected the goal contract");
+      },
+    },
     storage: {
       get: async (key: string) => storage.get(key),
       set: async (key: string, value: unknown) => {
@@ -125,6 +145,8 @@ function makeContext(root: string, options: { models?: any[] } = {}) {
     agentSwitches,
     modelSwitches,
     synthetics,
+    permissions,
+    permissionState,
     prompts,
     storage,
     switchState,
@@ -269,9 +291,10 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.doesNotMatch(ssot, /^## .*Model plan/m);
   assert.doesNotMatch(ssot, /^## .*MCP/m);
 
-  assert.equal(fake.tools.length, 18);
+  assert.equal(fake.tools.length, 19);
   assert.ok(fake.tools.every((tool) => tool.output), "every tool must declare an output schema");
   assert.ok(fake.tools.some((tool) => tool.name === "memory_archive"));
+  assert.ok(fake.tools.some((tool) => tool.name === "project_onboarding"), "project_onboarding tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "evidence_gate"), "evidence_gate tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "verify_real"), "verify_real tool missing");
   assert.ok(fake.tools.some((tool) => tool.name === "goal_contract"), "goal_contract tool missing");
@@ -295,6 +318,17 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(contextOutput.allowedRoot, root);
   assert.match(contextOutput.uiLine, /Context: SSOT OK \(manu\) \| Syllabus OK \(halim\)/);
   assert.ok(contextOutput.packBytes > 0, "context pack must not be empty");
+  const onboardingTool = fake.tools.find((tool) => tool.name === "project_onboarding");
+  assert.ok(onboardingTool, "project_onboarding tool missing");
+  const onboardingOutput = (await onboardingTool.execute({})).output;
+  assert.equal(onboardingOutput.created, false, "setup already recorded this tree; the tool must be idempotent");
+  assert.match(onboardingOutput.marker, /^onboarding:[a-f0-9]{12}$/);
+  assert.equal(onboardingOutput.evidence.root, root);
+  assert.ok(onboardingOutput.next.some((line: string) => /append_syllabus/.test(line)));
+  const onboardingSyllabus = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
+  assert.match(onboardingSyllabus, /### Project onboarding/);
+  assert.match(onboardingSyllabus, /onboarding:[a-f0-9]{12}/);
+  assert.match(onboardingSyllabus, /Agent checklist before the first goal contract/);
   const setupReport = JSON.parse(
     fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"),
   );
@@ -413,6 +447,11 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.match(opened.preview, /\{"id":7,"total":42\}/);
   assert.match(opened.preview, /মিলানোর নিয়ম: json/);
   assert.doesNotMatch(opened.preview, /বাজেট|budget/i, "no time/budget line in the preview");
+  const openConsent = fake.permissions.filter((entry) => entry.action === "goal_contract.open");
+  assert.ok(openConsent.length >= 1, "goal_contract open must ask the native permission door");
+  assert.equal(openConsent[openConsent.length - 1].sessionID, "ses_goal");
+  assert.deepEqual(openConsent[openConsent.length - 1].save, [root], "Always yes must remember this project");
+  assert.equal(openConsent[openConsent.length - 1].metadata?.goal, "checkout returns an order id");
   const previewCard = fake.synthetics.find(
     (entry) => entry.description === "goal contract preview",
   );
@@ -439,6 +478,9 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   assert.equal(closed.exitCode, 0);
   assert.match(closed.observed, /"id":7/);
   assert.equal(closed.uiShown, true, "the result must be pushed to the session UI");
+  const closeConsent = fake.permissions.filter((entry) => entry.action === "goal_contract.close");
+  assert.ok(closeConsent.length >= 1, "goal_contract close must ask the native permission door");
+  assert.deepEqual(closeConsent[closeConsent.length - 1].resources, [opened.id]);
   const resultCard = fake.synthetics.find(
     (entry) => entry.description === "goal contract result",
   );
@@ -466,7 +508,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
     id: mismatch.id,
     observed: '{"id":999,"total":0}',
     exitCode: 0,
-  })).output;
+  }, { sessionID: "ses_goal" })).output;
   assert.equal(mismatchClose.status, "FAIL");
   assert.match(mismatchClose.reason, /does not match/);
 
@@ -487,9 +529,54 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
     id: failing.id,
     observed: "all good",
     exitCode: 0,
-  })).output;
+  }, { sessionID: "ses_goal" })).output;
   assert.equal(failingClose.status, "FAIL");
   assert.match(failingClose.reason, /exited with 3/);
+
+  // Rejection is a hard stop. The preview may be shown, but nothing is written.
+  fake.permissionState.mode = "reject";
+  const rejectedOpen = (await goalTool.execute(
+    {
+      action: "open",
+      goal: "rejected goal must not be recorded",
+      input: "check-order.mjs",
+      expected: "whatever",
+      check: "node check-order.mjs",
+      pass: "should never run",
+    },
+    { sessionID: "ses_goal" },
+  )).output;
+  assert.equal(rejectedOpen.status, "rejected");
+  assert.equal(rejectedOpen.wrote, false);
+  assert.match(rejectedOpen.reason, /rejected/);
+  const syllabusAfterReject = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
+  assert.doesNotMatch(syllabusAfterReject, /rejected goal must not be recorded/);
+
+  // A rejected close must not run the check either.
+  fake.permissionState.mode = "allow";
+  const guarded = (await goalTool.execute(
+    {
+      action: "open",
+      goal: "close rejection guard",
+      input: "check-order.mjs",
+      expected: "a file appears",
+      check: 'node -e "require(\'fs\').writeFileSync(\'ran-on-close.txt\',\'x\')"',
+      pass: "file exists",
+    },
+    { sessionID: "ses_goal" },
+  )).output;
+  assert.equal(guarded.status, "open");
+  fake.permissionState.mode = "reject";
+  const rejectedClose = (await goalTool.execute(
+    { action: "close", id: guarded.id },
+    { sessionID: "ses_goal" },
+  )).output;
+  assert.equal(rejectedClose.status, "rejected");
+  assert.equal(rejectedClose.ran, false);
+  assert.equal(fs.existsSync(path.join(root, "ran-on-close.txt")), false);
+  const syllabusAfterCloseReject = fs.readFileSync(path.join(root, ".zombiecoder", "syllabus.md"), "utf8");
+  assert.match(syllabusAfterCloseReject, new RegExp(`Goal Contract ${guarded.id} — consent`));
+  fake.permissionState.mode = "allow";
 
   await assert.rejects(
     () => goalTool.execute({ action: "close", id: "gc-never", observed: "x", exitCode: 0 }),
@@ -512,7 +599,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
   const report = JSON.parse(fs.readFileSync(path.join(root, ".zombiecoder", ".state", "setup-report.json"), "utf8"));
   const toolStep = report.steps.find((step: any) => step.step === "register-tools");
   assert.equal(toolStep.ok, true);
-  assert.equal(toolStep.detail, "18 registered");
+  assert.equal(toolStep.detail, "19 registered");
   assert.ok(fs.existsSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl")));
 
   await cleanup();

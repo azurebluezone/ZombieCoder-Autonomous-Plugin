@@ -78,3 +78,38 @@ test("breaker status and retry prompt carry the failure evidence", () => {
   assert.match(prompt, /UNVERIFIED/);
   assert.match(prompt, /অন্য কোনো এজেন্টে সরাও না/);
 });
+
+test("contract and documentation failures use the same-agent breaker", () => {
+  let state = readBreakerState(undefined, "ses_contract");
+  const contractFailure = {
+    agent: "halim",
+    kind: "contract_failure" as const,
+    reason: "observed output does not match expected (contains)",
+    at: new Date().toISOString(),
+    context: { detail: "contract=gc-x status=FAIL check=bash verify.sh exit=1" },
+  };
+
+  const first = decideBreaker(state, contractFailure, BREAKER_LIMIT);
+  assert.equal(first.decision.action, "retry");
+  state = first.state;
+  const second = decideBreaker(state, { ...contractFailure, kind: "docs_failure" as const, reason: "DOCS_FAIL stale handoff" }, BREAKER_LIMIT);
+  assert.equal(second.decision.action, "retry");
+  state = second.state;
+  const third = decideBreaker(state, contractFailure, BREAKER_LIMIT);
+  assert.equal(third.decision.action, "stop");
+  assert.deepEqual(third.state.agents, ["halim"], "one agent owns every failure kind");
+
+  const status = statusMessage(contractFailure, { action: "retry", attempt: 1, limit: 3 });
+  assert.match(status, /expected বদলে নয়/);
+  assert.match(status, /handoff হবে না/);
+
+  const prompt = retryPrompt(contractFailure, "FAIL", { action: "retry", attempt: 1, limit: 3 });
+  assert.match(prompt, /contract=gc-x/);
+  assert.match(prompt, /expected বদলে নয়/);
+
+  const docsStatus = statusMessage(
+    { ...contractFailure, kind: "docs_failure", reason: "DOCS_FAIL stale handoff" },
+    { action: "retry", attempt: 2, limit: 3 },
+  );
+  assert.match(docsStatus, /documentation consistency/);
+});

@@ -191,6 +191,95 @@ test("pre-work gate never adds an onboarding status line", () => {
   assert.match(after.text, /### Project onboarding/, "the recorded lesson must stay readable");
 });
 
+test("context pack keeps the latest project onboarding visible when it is not the newest lesson", () => {
+  const root = seedProject();
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "syllabus.md"),
+    [
+      "# Syllabus",
+      "",
+      "## 5. Lessons (append-only)",
+      "",
+      "### Project onboarding",
+      "",
+      "`onboarding:abcdef123456`",
+      "",
+      "- Project: `demo-app` 1.2.3 — checkout demo",
+      "- Project root: `/tmp/demo`",
+      "- Files / bytes: 12 / 4096",
+      "- Languages: TypeScript(8), JavaScript(2)",
+      "- Top level: `src/`, `test/`, `README.md`, `logs/`",
+      "- Docs: `README.md`",
+      "- Tests: `test/app.test.ts`",
+      "- Logs: `logs/server.log` (2048B, 1 error line(s))",
+      "- Markers: `src/app.ts:3` TODO fix retry",
+      "- Git: main @ abc1234, 0 uncommitted change(s)",
+      "",
+      "**Audit failures carried over**",
+      "",
+      "- none recorded",
+      "",
+      "**Log problems (tail)**",
+      "",
+      "- `logs/server.log`: Error: connect ECONNREFUSED 127.0.0.1:5432",
+      "",
+      "**Evidence-backed gaps**",
+      "",
+      "- Log files contain error/failure lines; reproduce them before changing code.",
+      "",
+      "**Still unverified**",
+      "",
+      "- Whether the docs match the running behaviour; the agent must read both.",
+      "",
+      "### Later agent note",
+      "",
+      "A newer lesson that must not hide the onboarding record.",
+      "",
+    ].join("\n"),
+  );
+
+  const pack = buildContextPack(root, "manu");
+  assert.match(pack.text, /### Project onboarding \(current tree\)/);
+  assert.match(pack.text, /`onboarding:abcdef123456`/);
+  assert.match(pack.text, /- Project: `demo-app` 1\.2\.3/);
+  assert.match(pack.text, /- Logs: `logs\/server\.log` \(2048B, 1 error line\(s\)\)/);
+  assert.match(pack.text, /ECONNREFUSED/);
+  assert.match(pack.text, /### Later agent note/, "the newest lesson must still be present");
+  assert.doesNotMatch(pack.text, /### Project onboarding\n/, "inject the compact record, not the full lesson");
+  assert.doesNotMatch(pack.uiLine, /onboarding/i, "the UI line stays short");
+});
+
+test("onboarding record reports missing logs instead of inventing them", () => {
+  const root = seedProject();
+  fs.writeFileSync(
+    path.join(root, ".zombiecoder", "syllabus.md"),
+    [
+      "# Syllabus",
+      "",
+      "## 5. Lessons (append-only)",
+      "",
+      "### Project onboarding",
+      "",
+      "`onboarding:fedcba654321`",
+      "",
+      "- Project: `empty-app` unknown",
+      "- Files / bytes: 1 / 12",
+      "- Languages: unknown",
+      "- Docs: none found",
+      "- Tests: none found",
+      "- Logs: no .log files found",
+      "",
+    ].join("\n"),
+  );
+
+  const pack = buildContextPack(root, "manu");
+  assert.match(pack.text, /### Project onboarding \(current tree\)/);
+  assert.match(pack.text, /- Logs: no \.log files found/);
+  assert.match(pack.text, /- Docs: none found/);
+  assert.match(pack.text, /- Tests: none found/);
+});
+
+
 test("context pack marks missing SSOT instead of inventing content", () => {
   const root = tempProject();
   fs.mkdirSync(path.join(root, ".zombiecoder"), { recursive: true });

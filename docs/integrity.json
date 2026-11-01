@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-11-01T19:23:23.363Z",
+  "generated_at": "2026-11-01T21:21:34.706Z",
   "scope": [
     "src",
     "bin",
@@ -12,12 +12,12 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "7d03a7dd8b11f64c89ff83792ef09f64b8b8c487cc9fec59b6305a20801991ea",
-  "file_count": 116,
-  "total_bytes": 1172098,
+  "root_sha256": "f3ab8c210e0c30e2a702e4074e33d3692d981f564732cc1a3f3193d650fe9d09",
+  "file_count": 119,
+  "total_bytes": 1204885,
   "git": {
-    "commit": null,
-    "branch": null,
+    "commit": "7b9d1e2",
+    "branch": "murubbi",
     "dirty": true
   },
   "files": [
@@ -213,8 +213,8 @@
     },
     {
       "path": "package.json",
-      "bytes": 2325,
-      "sha256": "88c551aa0f88e309833d43416c3f5fd1b8bf209299cf381f2a05a73077c72b5b"
+      "bytes": 2423,
+      "sha256": "f4f20b8075694e69784d1fc28edde566c273d41e2b12cc6c4343aa2c49a41db8"
     },
     {
       "path": "scripts/allow-always-check.mjs",
@@ -230,6 +230,11 @@
       "path": "scripts/configure.mjs",
       "bytes": 14570,
       "sha256": "53c62929b01c0cc5bddc1a21935e88790c6f67a8d5b7989711b894a6da0faf18"
+    },
+    {
+      "path": "scripts/docs-check.mjs",
+      "bytes": 779,
+      "sha256": "391e4b5f418b6357a67bba6019b2c2818fb3e86889a4eaba0722dc49802917e7"
     },
     {
       "path": "scripts/e2e-install.mjs",
@@ -293,8 +298,8 @@
     },
     {
       "path": "src/plugin.ts",
-      "bytes": 73374,
-      "sha256": "09e70507bd0b1f4fdc0581d83c38639102560b36b9642070b6e02a971d84cafe"
+      "bytes": 79783,
+      "sha256": "c31e7f16f521d42608d7771ab06e727dbbf5333faf6a2215465c88464aa30e88"
     },
     {
       "path": "src/roster.ts",
@@ -303,18 +308,18 @@
     },
     {
       "path": "src/runtime.ts",
-      "bytes": 15970,
-      "sha256": "dccfccb3906942d0bd4ac526e0958e3dd5cb6d57007cb58c47a20678ae7c7bae"
+      "bytes": 16105,
+      "sha256": "e1c0ed06475af247a55da955b1b2af13966e2c5229081d45de4f742ea14ff80e"
     },
     {
       "path": "src/zombie/circuitBreaker.ts",
-      "bytes": 6482,
-      "sha256": "2c357054011164844ff16890ccbfaf6ab7cdf5132472961de6ce7399ae858033"
+      "bytes": 7589,
+      "sha256": "c240197b45c7278721245811e0e2fa423e1081c3afb1d5314bba1f1f4493c1c8"
     },
     {
       "path": "src/zombie/context.ts",
-      "bytes": 14713,
-      "sha256": "da637fa14e5b404f9926665a988019e261bc80a5513127ea854d110dc455ad3f"
+      "bytes": 16996,
+      "sha256": "73caa204d6e71a4a32260c543caacfc1822756d5884ac7bd3cfefc8a96ca67e0"
     },
     {
       "path": "src/zombie/defaults.ts",
@@ -325,6 +330,11 @@
       "path": "src/zombie/design.ts",
       "bytes": 13664,
       "sha256": "d47465bf40d7fbe879e6aaa11fc70174406cf6bd85375b5390e2a089af756601"
+    },
+    {
+      "path": "src/zombie/docsConsistency.ts",
+      "bytes": 3826,
+      "sha256": "996e71595316da95ffa2db2ba3169d5b47c6655ed214cbaf76215b4980760516"
     },
     {
       "path": "src/zombie/focus.ts",
@@ -338,8 +348,8 @@
     },
     {
       "path": "src/zombie/goalContract.ts",
-      "bytes": 10145,
-      "sha256": "5271ff1620e43787e7ee133f46886751acaf941b2243c1b2899c43940f3ba628"
+      "bytes": 12434,
+      "sha256": "946acb0f8989548da854cb7439a8e94c39055950479074219610ac1ecb7b280e"
     },
     {
       "path": "src/zombie/io.ts",
@@ -423,8 +433,8 @@
     },
     {
       "path": "src/zombie/server.ts",
-      "bytes": 64614,
-      "sha256": "58328827a671ae6d1705843939d2bb7fd6f888613cb386002f8f6b1f3c5c86a1"
+      "bytes": 67968,
+      "sha256": "81efaf3f25ad4967065ec2987f9cc7cf267d1e397e347ad3899767702823c886"
     },
     {
       "path": "src/zombie/skillCatalog.ts",
@@ -443,8 +453,8 @@
     },
     {
       "path": "src/zombie/syllabus.ts",
-      "bytes": 11329,
-      "sha256": "d9b1fd37fe7f67458b360ad53bad580fdb55e6c23ff1991e0dc6c0ff8925321f"
+      "bytes": 11362,
+      "sha256": "b78cfb409934296a4c7724a61077f040c1992a48464113a83f91756669054156"
     },
     {
       "path": "src/zombie/transform.ts",
@@ -458,18 +468,23 @@
     },
     {
       "path": "test/circuitBreaker.test.ts",
-      "bytes": 3176,
-      "sha256": "73926d16e7e7f4eb1b1b5a8d750e21801a3b3079b6214bb647c2409912bbf8fd"
+      "bytes": 4791,
+      "sha256": "83dff617538d24745fb23cb9fad77dc9dac9254361c6b579a9f7f1baafe9471e"
     },
     {
       "path": "test/context.test.ts",
-      "bytes": 31866,
-      "sha256": "356f7d9d06672f3eb93c67a7e263a088c1fc74fe2b9c9e721360b6267415c586"
+      "bytes": 34868,
+      "sha256": "66d0f69426abbad6c1a3ea82534d72daf43a29ba7fd48bb8289baa70b9b1611b"
     },
     {
       "path": "test/design.test.ts",
       "bytes": 4746,
       "sha256": "a1995cf09d563b94713a23f73d9c5ff3330f45c96125dc7cc908b361736f0c2e"
+    },
+    {
+      "path": "test/docs.test.ts",
+      "bytes": 2157,
+      "sha256": "d2b97395a5ab3b7710350d778e2b76857d740caf978842da5126efdc09fd94e2"
     },
     {
       "path": "test/focus.test.ts",
@@ -488,8 +503,8 @@
     },
     {
       "path": "test/goalContract.test.ts",
-      "bytes": 4268,
-      "sha256": "0b06a8bb735d99d4bd732d27989a3523e3622a53a700e5cdaa784fbdeb833da5"
+      "bytes": 6132,
+      "sha256": "dea761050c5caed15f362072f43cdf2b505e36b239bab28a80961c37f1b2e5ae"
     },
     {
       "path": "test/identity.test.ts",
@@ -568,8 +583,8 @@
     },
     {
       "path": "test/plugin.test.ts",
-      "bytes": 66387,
-      "sha256": "c9b96f679bf82bf6d1b9f738e0d0c032733db6108d828fd44bbf8b2addbc3524"
+      "bytes": 70223,
+      "sha256": "107657ce31318a627a1155c26e810b42910c7d4d5f4f5a911ab66821c3badc68"
     },
     {
       "path": "test/repo.test.ts",

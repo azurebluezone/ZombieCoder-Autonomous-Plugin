@@ -12,7 +12,9 @@ import * as path from "node:path";
 import {
   contractStatus,
   extractJson,
+  failedExpectedRewrite,
   matches,
+  normalizeCommand,
   normalizeMatch,
   parseContract,
   runCheck,
@@ -92,6 +94,72 @@ test("runCheck returns plain text even when the caller exports FORCE_COLOR", asy
 
   const painted = await runCheck(root, 'node -e "process.stdout.write(\'\\u001B[33m42\\u001B[39m\')"');
   assert.equal(painted.stdout, "42");
+});
+
+const failedSyllabus = [
+  "### Goal Contract gc-old",
+  "- status: open",
+  "- expected: ALL_OK",
+  "- check: `bash verify.sh`",
+  "- match: contains",
+  "",
+  "### Goal Contract gc-old — result",
+  "- status: FAIL",
+  "- command: `bash verify.sh`",
+  "- expected: ALL_OK",
+  "- match: contains",
+  "",
+].join("\n");
+
+test("a post-FAIL contract cannot reuse the check with a different expected", () => {
+  const rewrite = failedExpectedRewrite(failedSyllabus, {
+    check: "bash   verify.sh",
+    expected: "ALL_OK (rewritten)",
+    match: "contains",
+  });
+  assert.equal(rewrite?.id, "gc-old");
+  assert.equal(rewrite?.expected, "ALL_OK");
+  assert.equal(
+    failedExpectedRewrite(failedSyllabus, {
+      check: "bash verify.sh",
+      expected: "ALL_OK",
+      match: "contains",
+    }),
+    null,
+    "retrying the same check and the same expected stays legal after a real fix",
+  );
+});
+
+test("JSON key order is not an expected rewrite, but the mode is", () => {
+  const prior = [
+    "### Goal Contract gc-json — result",
+    "- status: FAIL",
+    "- command: `node check.mjs`",
+    '- expected: {"id":7,"total":42}',
+    "- match: json",
+    "",
+  ].join("\n");
+  assert.equal(
+    failedExpectedRewrite(prior, {
+      check: "node check.mjs",
+      expected: '{"total":42,"id":7}',
+      match: "json",
+    }),
+    null,
+  );
+  assert.ok(
+    failedExpectedRewrite(prior, {
+      check: "node check.mjs",
+      expected: '{"total":42,"id":7}',
+      match: "contains",
+    }),
+  );
+});
+
+test("normalizeCommand ignores wrapping backticks and spacing only", () => {
+  assert.equal(normalizeCommand("`bash   verify.sh`"), "bash verify.sh");
+  assert.equal(normalizeCommand("bash\tverify.sh"), "bash verify.sh");
+  assert.notEqual(normalizeCommand("bash verify.sh"), normalizeCommand("node verify.sh"));
 });
 
 test("contractStatus reads the recorded verdict and ignores the open block", () => {

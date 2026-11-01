@@ -7,7 +7,12 @@
 
 export const BREAKER_LIMIT = 3;
 
-export type BreakerFailureKind = "response_gate" | "tool_error" | "provider_error";
+export type BreakerFailureKind =
+  | "response_gate"
+  | "tool_error"
+  | "provider_error"
+  | "contract_failure"
+  | "docs_failure";
 
 export type BreakerContext = {
   model?: string;
@@ -93,14 +98,26 @@ export function breakerContext(
   };
 }
 
+function kindGuidance(kind: BreakerFailureKind): string {
+  switch (kind) {
+    case "contract_failure":
+      return "goal contract-এর observed output আর expected মিলেনি। expected বদলে নয় — আসল output/আচরণ ঠিক করো, অথবা ভিন্ন check দিয়ে নতুন contract খোলো।";
+    case "docs_failure":
+      return "documentation consistency check fail করেছে। stale claim মুছে code-এর বাস্তব আচরণ লেখো; test চুপ করিয়ে দিও না।";
+    default:
+      return "প্রমাণ ছাড়া দাবি বা tool error। একই কাজ নিজে শেষ করো; প্রমাণ ছাড়া PASS বলো না।";
+  }
+}
+
 export function statusMessage(
   failure: BreakerFailure,
   decision: Extract<BreakerDecision, { action: "retry" }>,
 ): string {
   return [
-    `**Circuit breaker:** \`${failure.agent}\` এই turn-এ আটকে গেছে — ${failure.reason}`,
+    `**Circuit breaker:** \`${failure.agent}\` এই attempt-এ আটকে গেছে — ${failure.reason}`,
     "",
     `একই এজেন্ট আবার চেষ্টা করবে (প্রয়াস ${decision.attempt}/${decision.limit})। অন্য এজেন্টে handoff হবে না; কাজ ও দায়িত্ব একই এজেন্টের।`,
+    kindGuidance(failure.kind),
   ].join("\n");
 }
 
@@ -115,6 +132,9 @@ export function retryPrompt(
     failure.context?.violations?.length
       ? `সমস্যাযুক্ত path: ${failure.context.violations.join(", ")}`
       : "",
+    failure.context?.detail ? `failure detail: ${failure.context.detail}` : "",
+    "",
+    kindGuidance(failure.kind),
     "",
     "আগের উত্তরটি (কাটা):",
     preview(blockedText) || "(খালি)",
@@ -136,6 +156,7 @@ export function unresolvedMessage(state: BreakerState, limit: number = BREAKER_L
     "",
     `${agent} ${attempts} বার চেষ্টা করেছে। কোনো অন্য এজেন্টে দায়িত্ব সরানো হয়নি।`,
     last ? `শেষ failure: ${last.reason}` : "",
+    last?.context?.detail ? `শেষ detail: ${last.context.detail}` : "",
     "",
     "**ভাইয়া, এখন কী করবেন:**",
     "1. **প্রমাণ দিন** — `path:line`, test output বা exit code; আমি সেটা দিয়ে আবার চালাব।",

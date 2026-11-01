@@ -21,9 +21,13 @@
 | ভাষা | chat বাংলায়; code, path, command, API name ইংরেজিতে |
 | প্রমাণ | path, command, exit code, test output — plus provenance (`live` / `real_run` / `real_file` / `simulated`)। আসল test output authentic (`real_run`); শুধু mock/fixture/demo দিয়ে "fixed" নয় — label দিলেও নয়; না থাকলে `UNVERIFIED`/`NOT_TESTED`; agent থামে, user-কে next step দেয় |
 | Goal contract | কোড শুরুর আগে `goal_contract` open: আসল input, observable expected output, check command, pass criteria; Bengali preview-র পরে native permission door-এ **Allow once / Allow always / Reject**। Allow once = এই গোল, Allow always = এই project-এর পরের open, Reject = কিছুই লেখা/চালানো হয় না; close-এ প্রতিবার সম্মতি লাগে, agent নিজে close করতে পারে না। close কোনো pattern সেভ করে না, তাই Allow always চাপলেও পরের close-এ আবার জিজ্ঞেস হয়। close নিজেই check command চালিয়ে observed vs expected মিলায় (contains/equals/regex/json); mismatch = FAIL, agent-এর exitCode claim বিশ্বাস হয় না। কোনো সময়/বাজেট প্রতিশ্রুতি নয় |
+| Context pack | SSOT excerpt + latest onboarding record + newest lesson + recent memory, bounded। syllabus-এ `onboarding:<hash>` থাকলে project kind, files/bytes, languages, docs/tests, logs বা `no .log files found`, gaps প্রতি turn-এ দেখা যায়—নতুন lesson সেটি ঢেকে দেয় না। |
+| VS Code ACP | `formulahendry.acp-client` extension; `acp.agents.OpenCode` = `{ command: "<opencode path>", args: ["acp"] }`; `acp.autoApprovePermissions` অবশ্যই `"ask"` (allowAll consent bypass করে)। ACP server private — saved session load করতে পারে, desktop app-এর live mirror নয়। |
 | টুল | model-এর জন্মগত অঙ্গ নয়; client/harness চালায় |
 | LSP | OpenCode V2.2.5-এ `lsp` config + server binary; installer ৭টি server auto-generate করে; `npm run lsp:probe` **7/7**; `npm run lsp:diagnostics` real diagnostic দেয়; desktop editor নেই, managed edit diagnostics `NOT_TESTED` |
-| MCP | দুটি local stdio server: `image-brand` (6 tools: PD/CC0 ছবি + branding + exact-size fit + `web_decorate`), `public-api` (8 tools: Wikipedia feeds, weather, currency, country, QR)। Installer `mcp/` কপি করে `opencode.json`-এ register করে; structural যাচাই `node scripts/audit-install.mjs`, live যাচাই `OPENCODE_CONFIG="$HOME/.opencode/opencode.json" opencode mcp list` বা `/api/mcp` |
+| MCP | দুটি local stdio server: `image-brand` (6 tools: PD/CC0 ছবি + branding + exact-size fit + `web_decorate`), `public-api` (8 tools: Wikipedia feeds, weather, currency, country, QR)। Installer `mcp/` কপি করে `opencode.json`-এ register করে; structural যাচাই `node scripts/audit-install.mjs`, live যাচাই `OPENCODE_CONFIG="$HOME/.opencode/opencode.json" opencode mcp list` বা `/api/mcp`. **কোনো MCP server-এ `patch` tool নেই।** |
+| Patch / edit | Multi-file edit = OpenCode-এর native `patch` (`opencode.tool.patch`, UI-তে `apply_patch`; ইনপুট `{ patchText }`)। OpenCode 2.2.5-এ এটি model-dependent: `model.id`-তে `gpt-` থাকলে (`oss`/`gpt-4` নয়) `patch` থাকে, `edit`/`write` বাদ; অন্য model-এ `patch` বাদ, `edit`/`write` থাকে। MCP দিয়ে `patch` যোগ হয় না। এক `patchText`-এ Add/Update/Delete/Move multiple files; সব hunk আগে verify, তারপর file-by-file apply — fully atomic নয়, automatic backup/rollback নেই; fail করলে `Completed before failure: <file>` আসে। `*** Move to:`-এর সঙ্গে non-empty hunk লাগে। `zombiecoder.patch_preview` শুধু single-file exact-string dry-run + apply-এ backup। `.zombiecoder/syllabus.md` target করলে multi-file patch block হয়; `append_syllabus`/`goal_contract` ব্যবহার করুন। |
+| Safe edit | read → exact diff/`patchText` → apply → `git diff` → targeted test → full test। Apply-এর আগে `git status`, irreversible হলে backup। |
 | Install proof | `install.sh` একমাত্র bootstrap/update/proof entrypoint; tmpfs staging, দুই installer pass (`H1 === H2`), source hash fidelity, এক loader, ৯ agent, consent `ask`, dependencies, audit, LSP probe, live `/api/plugin`, live MCP connectivity, space delta; artifact `$ZOMBIECODER_DIR/zombiecoder/install-proof.json`, stdout-এ `PROOF PASS`/`PROOF FAIL` |
 | License | Local Freedom, Non-Commercial (`LICENSE`) |
 
@@ -71,7 +75,7 @@
     syllabus-এ লেখো; দরকারি skill `skill_catalog` দিয়ে install করো। তারপর
     নতুন কাজের contract।
 12. `goal_contract` open/close user-এর সম্মতি ছাড়া নয়। Allow once = এই গোল,
-    Allow always = এই project-এর পরের open; Reject = থামো, handover করো।
+    Allow always = এই project-এর পরের open; Reject = থামো, user-কে কারণ জানাও।
     close কোনো pattern সেভ করে না, তাই প্রতিবার জিজ্ঞেস হয়।
     Agent নিজে গোল ক্লোজ করতে পারবে না।
 13. user যে product-এর কথা বলে তার official documentation-ই scope; তার বাইরে
@@ -216,6 +220,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 4. `npm run integrity:check` চালাও — code বদলায়নি কি না দেখো।
 5. OpenCode বন্ধ করে আবার খোলো — persona/config load হবে।
 6. প্রথম উত্তরে "ভাইয়া" আর evidence label দেখো; না দেখলে handoff আবার করো।
+7. VS Code থেকে চালাতে চাইলে ACP client-এ `acp.autoApprovePermissions: "ask"` রাখো; `allowAll` দিয়ে `goal_contract` consent bypass কোরো না।
 
 <!-- INTEGRITY:START -->
 <div align="center">
@@ -224,8 +229,8 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  7d03a7dd8b11f64c89ff83792ef09f64b8b8c487cc9fec59b6305a20801991ea  ║
-║  files 116 · bytes 1172098 · base no-git · dirty                         ║
+║  root  f3ab8c210e0c30e2a702e4074e33d3692d981f564732cc1a3f3193d650fe9d09  ║
+║  files 119 · bytes 1204885 · base 7b9d1e2 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -233,7 +238,7 @@ agent-এর প্রতিটি দাবিও স্পষ্ট।
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T19:23:23.363Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T21:21:34.706Z
 
 </div>
 <!-- INTEGRITY:END -->

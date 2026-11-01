@@ -185,10 +185,12 @@ Two plugin-side layers sit around the model call:
   or a path without a line is a reference, not proof. A blocked answer is also
   a circuit-breaker event: the failure (agent, reason, violations, blocked text
   preview) is stored under `agent/breaker/<sessionID>`, the user gets a synthetic
-  status line, and the session is switched to the next untried roster agent with a
-  queued prompt that demands evidence. After three failed agents the breaker
-  opens with an unresolved message and concrete next steps instead of another
-  silent stop. The replacement message states what failed, that the agent has
+  status line, and the same agent retries with a queued prompt that demands
+  evidence. There is no `switchAgent`, no model switch and no delegation. The
+  same counter also receives a `goal_contract` FAIL, a contract rewrite block and
+  a documentation consistency failure. After three failures the breaker opens
+  with an unresolved message and concrete next steps instead of another silent
+  stop. The replacement message states what failed, that the agent has
   been stopped, and what the user can do next (supply evidence, ask for an
   explicitly unverified explanation, or start a new instruction). The
   replacement is terminal (`finish_reason: stop` for OpenAI Chat, `stop_reason:
@@ -491,8 +493,8 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  7d03a7dd8b11f64c89ff83792ef09f64b8b8c487cc9fec59b6305a20801991ea  ║
-║  files 116 · bytes 1172098 · base no-git · dirty                         ║
+║  root  f3ab8c210e0c30e2a702e4074e33d3692d981f564732cc1a3f3193d650fe9d09  ║
+║  files 119 · bytes 1204885 · base 7b9d1e2 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -500,7 +502,7 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T19:23:23.363Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T21:21:34.706Z
 
 </div>
 <!-- INTEGRITY:END -->

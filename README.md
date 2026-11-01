@@ -143,6 +143,13 @@ evidence presence যাচাই করে, বাস্তব সত্য ন
 - **Compact context pack** — প্রতিটি model call-এ provider পুরো repo বা পুরো
   history পায় না। Plugin `SSOT.md` + `syllabus.md` + recent memory মিলিয়ে একটি
   bounded pack inject করে (`src/zombie/context.ts`)।
+- **Project onboarding excerpt** — syllabus-এ `onboarding:<hash>` marker থাকলে
+  pack প্রতি turn-এ তার compact record দেখায়: project kind/version, root,
+  files/bytes, languages, top level, docs, tests, logs (বা `no .log files found`)
+  এবং evidence-backed gaps। Onboarding lesson সবসময় newest নয়, তাই শুধু newest
+  lesson দেখালে সেটি হারিয়ে যেত; এখন marker-যুক্ত সর্বশেষ onboarding আলাদা
+  block হিসেবে থাকে আর newest lesson-ও থাকে। Marker না থাকলে pack স্পষ্ট করে
+  বলে agent-কে আগে `Project brief` lesson লিখতে হবে।
 - **`context_status` tool** — agent substantive কাজ শুরুর আগে এই tool call করে
   UI-তে এক লাইন দেখায়: `Context: SSOT OK | Syllabus OK | Memory N recent / M archives | Pack NB`।
   তাই SSOT, syllabus ও memory manage হচ্ছে কিনা user সরাসরি দেখতে পায়।
@@ -162,11 +169,14 @@ evidence presence যাচাই করে, বাস্তব সত্য ন
   থাকে। Disable করতে config-এ `"responseGate": false` দিন।
 - **Circuit breaker** — গেট আটকালে উত্তরটি শুধু replace হয়ে থেমে যায় না:
   failure-এর কারণ ও context (`agent/breaker/<sessionID>`) storage-এ লেখা হয়, user
-  UI-তে synthetic status message যায়, session পরের roster agent-এ switch হয় এবং
-  একটি queued prompt দিয়ে একই কাজ প্রমাণসহ আবার শুরু হয় (`src/zombie/circuitBreaker.ts`)।
-  এভাবে সর্বোচ্চ ৩টি agent চেষ্টা করে; ৩টি ব্যর্থ হলে breaker খুলে user-কে স্পষ্ট
-  unresolved message দেয় — কী কী চেষ্টা হয়েছে, শেষ কারণ কী, আর এখন কী করা যায়
-  (প্রমাণ দিন / কাজ ছোট করুন / নতুন নির্দেশ / gate বন্ধ করে diagnosis)।
+  UI-তে synthetic status message যায়, এবং **একই agent** একটি queued prompt দিয়ে
+  প্রমাণসহ আবার চেষ্টা করে (`src/zombie/circuitBreaker.ts`)। কোনো `switchAgent`,
+  model switch বা অন্য agent-এ delegation নেই — দায়িত্ব একই agent-এর।
+  `goal_contract` close FAIL, contract rewrite block, response-gate block আর
+  documentation consistency fail একই session counter-এ যায়। ৩টি failure হলে
+  breaker খুলে user-কে স্পষ্ট unresolved message দেয় — শেষ কারণ কী, কী কী চেষ্টা
+  হয়েছে, আর এখন কী করা যায় (প্রমাণ দিন / কাজ ছোট করুন / নতুন নির্দেশ / gate বন্ধ
+  করে diagnosis)।
 - **Evidence path policy** — agent যেকোনো ফাইল পড়তে পারে, তাই gate path-কে
   sandbox করে না; শুধু যাচাই করে cited ফাইলটি সত্যিই আছে কি না। resolution order:
   working directory → OpenCode config/data root (`$XDG_CONFIG_HOME/opencode`,
@@ -925,6 +935,38 @@ Installer নতুন agent-এর markdown ও `opencode.json` entry তৈর
 Persona inject না হলে model generic উত্তর দেবে — এটা model-এর দোষ নয়, handoff-এর
 ঘাটতি। তাই প্রথমে handoff, তারপর code।
 
+### ৮.৭ VS Code ACP client — একই project-এ editor থেকে chat
+
+VS Code-এ OpenCode session দেখতে [`formulahendry.acp-client`](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client)
+ব্যবহার করা যায়। এটি OpenCode-কে ACP (Agent Client Protocol) server হিসেবে চালায়;
+আলাদা কোনো ZombieCoder server নয়।
+
+```jsonc
+// ~/.config/Code/User/settings.json
+{
+  "acp.agents": {
+    "OpenCode": {
+      "command": "/absolute/path/to/opencode", // `which opencode` 결과
+      "args": ["acp"],
+      "env": {}
+    }
+  },
+  "acp.autoApprovePermissions": "ask",
+  "acp.logTraffic": true
+}
+```
+
+- `acp.autoApprovePermissions` অবশ্যই `"ask"` রাখুন। `"allowAll"` দিলে
+  `goal_contract` open/close-এর native permission door চুপচাপ approve হয়ে যায়,
+  অর্থাৎ user consent ছাড়া contract খুলে/বন্ধ হয়ে যেতে পারে। Consent bypass করে
+  পাওয়া PASS প্রমাণ নয়।
+- ACP server **private**: `session/list` ও `session/load` saved session দেখতে পারে,
+  কিন্তু desktop app-এর live session-এর mirror নয়। এক পাশে করা change অন্য পাশে
+  reload ছাড়া দেখা নাও যেতে পারে।
+- Extension/test probe যা প্রমাণ করেছে: initialize, `session/list` (৩টি session),
+  `session/load` (model ও mode ফেরত)। VS Code UI-তে click-through test চালানো না
+  হলে সেটি `NOT_TESTED` — config থাকা মানেই editor path প্রমাণিত নয়।
+
 ---
 
 ## ৯. Agent roster
@@ -972,11 +1014,68 @@ Persona inject না হলে model generic উত্তর দেবে — �
 | `zombiecoder.agent_modes` | Agent mode দেখা/বদলানো |
 | `zombiecoder.reload` | Skills/tools/agent door reload |
 | `zombiecoder.http_probe` | HTTP status, body hash, redacted headers |
-| `zombiecoder.patch_preview` | Dry-run patch; apply-এ backup |
+| `zombiecoder.patch_preview` | Single-file exact-string dry-run; apply-এ `.zombiecoder/.state/backups` copy (native multi-file `patch` নয়) |
 | `zombiecoder.env_get` | Env presence, value leak ছাড়া |
 | `zombiecoder.service_probe` | Port/service reachability |
 
-মোট ২১টি tool। Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
+মোট ২১টি tool। Tool execute না হলে `৬.৫ Native tool calls` দেখুন।
+
+### Native `patch` বনাম MCP — ফাইল তৈরি ও এডিট
+
+**সংক্ষেপে:** `patch` কোনো MCP tool নয়। এটি OpenCode V2-এর built-in tool
+(`opencode.tool.patch`; UI/persistence-এ `apply_patch`), আর ইনপুট একটাই—
+`patchText`। `mcp/image-brand` (6 tools) ও `mcp/public-api` (8 tools)-এ কোনো
+`patch` নেই; দুটোই আলাদা কাজের server।
+
+**কোন model-এ দেখা যাবে:** OpenCode 2.2.5-এ tool list model-এর উপর নির্ভর করে।
+`model.id`-তে `gpt-` থাকলে (কিন্তু `oss` বা `gpt-4` নয়) `patch` থাকে এবং
+`edit`/`write` বাদ পড়ে; অন্য model-এ `patch` বাদ পড়ে, `edit`/`write` থাকে।
+তাই patch না দেখলে model বদলান—MCP config দিয়ে এটি যোগ করা যায় না। যাচাই:
+`opencode/flint-40b-free`-এর tool list-এ `patch` ছিল না; scripted
+`probe/gpt-5.1` model-এর tool list-এ `patch` ছিল এবং নিচের Add/Update/Delete/Move
+সবই বাস্তবে apply হয়েছে (model simulated, patch tool real)।
+
+এক `patchText`-এ একাধিক file Add/Update/Delete/Move করা যায়:
+
+```text
+*** Begin Patch
+*** Add File: src/new-file.ts
++export const value = 1;
+*** Update File: src/existing.ts
+@@
+-old line
++new line
+*** Update File: src/moved.ts
+*** Move to: src/moved-renamed.ts
+@@
+-old content
++new content
+*** Delete File: src/old-file.ts
+*** End Patch
+```
+
+নিয়ম ও ঝুঁকি:
+
+- `patch` আগে সব hunk verify করে, তারপর file-by-file apply করে। এটি fully
+  atomic নয়; কোথাও fail করলে message বলে `Completed before failure: ...`—
+  আগের file-গুলো ইতিমধ্যে বদলে যেতে পারে। বাস্তব পরীক্ষায় (scripted model,
+  real patch tool) `a.txt` বদলানোর পরে read-only `readonly.txt`-এ EACCES হলে
+  error ছিল `Failed to write readonly.txt: EACCES ... Completed before failure:
+  a.txt`; `a.txt` বদলেছিল, `readonly.txt` বদলায়নি।
+- `*** Move to:`-এর সঙ্গে অন্তত একটি non-empty hunk লাগে (2.2.5-এ শুধু
+  `*** Move to:` দিলে `Update file hunk ... is empty` error হয়)।
+- Automatic backup বা rollback নেই। Apply-এর আগে `git status` দেখুন, দরকারে
+  backup/copy নিন; apply-এর পরে `git diff` ও targeted test চালান।
+- Plugin-এর ledger guard `patchText`-এর ভিতরের target scan করে। কোনো
+  Add/Update/Delete/Move target `.zombiecoder/syllabus.md` হলে পুরো patch
+  block হয়—ledger লিখতে `append_syllabus` বা `goal_contract` ব্যবহার করুন।
+- এক ফাইলে exact string বদলাতে `patch_preview` dry-run প্রথমে চালান; apply
+  করলে সেটি `.zombiecoder/.state/backups`-এ copy রাখে। তবে এটি single-file,
+  multi-file `patch`-এর বিকল্প নয়।
+
+নিরাপদ workflow: **read → `patch_preview` (single-file) বা `patchText` পরিকল্পনা
+→ apply → `git diff` → targeted check → full check**। `patch` tool execute না
+হলে `৬.৫ Native tool calls` দেখুন।
 
 ### MCP — দুটি local server (installer নিজেই register করে)
 
@@ -991,6 +1090,8 @@ Installer clone থেকে চালালে এগুলো install root-এ
 
 `opencode mcp list` → `✓ image-brand connected`, `✓ public-api connected`।
 Install-এর পরে কনফিগ যাচাই: `node scripts/audit-install.mjs`।
+কোনো MCP server-এ `patch` tool নেই; multi-file edit OpenCode-এর native
+`patch` (উপরে দেখুন), আর `patch_preview` শুধু single-file।
 বিস্তারিত: [`mcp/image-brand/README.md`](mcp/image-brand/README.md),
 [`mcp/public-api/README.md`](mcp/public-api/README.md)।
 
@@ -1380,8 +1481,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  7d03a7dd8b11f64c89ff83792ef09f64b8b8c487cc9fec59b6305a20801991ea  ║
-║  files 116 · bytes 1172098 · base no-git · dirty                         ║
+║  root  f3ab8c210e0c30e2a702e4074e33d3692d981f564732cc1a3f3193d650fe9d09  ║
+║  files 119 · bytes 1204885 · base 7b9d1e2 · dirty                        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1389,7 +1490,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T19:23:23.363Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T21:21:34.706Z
 
 </div>
 <!-- INTEGRITY:END -->

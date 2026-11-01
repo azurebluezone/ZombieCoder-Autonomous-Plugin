@@ -19,11 +19,14 @@ export const CONTEXT_LIMITS = {
   // Only the slices an agent needs for the current task. The full SSOT and
   // syllabus stay on disk and are read on demand through tools.
   ssot: 900,
-  syllabus: 500,
+  syllabus: 450,
+  // The onboarding record is the project's identity, not the newest lesson.
+  // Keep it visible even after later agent notes push it up the append-only file.
+  onboarding: 650,
   focus: 600,
   memoryPerMessage: 180,
   memoryTotal: 500,
-  total: 2400,
+  total: 2800,
 } as const;
 
 // Which SSOT sections each role actually needs. A documentation agent does not
@@ -197,6 +200,57 @@ function ssotExcerpt(text: string, agentID: string): string {
   return clip(parts.join("\n\n"), CONTEXT_LIMITS.ssot);
 }
 
+const ONBOARDING_MARKER = /`onboarding:[a-f0-9]{12}`/;
+const ONBOARDING_FIELDS = [
+  /^- Project:/,
+  /^- Project root:/,
+  /^- Files \/ bytes:/,
+  /^- Languages:/,
+  /^- Top level:/,
+  /^- Docs:/,
+  /^- Tests:/,
+  /^- Logs:/,
+  /^- Markers:/,
+  /^- Git:/,
+];
+
+function onboardingSection(lines: string[], heading: string, limit: number): string[] {
+  const start = lines.findIndex((line) => line.trim() === heading);
+  if (start < 0) return [];
+  const out: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (!line) {
+      if (out.length > 0) break;
+      continue;
+    }
+    if (/^\*\*/.test(line)) break;
+    if (line.startsWith("- ")) out.push(line);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function onboardingExcerpt(lesson: string): string {
+  const lines = lesson.split(/\r?\n/);
+  const picked = lines
+    .filter((line) => ONBOARDING_FIELDS.some((pattern) => pattern.test(line)))
+    .map((line) => line.trim());
+  const logProblems = onboardingSection(lines, "**Log problems (tail)**", 2);
+  const gaps = onboardingSection(lines, "**Evidence-backed gaps**", 4);
+  const marker = lesson.match(ONBOARDING_MARKER)?.[0] ?? "";
+  return [
+    "### Project onboarding (current tree)",
+    "",
+    ...(marker ? [marker] : []),
+    ...picked,
+    ...(logProblems.length > 0 ? ["", ...logProblems] : []),
+    ...(gaps.length > 0 ? ["", "Gaps:", ...gaps] : []),
+    "",
+    "Agent duty: read the full lesson; if no `Project brief` lesson carries this marker, append one (kind, contents, logs/no logs, gaps, user expectation) before the first `goal_contract`.",
+  ].join("\n");
+}
+
 function syllabusExcerpt(text: string): string {
   // Lessons are the only syllabus content that changes per turn. The seed puts
   // its placeholder and signature above the first lesson, so slicing the raw
@@ -213,9 +267,20 @@ function syllabusExcerpt(text: string): string {
   if (lessons.length === 0) {
     return "No lessons yet; read the full syllabus with read_syllabus before work.";
   }
-  const newest = lessons[lessons.length - 1].trim();
+  const newestIndex = lessons.length - 1;
+  const newest = lessons[newestIndex].trim();
+  const onboardingIndex = lessons.findLastIndex((entry) => ONBOARDING_MARKER.test(entry));
   const header = `Newest of ${lessons.length} lessons (newest last). Full history: read_syllabus.`;
-  return clip(`${header}\n### ${newest}`, CONTEXT_LIMITS.syllabus);
+  const blocks: string[] = [];
+  if (onboardingIndex >= 0) {
+    blocks.push(clip(onboardingExcerpt(lessons[onboardingIndex]), CONTEXT_LIMITS.onboarding));
+  }
+  if (onboardingIndex !== newestIndex) {
+    blocks.push(clip(`${header}\n### ${newest}`, CONTEXT_LIMITS.syllabus));
+  } else if (onboardingIndex >= 0) {
+    blocks.push(header);
+  }
+  return blocks.join("\n\n");
 }
 
 function memorySummary(recent: MemoryMessage[]): string {

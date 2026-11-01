@@ -82,6 +82,7 @@ import {
   readBreakerState,
   statusMessage,
   unresolvedMessage,
+  type BreakerFailure,
 } from "./zombie/circuitBreaker.ts";
 import { registerRpc, registerTools, audit } from "./zombie/server.ts";
 
@@ -95,6 +96,63 @@ export const TRANSFORM_APPLY_TIMEOUT_MS = 15000;
 // Tools that change the project. A read-only investigation may run before a
 // goal contract; a write may not.
 const MUTATING_TOOLS = new Set(["edit", "write", "patch", "multiedit", "apply_patch"]);
+
+// `patch` carries its file list inside patchText, not in filePath. The ledger
+// guard must see every target or a multi-file patch becomes a way around it.
+function patchTargets(input: Record<string, unknown>): string[] {
+  const patchText = typeof input.patchText === "string" ? input.patchText : "";
+  if (!patchText) return [];
+  const out: string[] = [];
+  for (const match of patchText.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) {
+    out.push(match[1].trim());
+  }
+  for (const match of patchText.matchAll(/^\*\*\* Move to: (.+)$/gm)) {
+    out.push(match[1].trim());
+  }
+  return out;
+}
+
+type ContractOutcome = {
+  status: "PASS" | "FAIL" | "BLOCKED";
+  id?: string;
+  reason?: string;
+  check?: string;
+  expected?: string;
+  exitCode?: number;
+  observed?: string;
+};
+
+/**
+ * Read the goal_contract result from the tool hook. The tool transform wraps
+ * the spec result as `{ output }`, but the host has shipped both shapes, so
+ * accept `result.output`, `result`, and `output` without guessing.
+ */
+function contractOutcome(event: any): ContractOutcome | null {
+  const raw = [event?.result?.output, event?.result, event?.output];
+  for (const item of raw) {
+    let value: any = item;
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        continue;
+      }
+    }
+    if (!value || typeof value !== "object") continue;
+    const status = String(value.status ?? "").toUpperCase();
+    if (status !== "PASS" && status !== "FAIL" && status !== "BLOCKED") continue;
+    return {
+      status,
+      id: typeof value.id === "string" ? value.id : undefined,
+      reason: typeof value.reason === "string" ? value.reason : undefined,
+      check: typeof value.check === "string" ? value.check : undefined,
+      expected: typeof value.expected === "string" ? value.expected : undefined,
+      exitCode: typeof value.exitCode === "number" ? value.exitCode : undefined,
+      observed: typeof value.observed === "string" ? value.observed : undefined,
+    };
+  }
+  return null;
+}
 
 export type ZombieConfig = {
   customProviderUrl: string;
@@ -1090,6 +1148,12 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     }
   };
 
+  // The breaker lives inside the session-hook block, but the tool hook is a
+  // separate block. This door keeps one implementation instead of duplicating it.
+  let contractFailureDoor:
+    | ((input: { sessionID: string; agentID: string; outcome: ContractOutcome }) => Promise<void>)
+    | null = null;
+
   if (ctx.session?.hook) {
     const contextHook = await stepAsync("hook-context", () =>
       ctx.session!.hook!("context", async (event: any) => {
@@ -1337,35 +1401,26 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     if (sessionHook) cleanups.push(() => sessionHook.dispose());
 
     // ---- circuit breaker ---------------------------------------------------
-    // A blocked answer is a recorded failure, not a dead end. The session moves
-    // to the next roster agent (queued prompt) up to BREAKER_LIMIT times, then
-    // the breaker opens with an actionable message instead of silently stopping.
+    // No handoff, no model switch: one agent owns the failure and retries with
+    // the evidence attached. After BREAKER_LIMIT failures the breaker stops and
+    // tells the user exactly what is missing.
     const breakerInflight = new Set<string>();
 
-    const escalateGateBlock = async (input: {
+    const runBreaker = async (input: {
       sessionID: string;
       agentID: string;
-      model?: string;
-      protocol: string;
+      failure: BreakerFailure;
       blockedText: string;
-      verdict: { reason: string; violations: string[]; matched: string[] };
+      queueRetry: boolean;
+      model?: string;
+      source: "response_gate" | "contract_failure" | "docs_failure";
+      extra?: Record<string, unknown>;
     }) => {
-      const { sessionID, agentID, model } = input;
+      const { sessionID, agentID, failure, model } = input;
       if (!sessionID || sessionID === "unknown") return;
       if (breakerInflight.has(sessionID)) return;
       const projectRoot = await resolveSessionRoot(sessionID);
       const session = ctx.session as any;
-      const available = Boolean(session?.synthetic && session?.prompt);
-      const failure = {
-        agent: agentID,
-        kind: "response_gate" as const,
-        reason: input.verdict.reason,
-        at: new Date().toISOString(),
-        context: breakerContext(input.verdict, input.blockedText, {
-          model,
-          detail: `protocol=${input.protocol}`,
-        }),
-      };
       const key = `agent/breaker/${sessionID}`;
       breakerInflight.add(sessionID);
       try {
@@ -1377,19 +1432,21 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           sessionID,
           agent: agentID,
           model,
-          source: "response_gate",
+          source: input.source,
           reason: failure.reason,
           violations: failure.context?.violations,
+          detail: failure.context?.detail,
           failures: nextState.failures.length,
           limit: BREAKER_LIMIT,
+          ...input.extra,
         });
-        if (!available) {
+        if (typeof session?.synthetic !== "function") {
           audit(projectRoot, "plugin", {
             kind: "agent.escalation",
             sessionID,
             from: agentID,
             ok: false,
-            reason: "session.synthetic/prompt unavailable",
+            reason: "session.synthetic unavailable",
           });
           return;
         }
@@ -1415,17 +1472,29 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           text: statusMessage(failure, decision),
           description: "zombiecoder circuit breaker",
         });
-        await session.prompt({
-          sessionID,
-          text: retryPrompt(failure, input.blockedText, decision),
-          delivery: "queue",
-        });
+        if (input.queueRetry) {
+          if (typeof session?.prompt !== "function") {
+            audit(projectRoot, "plugin", {
+              kind: "agent.escalation",
+              sessionID,
+              from: agentID,
+              ok: false,
+              reason: "session.prompt unavailable",
+            });
+            return;
+          }
+          await session.prompt({
+            sessionID,
+            text: retryPrompt(failure, input.blockedText, decision),
+            delivery: "queue",
+          });
+        }
         audit(projectRoot, "plugin", {
           kind: "agent.escalation",
           sessionID,
           from: agentID,
           to: agentID,
-          action: "retry",
+          action: input.queueRetry ? "retry" : "continue",
           attempt: decision.attempt,
           limit: decision.limit,
           ok: true,
@@ -1444,6 +1513,72 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         breakerInflight.delete(sessionID);
       }
     };
+
+    const escalateGateBlock = async (input: {
+      sessionID: string;
+      agentID: string;
+      model?: string;
+      protocol: string;
+      blockedText: string;
+      verdict: { reason: string; violations: string[]; matched: string[] };
+    }) => {
+      const failure: BreakerFailure = {
+        agent: input.agentID,
+        kind: "response_gate",
+        reason: input.verdict.reason,
+        at: new Date().toISOString(),
+        context: breakerContext(input.verdict, input.blockedText, {
+          model: input.model,
+          detail: `protocol=${input.protocol}`,
+        }),
+      };
+      await runBreaker({
+        sessionID: input.sessionID,
+        agentID: input.agentID,
+        failure,
+        blockedText: input.blockedText,
+        queueRetry: true,
+        model: input.model,
+        source: "response_gate",
+      });
+    };
+
+    const escalateContractFailure = async (input: {
+      sessionID: string;
+      agentID: string;
+      outcome: ContractOutcome;
+    }) => {
+      const { outcome } = input;
+      const detail = [
+        outcome.id ? `contract=${outcome.id}` : "",
+        outcome.status ? `status=${outcome.status}` : "",
+        outcome.check ? `check=${outcome.check}` : "",
+        typeof outcome.exitCode === "number" ? `exit=${outcome.exitCode}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const docsCheck = /docs[:_-]?check/i.test(outcome.check ?? "");
+      const failure: BreakerFailure = {
+        agent: input.agentID,
+        kind: docsCheck ? "docs_failure" : "contract_failure",
+        reason: outcome.reason || `goal_contract ${outcome.id ?? ""} ${outcome.status}`,
+        at: new Date().toISOString(),
+        context: {
+          detail,
+          blockedPreview: String(outcome.observed ?? "").slice(0, 240),
+        },
+      };
+      await runBreaker({
+        sessionID: input.sessionID,
+        agentID: input.agentID,
+        failure,
+        blockedText: outcome.observed ?? "",
+        queueRetry: false,
+        source: docsCheck ? "docs_failure" : "contract_failure",
+        extra: { contract: outcome.id, expected: outcome.expected },
+      });
+    };
+    contractFailureDoor = escalateContractFailure;
 
     // Hard response gate: only the primary assistant answer is gated. Title,
     // compaction and generate calls are internal and must stay untouched.
@@ -1590,17 +1725,22 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         const agentID = String(event?.agent ?? "unknown");
         const projectRoot = await resolveSessionRoot(sessionID);
         const input = (event?.input ?? {}) as Record<string, unknown>;
-        const target = String(input.filePath ?? input.path ?? input.file ?? "").replace(/\\/g, "/");
-        if (/\.zombiecoder\/syllabus\.md$/i.test(target)) {
+        const fileTarget = String(input.filePath ?? input.path ?? input.file ?? "").replace(/\\/g, "/");
+        const targets = [fileTarget, ...patchTargets(input)]
+          .filter((value) => value.length > 0)
+          .map((value) => value.replace(/\\/g, "/"));
+        const ledger = targets.find((value) => /(?:^|\/)\.zombiecoder\/syllabus\.md$/i.test(value));
+        if (ledger) {
           audit(projectRoot, agentID, {
             kind: "goal_contract.block",
             sessionID,
             tool,
-            target,
+            target: ledger,
+            targets,
             reason: "syllabus ledger is plugin-owned",
           });
           throw new Error(
-            "syllabus.md is the append-only goal ledger; use append_syllabus or goal_contract, not edit/write",
+            "syllabus.md is the append-only goal ledger; use append_syllabus or goal_contract, not edit/write/patch",
           );
         }
         const syllabus = readSyllabus(projectRoot) ?? "";
@@ -1609,7 +1749,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           kind: "goal_contract.block",
           sessionID,
           tool,
-          target,
+          target: targets[0] ?? "",
+          targets,
           reason: "no open goal contract",
         });
         throw new Error(
@@ -1643,6 +1784,41 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           status: event?.status ?? "unknown",
           consecutiveFailures: count,
         });
+
+        // A goal_contract FAIL is a real failed attempt, not a successful tool
+        // call that happens to contain the word FAIL. Feed it into the same
+        // same-agent breaker so a rewritten expectation cannot pass quietly.
+        const contract =
+          String(event?.tool ?? "").toLowerCase() === "goal_contract"
+            ? contractOutcome(event)
+            : null;
+        if (contract) {
+          const breakerKey = `agent/breaker/${sessionID}`;
+          audit(projectRoot, agentID, {
+            kind: "agent.contract_result",
+            sessionID,
+            contract: contract.id,
+            status: contract.status,
+            reason: contract.reason,
+            check: contract.check,
+            exitCode: contract.exitCode,
+          });
+          if (contract.status === "PASS") {
+            if (await ctx.storage.get(breakerKey)) {
+              await ctx.storage.set(breakerKey, readBreakerState(undefined, sessionID));
+            }
+          } else if (contractFailureDoor) {
+            await contractFailureDoor({ sessionID, agentID, outcome: contract });
+          } else {
+            audit(projectRoot, agentID, {
+              kind: "agent.escalation",
+              sessionID,
+              from: agentID,
+              ok: false,
+              reason: "breaker unavailable; goal_contract failure not counted",
+            });
+          }
+        }
 
         if (!failed || count < 3 || previous?.escalated) return;
 

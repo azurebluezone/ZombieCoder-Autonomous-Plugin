@@ -16,6 +16,15 @@ export type GoalContractFields = {
   check: string;
   pass: string;
   match: MatchMode;
+  /** v2 contracts are closed under the immutable-expected guard. */
+  guard: string;
+};
+
+export type FailedContract = {
+  id: string;
+  check: string;
+  expected: string;
+  match: MatchMode;
 };
 
 export type CheckResult = {
@@ -41,6 +50,27 @@ function stripAnsi(value: string): string {
 export function normalizeMatch(value: unknown): MatchMode {
   const mode = String(value ?? "").trim().toLowerCase();
   return (MATCH_MODES as string[]).includes(mode) ? (mode as MatchMode) : "contains";
+}
+
+/** A check command's identity: no wrapping backticks, no incidental spacing. */
+export function normalizeCommand(value: unknown): string {
+  return String(value ?? "")
+    .replace(/^`+/, "")
+    .replace(/`+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function expectedKey(expected: string, mode: MatchMode): string {
+  const value = String(expected ?? "").trim();
+  if (mode === "json") {
+    try {
+      return "json:" + JSON.stringify(canon(JSON.parse(value)));
+    } catch {
+      // validateExpected rejects this at open; keep the comparison literal.
+    }
+  }
+  return `${mode}:${value}`;
 }
 
 /** Compile-time validation so a broken contract fails at open, not at close. */
@@ -97,6 +127,7 @@ export function parseContract(syllabus: string, id: string): GoalContractFields 
     check: field("check"),
     pass: field("pass"),
     match: normalizeMatch(field("match")),
+    guard: field("guard"),
   };
 }
 
@@ -127,16 +158,11 @@ export type OpenContract = {
   session: string;
 };
 
-/**
- * Contracts opened in a session whose result block is still missing. The
- * syllabus is the ledger: open appends a block, close appends `<id> — result`.
- * Anything else (a chat claim, an agent's memory) is not evidence.
- */
-export function openContracts(syllabus: string, sessionID?: string): OpenContract[] {
-  const wanted = String(sessionID ?? "").trim();
-  const text = String(syllabus ?? "");
-  const blocks: Array<{ id: string; result: boolean; fields: Record<string, string> }> = [];
-  let current: (typeof blocks)[number] | null = null;
+type ContractBlock = { id: string; result: boolean; fields: Record<string, string> };
+
+function contractBlocks(text: string): ContractBlock[] {
+  const blocks: ContractBlock[] = [];
+  let current: ContractBlock | null = null;
   for (const line of text.split(/\r?\n/)) {
     const heading = /^### Goal Contract (gc-[A-Za-z0-9]+)( — result)?[ \t]*$/.exec(line);
     if (heading) {
@@ -154,6 +180,17 @@ export function openContracts(syllabus: string, sessionID?: string): OpenContrac
     if (field) current.fields[field[1]] = field[2].replace(/^`+|`+$/g, "").trim();
   }
   if (current) blocks.push(current);
+  return blocks;
+}
+
+/**
+ * Contracts opened in a session whose result block is still missing. The
+ * syllabus is the ledger: open appends a block, close appends `<id> — result`.
+ * Anything else (a chat claim, an agent's memory) is not evidence.
+ */
+export function openContracts(syllabus: string, sessionID?: string): OpenContract[] {
+  const wanted = String(sessionID ?? "").trim();
+  const blocks = contractBlocks(String(syllabus ?? ""));
   const closed = new Set(blocks.filter((block) => block.result).map((block) => block.id));
   return blocks
     .filter((block) => !block.result && !closed.has(block.id))
@@ -164,6 +201,34 @@ export function openContracts(syllabus: string, sessionID?: string): OpenContrac
       goal: block.fields.goal ?? "",
       session: block.fields.session ?? "",
     }));
+}
+
+/**
+ * The exact gaming pattern this guard exists for: a contract FAILED, then a new
+ * contract reuses the same check command with a different expected value so the
+ * failed output becomes a pre-registered PASS. A FAIL verdict is evidence; it
+ * cannot be rewritten by editing the expectation. Retrying the same check with
+ * the same expected remains allowed after a real code fix.
+ */
+export function failedExpectedRewrite(
+  syllabus: string,
+  candidate: { id?: string; check: string; expected: string; match: MatchMode },
+): FailedContract | null {
+  const check = normalizeCommand(candidate.check);
+  if (!check) return null;
+  const wanted = expectedKey(candidate.expected, candidate.match);
+  for (const block of contractBlocks(String(syllabus ?? ""))) {
+    if (!block.result || block.fields.status !== "FAIL") continue;
+    if (candidate.id && block.id === candidate.id) continue;
+    const priorCheck = normalizeCommand(block.fields.command ?? block.fields.check ?? "");
+    if (!priorCheck || priorCheck !== check) continue;
+    const priorExpected = String(block.fields.expected ?? "").trim();
+    const priorMode = normalizeMatch(block.fields.match);
+    if (expectedKey(priorExpected, priorMode) !== wanted) {
+      return { id: block.id, check: priorCheck, expected: priorExpected, match: priorMode };
+    }
+  }
+  return null;
 }
 
 /** First JSON object/array in the text, balanced and string-aware. */

@@ -22,6 +22,7 @@ import { keepTransform, type TransformDoor } from "./transform.ts";
 import { buildContextPack, resolveAllowedPath } from "./context.ts";
 import {
   contractStatus,
+  failedExpectedRewrite,
   matches,
   normalizeMatch,
   parseContract,
@@ -416,7 +417,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "goal_contract",
       description:
-        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code, with the user's explicit consent. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and a match mode (contains|equals|regex|json); it shows a Bengali preview card in the session UI, then asks the user through the native permission door. In that dialog Allow once approves this goal, Allow always approves later opens in this project, and Reject writes nothing and returns status=rejected. close shows its own preview and asks again (per contract), then RUNS the recorded check command in the project root (120s cap) and matches the real output against the recorded expected value; PASS only when the exit code is 0 and the output matches. close proposes no saved pattern, so Allow always cannot skip the next close. Agent-supplied observed/exitCode are saved as a claim and never trusted. A mismatch, empty output or failed command is FAIL, so a mock cannot be tuned to the expected result afterwards. Without an approval the tool writes and runs nothing; the agent must hand over instead of self-closing.",
+        "Pre-register a task's expected outcome in the append-only syllabus BEFORE writing code, with the user's explicit consent. open needs the real user input, an observable expected output (not 'tests pass'), the check command, pass criteria and a match mode (contains|equals|regex|json); it shows a Bengali preview card in the session UI, then asks the user through the native permission door. In that dialog Allow once approves this goal, Allow always approves later opens in this project, and Reject writes nothing and returns status=rejected. close shows its own preview and asks again (per contract), then RUNS the recorded check command in the project root (120s cap) and matches the real output against the recorded expected value; PASS only when the exit code is 0 and the output matches. close proposes no saved pattern, so Allow always cannot skip the next close. Agent-supplied observed/exitCode are saved as a claim and never trusted. A mismatch, empty output or failed command is FAIL, so a mock cannot be tuned to the expected result afterwards. After a FAIL, a new contract may reuse the same check only with the same expected; a different expected is rejected as a rewrite (v2 contracts enforce this again at close). A FAIL result is fed into the same-agent circuit breaker; there is no delegation. Without an approval the tool writes and runs nothing; the agent must hand over instead of self-closing.",
       input: {
         type: "object" as const,
         properties: {
@@ -474,6 +475,22 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
           const mode = normalizeMatch(text("match"));
           const expectedError = validateExpected(expected, mode);
           if (expectedError) throw new Error(expectedError);
+          const currentSyllabus = readSyllabus(projectRoot) ?? "";
+          const rewrite = failedExpectedRewrite(currentSyllabus, { check, expected, match: mode });
+          if (rewrite) {
+            audit(projectRoot, "goal_contract", {
+              kind: "goal_contract.rewrite_block",
+              status: "rejected",
+              prior: rewrite.id,
+              check,
+              priorExpected: rewrite.expected,
+              expected,
+            });
+            throw new Error(
+              `goal_contract open rejected: ${rewrite.id} already FAILED with the same check and a different expected (${rewrite.expected}). ` +
+                "A FAIL verdict cannot be rewritten. Keep that expected and fix the real output, or use a different check command.",
+            );
+          }
           // Human-readable card: the user must see what the agent understood
           // before any code is written. Shown as a synthetic session message so
           // it appears in the UI, not only inside a file.
@@ -556,6 +573,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             `- check: \`${check}\``,
             `- pass: ${pass}`,
             `- match: ${mode}`,
+            `- guard: v2`,
           ].join("\n");
           const written = appendSyllabus(projectRoot, `Goal Contract ${id}`, summary, auditFile(projectRoot));
           audit(projectRoot, "goal_contract", {
@@ -590,6 +608,56 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
               next: "Do not ask for consent again. Open a new contract for a new goal.",
             };
           }
+          const sessionID = String(context?.sessionID ?? "").trim();
+          // Defense in depth for v2 contracts: even if an open block predates
+          // the open guard, a post-FAIL expected rewrite cannot be closed PASS.
+          const rewrite = contract.guard === "v2"
+            ? failedExpectedRewrite(syllabus, {
+                id,
+                check: contract.check,
+                expected: contract.expected,
+                match: mode,
+              })
+            : null;
+          if (rewrite) {
+            audit(projectRoot, "goal_contract", {
+              kind: "goal_contract.rewrite_block",
+              status: "blocked",
+              id,
+              prior: rewrite.id,
+              check: contract.check,
+              priorExpected: rewrite.expected,
+              expected: contract.expected,
+            });
+            let uiShown = false;
+            if (sessionID && deps.synthetic) {
+              try {
+                await deps.synthetic({
+                  sessionID,
+                  description: "goal contract blocked",
+                  text: [
+                    `⛔ Goal Contract ${id} — blocked`,
+                    "",
+                    `আগের contract \`${rewrite.id}\` একই check দিয়ে FAIL হয়েছে (expected: ${rewrite.expected})।`,
+                    `এখন expected বদলে \`${contract.expected}\` দেওয়া হয়েছে — এটা FAIL-এর ফল পুনর্লিখন।`,
+                    "",
+                    "contract খোলাই আছে। আসল output ঠিক করো, অথবা ভিন্ন check command দিয়ে নতুন contract খোলো।",
+                  ].join("\n"),
+                });
+                uiShown = true;
+              } catch {
+                uiShown = false;
+              }
+            }
+            return {
+              id,
+              status: "blocked",
+              ran: false,
+              uiShown,
+              reason: `expected rewritten after ${rewrite.id} FAILED with the same check`,
+              next: "Do not rewrite the expected value. Fix the real output under the recorded expectation, or open a new contract with a different check command.",
+            };
+          }
           // The user must see what will be executed before the native dialog.
           const closePreview = [
             "🧭 শেষ ধাপ — গোল বন্ধ করার আগে",
@@ -603,7 +671,6 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
             "👍 permission dialog-এ: Allow once = চেক চালাও; Allow always চাপলেও close-এর জন্য কিছু সেভ হয় না, পরের close-এ আবার জিজ্ঞেস করব; Reject = চেক চলবে না।",
             "✋ Reject দিলে contract খোলাই থাকবে, ফল লেখা হবে না।",
           ].join("\n");
-          const sessionID = String(context?.sessionID ?? "").trim();
           let previewShown = false;
           if (sessionID && deps.synthetic) {
             try {

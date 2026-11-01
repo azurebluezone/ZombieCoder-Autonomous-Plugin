@@ -577,7 +577,7 @@ test("setup scaffolds .zombiecoder, writes agent markdown, and registers doors",
       goal: "rejected goal must not be recorded",
       input: "check-order.mjs",
       expected: "whatever",
-      check: "node check-order.mjs",
+      check: 'node -e "console.log(\'rejected-check\')"',
       pass: "should never run",
     },
     { sessionID: "ses_goal" },
@@ -828,6 +828,63 @@ test("three consecutive tool errors stop the same agent without switching", asyn
   await cleanup();
 });
 
+test("a goal_contract FAIL feeds the same-agent breaker without switching", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const after = fake.toolHooks["execute.after"];
+  assert.equal(typeof after, "function", "tool failure hook was not registered");
+
+  const event = (status: "PASS" | "FAIL") => ({
+    status: "completed",
+    sessionID: "ses_contract",
+    agent: "halim",
+    tool: "goal_contract",
+    id: "call-goal",
+    result: {
+      output: {
+        id: "gc-test",
+        status,
+        reason: status === "FAIL" ? "observed output does not match expected (contains)" : undefined,
+        check: "bash verify.sh",
+        expected: "ALL_OK",
+        exitCode: status === "FAIL" ? 1 : 0,
+        observed: status === "FAIL" ? "NO" : "ALL_OK",
+      },
+    },
+  });
+
+  for (let index = 0; index < 2; index += 1) await after(event("FAIL"));
+  assert.equal(
+    fake.synthetics.filter((entry) => entry.description === "zombiecoder circuit breaker").length,
+    2,
+    "each failed contract attempt is visible to the user",
+  );
+  assert.deepEqual(fake.agentSwitches, [], "no agent handoff");
+  assert.deepEqual(fake.modelSwitches, [], "no model switch");
+  assert.equal(fake.prompts.length, 0, "a tool-level FAIL does not queue a duplicate prompt");
+
+  await after(event("FAIL"));
+  const stopped = fake.synthetics.filter(
+    (entry) => entry.description === "zombiecoder circuit breaker",
+  );
+  assert.equal(stopped.length, 3);
+  assert.match(stopped[2].text, /কাজটি সমাধান হয়নি/);
+  assert.match(stopped[2].text, /contract=gc-test/);
+  assert.deepEqual(fake.agentSwitches, [], "the breaker never hands the task to another agent");
+
+  const audit = fs.readFileSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl"), "utf8");
+  assert.match(audit, /"kind":"agent\.contract_result"/);
+  assert.match(audit, /"source":"contract_failure"/);
+  assert.match(audit, /"kind":"agent\.breaker\.open"/);
+
+  await after(event("PASS"));
+  const reset = fake.storage.get("agent/breaker/ses_contract") as { failures?: unknown[] };
+  assert.equal(reset?.failures?.length, 0, "a PASS contract resets the same session breaker");
+
+  await cleanup();
+});
+
 test("a write without an open goal contract is blocked and audited", async () => {
   const root = tempProject();
   const fake = makeContext(root);
@@ -877,6 +934,56 @@ test("a write without an open goal contract is blocked and audited", async () =>
     agent: "manu",
     tool: "edit",
     input: { filePath: "src/a.ts" },
+  });
+  await cleanup();
+});
+
+test("a multi-file patch cannot hand-write the syllabus ledger", async () => {
+  const root = tempProject();
+  const fake = makeContext(root);
+  const cleanup = await setup(fake.ctx);
+  const before = fake.toolHooks["execute.before"];
+  assert.equal(typeof before, "function", "tool before hook was not registered");
+  fs.appendFileSync(
+    path.join(root, ".zombiecoder", "syllabus.md"),
+    "\n### Goal Contract gc-testopen\n\n- status: open\n- session: ses_patch\n- goal: test\n",
+  );
+
+  await assert.rejects(
+    before({
+      sessionID: "ses_patch",
+      agent: "manu",
+      tool: "patch",
+      input: {
+        patchText: [
+          "*** Begin Patch",
+          "*** Update File: src/a.ts",
+          "@@",
+          "-old",
+          "+new",
+          "*** Update File: .zombiecoder/syllabus.md",
+          "@@",
+          "-status: open",
+          "+status: PASS",
+          "*** End Patch",
+        ].join("\n"),
+      },
+    }),
+    /append-only goal ledger/,
+    "the patch target list must be inspected, not just filePath",
+  );
+  const audit = fs.readFileSync(path.join(root, ".zombiecoder", ".state", "audit.jsonl"), "utf8");
+  assert.match(audit, /"tool":"patch"/);
+  assert.match(audit, /"target":"\.zombiecoder\/syllabus\.md"/);
+  assert.match(audit, /"reason":"syllabus ledger is plugin-owned"/);
+
+  await before({
+    sessionID: "ses_patch",
+    agent: "manu",
+    tool: "patch",
+    input: {
+      patchText: "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch",
+    },
   });
   await cleanup();
 });

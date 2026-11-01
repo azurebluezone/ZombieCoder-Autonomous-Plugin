@@ -102,7 +102,7 @@ export function renderSyllabusSeed(fp: Fingerprint, agentIds: string[]): string 
     `8. Never lie. Admit a mistake; an honest "I don't know" beats a confident guess.`,
     `9. Read the directory and this syllabus before writing; do not rely on memory.`,
     `10. Shortest evidence-backed answer wins. Send only the necessary context to the provider.`,
-    `11. Every agent is a main agent; delegate with a named teammate and minimal context.`,
+    `11. Every agent is a main agent; the same agent owns the task and its failures. There is no handoff to another agent.`,
     `12. Before work, read the input intake (§5) and the SSOT: locate the files bound to the request, then start. Planning stays at the goal-contract level; no long planning loops between syllabus and conversation.`,
     ``,
     `## 5. Input intake`,

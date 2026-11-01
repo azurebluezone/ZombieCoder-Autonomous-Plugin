@@ -31,6 +31,7 @@ import {
 import { isStandInPath } from "./responseGate.ts";
 import { syntaxCheck } from "./lsp.ts";
 import { ensureOnboarding } from "./onboarding.ts";
+import { buildDesignSketch, reviewDesign } from "./design.ts";
 import {
   autoInstallSkills,
   installSharedSkill,
@@ -392,8 +393,24 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       },
       run: (input: any, context?: ToolContextLike) => {
         if (!input?.topic || !input?.summary) throw new Error("topic and summary are required");
+        const topic = String(input.topic).trim();
+        const summary = String(input.summary);
+        if (/[\r\n]/.test(topic)) throw new Error("topic must be one line");
+        // goal_contract open/close appends its own ledger blocks through the
+        // function. Letting the generic lesson tool mint a "— result" heading
+        // would let an agent write its own PASS without the permission door.
+        if (
+          /^Goal Contract\b/i.test(topic) ||
+          summary
+            .split(/\r?\n/)
+            .some((line) => /^#{1,6}\s*Goal Contract\b/i.test(line.trim()))
+        ) {
+          throw new Error(
+            "append_syllabus cannot write a Goal Contract block; goal_contract open/close owns that ledger",
+          );
+        }
         const projectRoot = rootFor(context);
-        return appendSyllabus(projectRoot, input.topic, input.summary, auditFile(projectRoot));
+        return appendSyllabus(projectRoot, topic, summary, auditFile(projectRoot));
       },
     },
     {
@@ -729,6 +746,37 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
       run: (_input: any, context?: ToolContextLike) => scanProject(rootFor(context)),
     },
     {
+      name: "design_sketch",
+      description:
+        "Stitch stage 1: write a real design sketch before code. Produces .zombiecoder/design/<id>/sketch.md (journey, ASCII wireframe, loading/empty/error/success matrix, tokens, WCAG 2.2 AA checklist) and design.json. site: ecommerce | hospital | lms | generic. Follow it with design_review after the markup exists.",
+      input: {
+        type: "object" as const,
+        properties: {
+          brief: { type: "string", description: "What the interface must do, in the user's words." },
+          brand: { type: "string", description: "Site/brand name." },
+          site: { type: "string", enum: ["ecommerce", "hospital", "lms", "generic"] },
+          screens: { type: "array", items: { type: "string" }, description: "Screen names, primary first." },
+          output: { type: "string", description: "Optional directory relative to the project root." },
+        },
+        required: ["brief"],
+        additionalProperties: false,
+      },
+      run: (input: any, context?: ToolContextLike) => buildDesignSketch(rootFor(context), input ?? {}),
+    },
+    {
+      name: "design_review",
+      description:
+        "Stitch stage 3: review real markup/CSS and return file:line findings for missing alt text, unnamed buttons, removed focus rings, missing lang/viewport, absent loading/empty/error/success states and missing design tokens. Regex heuristic, not a browser or contrast engine; high findings must be fixed before claiming the design is done.",
+      input: {
+        type: "object" as const,
+        properties: {
+          target: { type: "string", description: "File or directory relative to the project root. Default: '.'" },
+        },
+        additionalProperties: false,
+      },
+      run: (input: any, context?: ToolContextLike) => reviewDesign(rootFor(context), String(input?.target ?? ".")),
+    },
+    {
       name: "project_onboarding",
       description:
         "First-input project audit. Reads the tree, manifests, docs, tests, log files, open TODO/FIXME markers and recent audit failures; checks which stack skills are installed; appends ONE evidence lesson per file tree to the syllabus (idempotent by an onboarding:<hash> marker) and returns the evidence plus the manual checklist. Call it on the first user input of a session, then read the docs/code yourself, compare the user's expectation with the documented scope, append the human judgement with append_syllabus and install missing skills before the first goal_contract. The tool records facts; it cannot judge whether the docs are true.",
@@ -1047,7 +1095,7 @@ export function toolSpecs(deps: SurfaceDeps): ToolSpec[] {
     {
       name: "skill_catalog",
       description:
-        "List or install shared runtime skills. The catalog covers Laravel, Node, Next, Python, FastAPI, cPanel, resource optimization, server operations, first-principles and evidence-before-confidence. Skills live once at <install>/zombiecoder/skills, shared by every working directory. When the user names a skill or domain, call action=install with its id: the file is fetched from the gate/git catalog if missing, copied into the shared store, and the skill registry reloads. action=auto detects the current project's stack and installs those ids into the same shared store.",
+        "List or install shared runtime skills. The catalog covers Laravel, Node, Next, Python, FastAPI, cPanel, UI/UX, resource optimization, server operations, first-principles and evidence-before-confidence. Installing writes OpenCode's native global skill at <install>/skills/<name>/SKILL.md (name matches the folder, description 1-1024 chars) plus a legacy flat copy, so the skill loads in every working directory. When the user names a skill or domain, call action=install with its id: the file is fetched from the gate/git catalog if missing, written natively, and the skill registry reloads. action=auto detects the current project's stack and installs those ids.",
       input: {
         type: "object" as const,
         properties: {

@@ -33,19 +33,19 @@ test("system and tool rows are not conversation memory", () => {
   assert.equal(isArchivableRole("assistant"), true);
 });
 
-test("archive keeps dialogue only, newest five stay in RAM", async () => {
+test("archive keeps the full dialogue only, newest ten stay in RAM", async () => {
   const { root, storage } = memory();
   const messages = [
     { role: "system", text: "tool catalog noise" },
-    ...Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", text: `turn ${i + 1}` })),
+    ...Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", text: `turn ${i + 1}` })),
     { role: "tool", text: "shell output" },
   ];
   const result = await keepRecent(storage, root, "ses_dialogue", messages);
-  assert.equal(result.kept, 5);
-  assert.equal(result.archived, 3);
+  assert.equal(result.kept, 10);
+  assert.equal(result.archived, 12);
   const raw = fs.readFileSync(result.archiveFile, "utf8").trim().split("\n");
   const archived = raw.flatMap((line) => JSON.parse(line).archived);
-  assert.equal(archived.length, 3);
+  assert.equal(archived.length, 12);
   assert.ok(archived.every((m: any) => m.role === "user" || m.role === "assistant"));
   assert.ok(!archived.some((m: any) => m.text.includes("catalog") || m.text.includes("shell output")));
   fs.rmSync(root, { recursive: true, force: true });

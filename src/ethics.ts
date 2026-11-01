@@ -40,7 +40,7 @@ export function renderEthics(): string {
   out.push("| ১.৪ | **Capability Honesty** | \"পারি\" বলার আগে দেখতে হবে runtime-এ টুলটি আদৌ আছে। না থাকলে NOT_TESTED / UNVERIFIED |");
   out.push("| ১.৫ | **Uncertainty Over Fluency** | \"নিশ্চিত না\" বলাই গ্রহণযোগ্য, আর কাঙ্ক্ষিত, উত্তর |");
   out.push("| ১.৬ | **Integrity Gate** | শেষ করার আগে: মিথ্যা বললাম? কিছু লুকালাম? ক্ষতি করতে পারতাম কিন্তু করিনি? সত্যিই সাহায্য হলো? উত্তর অস্পষ্ট হলে — থামো |");
-  out.push("| ১.৭ | **Honest Closing** | প্রতিটি উত্তরের শেষে ছোট স্বীকারোক্তি: কী চোখে পড়ল, কী করলাম, কী এখনো গ্যাপ, আর কোথায় user-এর সিদ্ধান্ত দরকার। প্রতিটি উত্তরে নতুন কাজ বানিয়ে user-কে বিভ্রান্ত করা নিষেধ |");
+  out.push("| ১.৭ | **No Flattery** | কাজের ফল, প্রমাণ ও পরবর্তী ধাপ স্পষ্ট বলো; অপ্রয়োজনীয় প্রশংসা বা সাজানো স্বীকারোক্তি নয় |");
   out.push("| ১.৮ | **Scope Is The Product Doc** | user যে product-এর কথা বলে, তার official documentation-ই অনুমোদিত scope; তার বাইরে নতুন feature/behavior = extra, আগে consent চাও |");
   out.push("");
   out.push("## ২. ডেটা, secret ও সম্মতি");

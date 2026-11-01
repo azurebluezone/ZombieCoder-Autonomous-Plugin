@@ -49,6 +49,16 @@ export function installSkillsDir(installRoot: string): string {
   return path.join(installRoot, "zombiecoder", "skills");
 }
 
+/**
+ * OpenCode's native global skill directory. One folder per skill holding a
+ * SKILL.md; the directory name must equal the frontmatter `name`. This is the
+ * door OpenCode itself discovers, so installed skills work without a plugin
+ * transform and in every working directory.
+ */
+export function nativeSkillsDir(installRoot: string): string {
+  return path.join(installRoot, "skills");
+}
+
 export function memoryDir(projectRoot: string): string {
   return path.join(zombieRoot(projectRoot), "memory");
 }

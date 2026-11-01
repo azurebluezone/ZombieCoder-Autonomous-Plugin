@@ -15,6 +15,7 @@
 // `modelStrategy: "random"` when they explicitly want random mapping.
 
 import type { AgentDef } from "../roster.ts";
+import { isLocalBaseUrl, type LocalProvider } from "./runnerIdentity.ts";
 import {
   BASELINE_MODEL,
   DEFAULT_CUSTOM_PROVIDER_ID,
@@ -68,6 +69,10 @@ export type ModelPlan = {
   probe: ProbeResult;
   candidates: string[];
   assignment: Record<string, string>;
+  /** Proof for the live runner identity: catalog refs at cost 0/0. */
+  freeRefs: string[];
+  /** Proof for "local model": providers whose baseURL is loopback/LAN. */
+  localProviders: LocalProvider[];
   notes: string[];
 };
 
@@ -344,6 +349,12 @@ export async function resolveModels(
 
   const catalog = await readCatalog(doors);
   const defaultModel = await readDefaultModel(doors);
+  // Catalog facts for the live runner identity. They are computed once here and
+  // cached by the setup closure, so the per-request context hook never re-reads
+  // the catalog.
+  const localProviders: LocalProvider[] = catalog.providers
+    .filter((p) => isLocalBaseUrl(p.baseURL))
+    .map((p) => ({ providerID: p.providerID, baseURL: p.baseURL }));
   // A free model from the *custom* provider is still the custom provider: if its
   // server is down, or its context window is too small, assigning it to agents
   // is the same failure. Free fallback means OpenCode's own catalog. Anchor on
@@ -475,6 +486,8 @@ export async function resolveModels(
     probe,
     candidates,
     assignment,
+    freeRefs: freeAll.map((m) => m.ref),
+    localProviders,
     notes,
   };
 }

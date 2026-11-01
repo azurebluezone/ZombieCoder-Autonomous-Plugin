@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 const execFileAsync = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PIPELINE = path.join(HERE, "pipeline.py");
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const DEFAULT_OUT = process.env.IMAGE_BRAND_DIR || path.join(os.homedir(), ".local", "share", "zombie-image-brand");
 const MAX_BYTES = 30 * 1024 * 1024;
 const UA = `image-brand-mcp/${VERSION} (local; +https://opencode.ai)`;
@@ -143,6 +143,46 @@ export const TOOLS = [
         output_dir: { type: "string" },
       },
       required: ["items"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "web_decorate",
+    description:
+      "Build a small, real site decoration pack for ecommerce, hospital, LMS or generic sites: <site>-named logo PNG, hero, OG card, card images, index.html, styles.css and decorate.json. Optional data.wiki / data.country pulls live public-API facts with source URLs. Use image_search → image_fetch → web_decorate; no model is called. Every generated file has a sha256 in the manifest.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        site: { type: "string", enum: ["ecommerce", "hospital", "lms", "generic"] },
+        brand: { type: "string", minLength: 1 },
+        headline: { type: "string", minLength: 1 },
+        subheadline: { type: "string" },
+        kicker: { type: "string" },
+        accent: { type: "string", default: "#e6b43c" },
+        logo: { type: "string", description: "Optional PNG logo; otherwise a wordmark named <slug>-logo.png is generated." },
+        images: { type: "array", maxItems: 4, items: { type: "string" }, description: "Local image paths. First is hero; next three become card images." },
+        cards: {
+          type: "array",
+          maxItems: 6,
+          items: {
+            type: "object",
+            properties: { title: { type: "string" }, body: { type: "string" }, meta: { type: "string" } },
+            required: ["title"],
+            additionalProperties: false,
+          },
+        },
+        data: {
+          type: "object",
+          properties: {
+            wiki: { type: "string", description: "Wikipedia page title, e.g. Dhaka." },
+            wiki_lang: { type: "string", default: "en" },
+            country: { type: "string", description: "Country name for capital/currency/flag facts." },
+          },
+          additionalProperties: false,
+        },
+        output_dir: { type: "string" },
+      },
+      required: ["site", "brand", "headline"],
       additionalProperties: false,
     },
   },
@@ -498,7 +538,7 @@ export async function fitImage(input = {}) {
 }
 
 async function runPipeline(spec) {
-  const outDir = path.dirname(spec.output);
+  const outDir = spec.output ? path.dirname(spec.output) : path.resolve(spec.output_dir || DEFAULT_OUT);
   await fsp.mkdir(outDir, { recursive: true });
   const specFile = path.join(outDir, `.image-brand-${Date.now()}-${process.pid}.json`);
   await fsp.writeFile(specFile, JSON.stringify(spec, null, 2) + "\n");
@@ -544,6 +584,554 @@ export async function brandBatch(input = {}) {
   return { ...manifest, manifest: manifestFile };
 }
 
+const SITE_PROFILES = {
+  ecommerce: {
+    label: "অনলাইন দোকান",
+    nav: ["হোম", "পণ্য", "অফার"],
+    section: "আজকের বাছাই",
+    cta: "এখনই অর্ডার করুন",
+    cards: [
+      { title: "তাজা সবজি", body: "প্রতিদিন সকালে বাগান থেকে বাছাই করা।", meta: "৳ ৮০ / কেজি" },
+      { title: "হাতে বানানো মিষ্টি", body: "ছোট ব্যাচ, সংরক্ষক ছাড়া।", meta: "৳ ৩২০ / বক্স" },
+      { title: "ঘরের মসলা", body: "শীতল পাথরে ভাঙা, খাঁটি মিশ্রণ।", meta: "৳ ২৪০ / ২৫০ গ্রাম" },
+    ],
+  },
+  hospital: {
+    label: "হাসপাতাল ও ক্লিনিক",
+    nav: ["হোম", "বিভাগ", "ডাক্তার"],
+    section: "আমাদের বিভাগ",
+    cta: "অ্যাপয়েন্টমেন্ট নিন",
+    cards: [
+      { title: "মেডিসিন", body: "জ্বর, সংক্রমণ ও দীর্ঘমেয়াদি রোগের পরামর্শ।", meta: "শনি–বৃহস্পতি · ৯টা–৫টা" },
+      { title: "শিশু বিভাগ", body: "নবজাতক থেকে কিশোর — টিকা ও বৃদ্ধি পর্যবেক্ষণ।", meta: "প্রতিদিন · ১০টা–২টা" },
+      { title: "ল্যাব", body: "রক্ত, ইউরিন ও ইসিজি — একই দিনে রিপোর্ট।", meta: "সকাল ৮টা–রাত ৮টা" },
+    ],
+  },
+  lms: {
+    label: "অনলাইন লার্নিং",
+    nav: ["হোম", "কোর্স", "প্রগ্রেস"],
+    section: "শুরু করার কোর্স",
+    cta: "কোর্স শুরু করুন",
+    cards: [
+      { title: "Python দিয়ে শুরু", body: "ভেরিয়েবল থেকে প্রথম CLI — হাতে-কলমে।", meta: "১২ লেসন · ৩ ঘণ্টা" },
+      { title: "Web Foundations", body: "HTML, CSS আর accessibility-র শক্ত ভিত।", meta: "১০ লেসন · ২.৫ ঘণ্টা" },
+      { title: "Regex, ভয় ছাড়া", body: "১০ accept, ১০ reject — pattern আগে, কোড পরে।", meta: "৮ লেসন · ২ ঘণ্টা" },
+    ],
+  },
+  generic: {
+    label: "আমাদের কাজ",
+    nav: ["হোম", "সেবা", "যোগাযোগ"],
+    section: "যা আমরা করি",
+    cta: "শুরু করুন",
+    cards: [
+      { title: "পরিকল্পনা", body: "লক্ষ্য, সীমা আর যাচাইয়ের মাপ আগে ঠিক করি।", meta: "ধাপ ১" },
+      { title: "বাস্তবায়ন", body: "ছোট, যাচাইযোগ্য পরিবর্তনে কাজ এগোয়।", meta: "ধাপ ২" },
+      { title: "প্রমাণ", body: "ফলাফল দেখাই — দাবি নয়, artifact দিই।", meta: "ধাপ ৩" },
+    ],
+  },
+};
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+
+function safeHttps(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function slugify(value) {
+  const slug = String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/g, "");
+  return slug || "site";
+}
+
+async function fetchWiki(title, lang = "en") {
+  const code = /^[a-z]{2,3}$/.test(String(lang)) ? String(lang) : "en";
+  const slug = encodeURIComponent(String(title).trim().replace(/\s+/g, "_"));
+  const data = await fetchJson(`https://${code}.wikipedia.org/api/rest_v1/page/summary/${slug}`);
+  return {
+    title: data?.title ?? String(title),
+    description: data?.description ?? null,
+    extract: data?.extract ?? null,
+    url: safeHttps(data?.content_urls?.desktop?.page) ?? `https://${code}.wikipedia.org/`,
+    thumbnail: safeHttps(data?.thumbnail?.source),
+    license: "CC BY-SA 4.0",
+    source: `https://${code}.wikipedia.org`,
+  };
+}
+
+async function fetchCountry(name) {
+  const data = await fetchJson(
+    "https://countriesnow.space/api/v0.1/countries/info?returns=currency,flag,capital",
+  );
+  if (data?.error) throw new Error(String(data.msg ?? "country provider error"));
+  const needle = String(name).toLowerCase();
+  const row = (data?.data ?? []).find((entry) => String(entry?.name ?? "").toLowerCase() === needle)
+    ?? (data?.data ?? []).find((entry) => String(entry?.name ?? "").toLowerCase().includes(needle));
+  if (!row) throw new Error(`country not found: ${name}`);
+  return {
+    name: row.name,
+    capital: row.capital ?? null,
+    currency: row.currency ?? null,
+    flag: safeHttps(row.flag),
+    iso2: row.iso2 ?? null,
+    source: "https://countriesnow.space",
+  };
+}
+
+function renderCards(profile, cards, slug, fixture) {
+  const cardImages = Array.isArray(fixture?.files?.cards) ? fixture.files.cards : [];
+  return cards
+    .map((card, index) => {
+      const image = cardImages[index]
+        ? `<img src="./${escapeHtml(path.basename(cardImages[index]))}" alt="${escapeHtml(card.title)}" width="640" height="420" loading="lazy">`
+        : "";
+      return [
+        '<article class="card">',
+        image,
+        '<div class="card-body">',
+        `<h3>${escapeHtml(card.title)}</h3>`,
+        card.body ? `<p>${escapeHtml(card.body)}</p>` : "",
+        card.meta ? `<p class="meta">${escapeHtml(card.meta)}</p>` : "",
+        "</div>",
+        "</article>",
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+function renderFacts(data) {
+  const facts = [];
+  if (data?.wiki) {
+    const extract = String(data.wiki.extract ?? "").slice(0, 280);
+    facts.push(
+      [
+        '<article class="fact">',
+        `<h3>${escapeHtml(data.wiki.title)}</h3>`,
+        extract ? `<p>${escapeHtml(extract)}${data.wiki.extract.length > 280 ? "…" : ""}</p>` : "",
+        `<p class="source"><a href="${escapeHtml(data.wiki.url)}" rel="noopener noreferrer">Wikipedia</a> · ${escapeHtml(data.wiki.license)}</p>`,
+        "</article>",
+      ].join("\n"),
+    );
+  }
+  if (data?.country) {
+    const flag = data.country.flag
+      ? `<img src="${escapeHtml(data.country.flag)}" alt="${escapeHtml(data.country.name)}-এর পতাকা" width="48" height="32" loading="lazy">`
+      : "";
+    facts.push(
+      [
+        '<article class="fact">',
+        `<h3>${flag} ${escapeHtml(data.country.name)}</h3>`,
+        `<dl><dt>রাজধানী</dt><dd>${escapeHtml(data.country.capital ?? "—")}</dd><dt>মুদ্রা</dt><dd>${escapeHtml(data.country.currency ?? "—")}</dd></dl>`,
+        `<p class="source">${escapeHtml(data.country.source)}</p>`,
+        "</article>",
+      ].join("\n"),
+    );
+  }
+  return facts.join("\n");
+}
+
+function renderStyle(accent) {
+  return `:root {
+  --accent: ${accent};
+  --surface: #f8fafc;
+  --ink: #0f172a;
+  --muted: #475569;
+  --line: #e2e8f0;
+  --radius: 14px;
+  --space: 4px;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: "Noto Sans Bengali", "Hind Siliguri", system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.6;
+}
+
+a { color: inherit; }
+
+img { max-width: 100%; display: block; }
+
+.skip {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  background: var(--ink);
+  color: #fff;
+  padding: 12px 18px;
+  z-index: 10;
+}
+
+.skip:focus { left: 12px; top: 12px; }
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 5);
+  padding: calc(var(--space) * 4) calc(var(--space) * 6);
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.brand img { width: 150px; height: auto; }
+
+nav { display: flex; gap: calc(var(--space) * 4); margin-left: auto; }
+
+nav a { text-decoration: none; color: var(--muted); font-weight: 600; }
+
+nav a:hover { color: var(--ink); }
+
+.cta {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #10131a;
+  font-weight: 700;
+  text-decoration: none;
+  border: 2px solid transparent;
+}
+
+.cta-small { padding: 8px 16px; min-height: 40px; }
+
+.ghost {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  color: #fff;
+  text-decoration: none;
+}
+
+.hero {
+  background-image: linear-gradient(90deg, rgba(9, 13, 22, 0.72), rgba(9, 13, 22, 0.18)), var(--hero);
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+  min-height: min(78vh, 680px);
+  display: flex;
+  align-items: flex-end;
+}
+
+.hero-inner { padding: clamp(24px, 6vw, 88px); max-width: 900px; }
+
+.kicker { text-transform: uppercase; letter-spacing: 0.14em; color: var(--accent); font-weight: 700; margin: 0 0 12px; }
+
+h1 { font-size: clamp(2rem, 5vw, 4rem); line-height: 1.12; margin: 0 0 16px; }
+
+.sub { font-size: clamp(1rem, 2vw, 1.3rem); color: #e5e7eb; max-width: 62ch; margin: 0 0 28px; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+main section { padding: clamp(32px, 6vw, 72px) clamp(20px, 6vw, 88px); }
+
+.cards h2, .data h2, .states h2 { font-size: clamp(1.4rem, 3vw, 2rem); margin: 0 0 24px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+
+.card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+
+.card img { aspect-ratio: 640 / 420; object-fit: cover; width: 100%; }
+
+.card-body { padding: 20px; }
+
+.card h3 { margin: 0 0 8px; font-size: 1.15rem; }
+
+.card p { margin: 0; color: var(--muted); }
+
+.card .meta { margin-top: 14px; color: var(--ink); font-weight: 700; }
+
+.data { background: #fff; border-top: 1px solid var(--line); }
+
+.facts { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+.fact { border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+
+.fact h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
+
+.fact dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
+
+.fact dt { color: var(--muted); }
+
+.fact dd { margin: 0; font-weight: 600; }
+
+.source { font-size: 0.85rem; color: var(--muted); margin: 12px 0 0; }
+
+.states { border-top: 1px solid var(--line); }
+
+.state-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+
+.state-buttons button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.state-buttons button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #10131a; font-weight: 700; }
+
+.state-panel { border: 1px dashed var(--line); border-radius: var(--radius); padding: 18px; background: #fff; }
+
+footer { padding: 32px clamp(20px, 6vw, 88px); color: var(--muted); border-top: 1px solid var(--line); }
+
+@media (max-width: 720px) {
+  .site-header { flex-wrap: wrap; }
+  nav { order: 3; width: 100%; overflow-x: auto; margin-left: 0; }
+  .cta-small { margin-left: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+`;
+}
+
+function renderHtml({ profile, brand, headline, subheadline, kicker, slug, cards, facts, site, fixture }) {
+  const links = profile.nav.map((item) => `<a href="#main">${escapeHtml(item)}</a>`).join("");
+  const bodyFacts = facts
+    ? `<section id="data" class="data" aria-labelledby="data-title"><h2 id="data-title">তথ্যকোষ</h2><div class="facts">${facts}</div></section>`
+    : "";
+  return `<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(brand)} — ${escapeHtml(headline)}</title>
+<meta name="description" content="${escapeHtml(subheadline || headline)}">
+<meta property="og:title" content="${escapeHtml(brand)}">
+<meta property="og:description" content="${escapeHtml(subheadline || headline)}">
+<meta property="og:image" content="./${escapeHtml(slug)}-og.jpg">
+<link rel="icon" href="./${escapeHtml(slug)}-logo.png">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<a class="skip" href="#main">মূল কনটেন্টে যান</a>
+<header class="site-header">
+  <a class="brand" href="#main"><img src="./${escapeHtml(slug)}-logo.png" alt="${escapeHtml(brand)}" width="180" height="45"></a>
+  <nav aria-label="প্রধান নেভিগেশন">${links}</nav>
+  <a class="cta cta-small" href="#cards">${escapeHtml(profile.cta)}</a>
+</header>
+<main id="main">
+  <section class="hero" style="--hero: url('./${escapeHtml(slug)}-hero.jpg')">
+    <div class="hero-inner">
+      <p class="kicker">${escapeHtml(kicker || profile.label)}</p>
+      <h1>${escapeHtml(headline)}</h1>
+      <p class="sub">${escapeHtml(subheadline || profile.label)}</p>
+      <div class="actions">
+        <a class="cta" href="#cards">${escapeHtml(profile.cta)}</a>
+        <a class="ghost" href="#data">আরও জানুন</a>
+      </div>
+    </div>
+  </section>
+  <section id="cards" class="cards" aria-labelledby="cards-title">
+    <h2 id="cards-title">${escapeHtml(profile.section)}</h2>
+    <div class="grid">
+${renderCards(profile, cards, slug, fixture)}
+    </div>
+  </section>
+  ${bodyFacts}
+  <section id="states" class="states" aria-labelledby="states-title">
+    <h2 id="states-title">অবস্থা দেখুন</h2>
+    <div class="state-buttons" role="group" aria-label="ইন্টারফেস অবস্থা">
+      <button type="button" data-demo-state="loading" aria-pressed="false">loading</button>
+      <button type="button" data-demo-state="empty" aria-pressed="false">empty</button>
+      <button type="button" data-demo-state="error" aria-pressed="false">error</button>
+      <button type="button" data-demo-state="success" aria-pressed="false">success</button>
+    </div>
+    <p class="state-panel" id="demo-panel" aria-live="polite">সব ঠিক আছে — একটি অবস্থা বেছে নিন।</p>
+  </section>
+</main>
+<footer>
+  <p>${escapeHtml(brand)} · ${escapeHtml(profile.label)} · ${escapeHtml(site)}</p>
+</footer>
+<script>
+const copy = {
+  loading: "লোড হচ্ছে… কার্ডের জায়গা ধরে রাখা হয়েছে।",
+  empty: "এখনো কিছু নেই। ফিল্টার বদলান বা নতুন কিছু যোগ করুন।",
+  error: "অনুরোধ ব্যর্থ হয়েছে। আবার চেষ্টা করুন; সমস্যা থাকলে যোগাযোগ করুন।",
+  success: "সফল হয়েছে। পরের ধাপে যান।"
+};
+const panel = document.getElementById("demo-panel");
+for (const button of document.querySelectorAll("[data-demo-state]")) {
+  button.addEventListener("click", () => {
+    const state = button.dataset.demoState;
+    panel.textContent = copy[state];
+    panel.dataset.state = state;
+    for (const other of document.querySelectorAll("[data-demo-state]")) {
+      other.setAttribute("aria-pressed", String(other === button));
+    }
+  });
+}
+</script>
+</body>
+</html>
+`;
+}
+
+export async function webDecorate(input = {}) {
+  const site = String(input.site ?? "").toLowerCase();
+  const profile = SITE_PROFILES[site];
+  if (!profile) throw new Error("site must be ecommerce, hospital, lms or generic");
+  const brand = String(input.brand ?? "").trim();
+  const headline = String(input.headline ?? "").trim();
+  if (!brand) throw new Error("brand is required");
+  if (!headline) throw new Error("headline is required");
+  const accent = String(input.accent ?? "#e6b43c").trim();
+  if (!/^#[0-9a-f]{6}$/i.test(accent)) throw new Error("accent must be #rrggbb");
+
+  const slug = slugify(brand);
+  const dir = path.resolve(input.output_dir || path.join(DEFAULT_OUT, "web", slug));
+  await fsp.mkdir(dir, { recursive: true });
+
+  const images = (Array.isArray(input.images) ? input.images : [])
+    .map((entry) => path.resolve(String(entry)))
+    .slice(0, 4);
+  for (const image of images) if (!fs.existsSync(image)) throw new Error(`image not found: ${image}`);
+  let logo = null;
+  if (input.logo) {
+    logo = path.resolve(String(input.logo));
+    if (!fs.existsSync(logo)) throw new Error(`logo not found: ${logo}`);
+  }
+
+  const providedCards = Array.isArray(input.cards) ? input.cards : [];
+  if (providedCards.length > 6) throw new Error("at most 6 cards");
+  const cards = (providedCards.length > 0 ? providedCards : profile.cards).map((card, index) => ({
+    title: String(card?.title ?? `কার্ড ${index + 1}`).trim(),
+    body: String(card?.body ?? "").trim(),
+    meta: String(card?.meta ?? "").trim(),
+  }));
+
+  const data = {};
+  const dataErrors = [];
+  if (input.data?.wiki) {
+    try {
+      data.wiki = await fetchWiki(input.data.wiki, input.data.wiki_lang || "en");
+    } catch (error) {
+      dataErrors.push({ source: "wikipedia", error: String(error?.message ?? error) });
+    }
+  }
+  if (input.data?.country) {
+    try {
+      data.country = await fetchCountry(input.data.country);
+    } catch (error) {
+      dataErrors.push({ source: "countriesnow", error: String(error?.message ?? error) });
+    }
+  }
+
+  const fixture = await runPipeline({
+    op: "decorate",
+    site,
+    brand,
+    headline,
+    subheadline: String(input.subheadline ?? "").trim(),
+    kicker: String(input.kicker ?? "").trim(),
+    accent,
+    logo,
+    images,
+    output_dir: dir,
+  });
+
+  const htmlFile = path.join(dir, "index.html");
+  const cssFile = path.join(dir, "styles.css");
+  const manifestFile = path.join(dir, "decorate.json");
+  const css = renderStyle(accent);
+  const html = renderHtml({
+    profile,
+    brand,
+    headline,
+    subheadline: String(input.subheadline ?? "").trim(),
+    kicker: String(input.kicker ?? "").trim(),
+    slug,
+    cards,
+    facts: renderFacts(data),
+    site,
+    fixture,
+  });
+  await fsp.writeFile(htmlFile, html, "utf8");
+  await fsp.writeFile(cssFile, css, "utf8");
+
+  const manifest = {
+    ok: true,
+    tool: "web_decorate",
+    version: VERSION,
+    site,
+    brand,
+    slug,
+    created: fixture.created,
+    files: {
+      html: htmlFile,
+      css: cssFile,
+      logo: fixture.files.logo,
+      hero: fixture.files.hero,
+      og: fixture.files.og,
+      cards: fixture.files.cards,
+      manifest: manifestFile,
+    },
+    hashes: {
+      ...fixture.hashes,
+      cards: fixture.card_hashes ?? [],
+      html: createHash("sha256").update(html).digest("hex"),
+      css: createHash("sha256").update(css).digest("hex"),
+    },
+    inputs: {
+      images: images.map((image) => ({
+        path: image,
+        sha256: createHash("sha256").update(fs.readFileSync(image)).digest("hex"),
+      })),
+      logo: logo ? { path: logo, sha256: createHash("sha256").update(fs.readFileSync(logo)).digest("hex") } : null,
+    },
+    cards,
+    data,
+    data_errors: dataErrors,
+    license_note:
+      "Wikipedia text is CC BY-SA 4.0 and is linked in the page; country facts come from countriesnow.space. Input images keep their own licence sidecars.",
+  };
+  await fsp.writeFile(manifestFile, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  return {
+    ...fixture,
+    files: manifest.files,
+    hashes: manifest.hashes,
+    cards: cards.length,
+    data,
+    data_errors: dataErrors,
+    manifest: manifestFile,
+  };
+}
+
+
 export async function handleRpc(request) {
   const { id, method, params } = request ?? {};
   if (method === "initialize") {
@@ -573,6 +1161,7 @@ export async function handleRpc(request) {
       else if (name === "image_brand") result = await brandImage(args);
       else if (name === "image_fit") result = await fitImage(args);
       else if (name === "image_batch") result = await brandBatch(args);
+      else if (name === "web_decorate") result = await webDecorate(args);
       else throw new Error(`unknown tool ${JSON.stringify(name)}`);
       return {
         jsonrpc: "2.0",

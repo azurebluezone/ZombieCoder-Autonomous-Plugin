@@ -106,6 +106,19 @@ test("installer never writes provider/undefined when /models is empty", async ()
           fs.readFileSync(path.join(root, ".zombiecoder", "config.json"), "utf8"),
         );
         assert.equal(zombiecoder.installMode, "project");
+
+        // The bundled MCP servers answered a real tools/list handshake.
+        assert.match(result.stdout, /verify MCP tools \(stdio\).*image-brand=6/);
+        // Native global skill: SKILL.md, not only the legacy flat file.
+        const nativeSkill = path.join(
+          root,
+          ".opencode",
+          "skills",
+          "first-principles",
+          "SKILL.md",
+        );
+        assert.ok(fs.existsSync(nativeSkill), "native first-principles/SKILL.md missing");
+        assert.match(fs.readFileSync(nativeSkill, "utf8"), /^name: first-principles$/m);
       } finally {
         fs.rmSync(root, { recursive: true, force: true });
       }

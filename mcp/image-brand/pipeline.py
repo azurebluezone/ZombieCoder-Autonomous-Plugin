@@ -20,7 +20,7 @@ from pathlib import Path
 
 from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps, features
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 BENGALI = re.compile(r"[\u0980-\u09FF]")
 DEFAULT_BN_FONT = "/usr/share/fonts/truetype/noto/NotoSansBengali-Bold.ttf"
 DEFAULT_BN_FONT_REGULAR = "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf"
@@ -455,13 +455,185 @@ def fit_image(spec: dict) -> dict:
     return fixture
 
 
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")
+    return (slug[:48] or "site").strip("-")
+
+
+def cover_image(path: Path, width: int, height: int) -> Image.Image:
+    source = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    return ImageOps.fit(source, (width, height), method=Image.LANCZOS, centering=(0.5, 0.5)).convert("RGBA")
+
+
+def gradient_canvas(width: int, height: int, accent: tuple[int, int, int], site: str) -> Image.Image:
+    canvas = Image.new("RGBA", (width, height), (10, 16, 28, 255))
+    draw = ImageDraw.Draw(canvas)
+    top = (18 + accent[0] // 8, 22 + accent[1] // 8, 34 + accent[2] // 8)
+    bottom = (7, 10, 18)
+    for y in range(height):
+        blend = y / max(1, height - 1)
+        color = tuple(round(top[i] * (1 - blend) + bottom[i] * blend) for i in range(3))
+        draw.line([(0, y), (width, y)], fill=color + (255,))
+    # Large translucent shapes give the placeholder depth without stock art.
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    shape = ImageDraw.Draw(layer)
+    shape.ellipse([width * 0.62, -height * 0.25, width * 1.05, height * 0.55], fill=accent + (54,))
+    shape.ellipse([-width * 0.18, height * 0.45, width * 0.35, height * 1.1], fill=accent + (38,))
+    if site == "hospital":
+        shape.rounded_rectangle([width * 0.72, height * 0.52, width * 0.88, height * 0.9], radius=18, fill=(255, 255, 255, 18))
+    elif site == "lms":
+        for i in range(3):
+            shape.rounded_rectangle(
+                [width * 0.7, height * (0.5 + i * 0.12), width * 0.92, height * (0.56 + i * 0.12)],
+                radius=12,
+                fill=(255, 255, 255, 22),
+            )
+    else:
+        shape.rounded_rectangle([width * 0.7, height * 0.58, width * 0.93, height * 0.84], radius=22, fill=(255, 255, 255, 20))
+    return Image.alpha_composite(canvas, layer)
+
+
+def draw_hero_text(canvas: Image.Image, engine: TextEngine, spec: dict, margin: int, max_width: int) -> None:
+    kicker = str(spec.get("kicker") or spec.get("site") or "site").upper()
+    headline = str(spec.get("headline") or spec.get("brand") or "").strip()
+    subheadline = str(spec.get("subheadline") or "").strip()
+    accent = ImageColor.getrgb(str(spec.get("accent") or "#e6b43c"))
+    draw = ImageDraw.Draw(canvas)
+    bottom = canvas.height - margin
+    kicker_size = max(22, round(canvas.width * 0.017))
+    engine.draw_line((margin, bottom - round(canvas.height * 0.30)), kicker, kicker_size, True, accent + (255,))
+    title_size, title_lines = engine.fit(
+        headline,
+        list(range(min(92, round(canvas.width * 0.058)), 39, -4)),
+        True,
+        max_width,
+        3,
+        canvas.height * 0.28,
+    )
+    sub_size = max(24, round(title_size * 0.42))
+    sub_lines = engine.wrap(subheadline, sub_size, False, max_width) if subheadline else []
+    block = len(title_lines) * round(title_size * 1.24) + (len(sub_lines) * round(sub_size * 1.32) + round(sub_size * 0.5) if sub_lines else 0)
+    y = bottom - block
+    for line in title_lines:
+        engine.draw_line((margin, y), line, title_size, True, (255, 255, 255, 255))
+        y += round(title_size * 1.24)
+    if sub_lines:
+        y += round(sub_size * 0.5)
+        for line in sub_lines:
+            engine.draw_line((margin, y), line, sub_size, False, (229, 231, 235, 255))
+            y += round(sub_size * 1.32)
+    draw.line([(margin, bottom + round(margin * 0.25)), (margin + round(canvas.width * 0.18), bottom + round(margin * 0.25))], fill=accent + (255,), width=max(4, round(canvas.width * 0.003)))
+
+
+def decorate(spec: dict) -> dict:
+    brand = str(spec.get("brand") or "").strip()
+    if not brand:
+        fail("brand is required")
+    site = str(spec.get("site") or "generic").lower()
+    if site not in ("ecommerce", "hospital", "lms", "generic"):
+        fail("site must be ecommerce, hospital, lms or generic")
+    out_dir = Path(spec.get("output_dir") or ".").expanduser()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    slug = slugify(brand)
+    accent_value = str(spec.get("accent") or "#e6b43c")
+    try:
+        accent = ImageColor.getrgb(accent_value)
+    except ValueError:
+        fail(f"invalid accent {accent_value!r}; use #rrggbb")
+    margin = 72
+    files: dict[str, object] = {}
+
+    # Logo: always written as <slug>-logo.png, whether supplied or generated.
+    logo_path = out_dir / f"{slug}-logo.png"
+    if spec.get("logo"):
+        supplied = Path(str(spec["logo"])).expanduser()
+        if not supplied.is_file():
+            fail(f"logo not found: {supplied}")
+        logo = Image.open(supplied).convert("RGBA")
+        logo.thumbnail((640, 160), Image.LANCZOS)
+        canvas = Image.new("RGBA", (720, 180), (0, 0, 0, 0))
+        canvas.alpha_composite(logo, ((720 - logo.width) // 2, (180 - logo.height) // 2))
+    else:
+        canvas = Image.new("RGBA", (720, 180), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+        draw.rounded_rectangle([8, 38, 112, 142], radius=26, fill=accent + (255,))
+        mark_font = load_font(DEFAULT_LATIN_FONT, 52)
+        box = draw.textbbox((0, 0), "ZC", font=mark_font)
+        draw.text((60 - (box[2] - box[0]) / 2 - box[0], 90 - (box[3] - box[1]) / 2 - box[1]), "ZC", font=mark_font, fill=(18, 20, 26, 255))
+        engine = TextEngine(spec, draw)
+        size, lines = engine.fit(brand, list(range(66, 27, -2)), True, 570, 1, 140)
+        engine.draw_line((138, 52), lines[0], size, True, (255, 255, 255, 255))
+    canvas.save(logo_path)
+    files["logo"] = str(logo_path)
+
+    # Hero: supplied photo gets a scrim; with no photo a branded gradient is
+    # still a real image, not a broken <img>.
+    hero_w, hero_h = 1600, 900
+    images = [Path(str(entry)).expanduser() for entry in (spec.get("images") or []) if str(entry).strip()]
+    for image in images:
+        if not image.is_file():
+            fail(f"image not found: {image}")
+    if images:
+        hero = cover_image(images[0], hero_w, hero_h)
+    else:
+        hero = gradient_canvas(hero_w, hero_h, accent, site)
+    gradient_band(hero, round(hero_h * 0.62), 226)
+    hero_engine = TextEngine(spec, ImageDraw.Draw(hero))
+    draw_hero_text(hero, hero_engine, {**spec, "site": site, "accent": accent_value}, margin, hero_w - margin * 2)
+    hero_path = out_dir / f"{slug}-hero.jpg"
+    hero.convert("RGB").save(hero_path, quality=90, subsampling=1)
+    files["hero"] = str(hero_path)
+
+    # OG card reuses the hero so social preview and page agree.
+    og = ImageOps.fit(hero, (1200, 630), method=Image.LANCZOS).convert("RGBA")
+    og_path = out_dir / f"{slug}-og.jpg"
+    og.convert("RGB").save(og_path, quality=90, subsampling=1)
+    files["og"] = str(og_path)
+
+    cards: list[str] = []
+    for index, image in enumerate(images[1:4], start=1):
+        card = cover_image(image, 640, 420)
+        card_path = out_dir / f"{slug}-card-{index}.jpg"
+        card.convert("RGB").save(card_path, quality=88, subsampling=1)
+        cards.append(str(card_path))
+    files["cards"] = cards
+
+    fixture = {
+        "ok": True,
+        "version": VERSION,
+        "op": "decorate",
+        "site": site,
+        "brand": brand,
+        "slug": slug,
+        "dir": str(out_dir),
+        "files": files,
+        "hashes": {name: sha256_file(Path(path)) for name, path in files.items() if isinstance(path, str)},
+        "card_hashes": [sha256_file(Path(path)) for path in cards],
+        "canvas": {"hero": [hero_w, hero_h], "og": [1200, 630], "logo": [720, 180]},
+        "fonts": {
+            "bengali_bold": hero_engine.bn_bold,
+            "bengali_regular": hero_engine.bn_regular,
+            "latin_bold": hero_engine.latin_bold,
+            "latin_regular": hero_engine.latin_regular,
+            "raqm": bool(features.check("raqm")),
+        },
+        "created": datetime.now(timezone.utc).isoformat(),
+    }
+    return fixture
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--spec", required=True, help="path to the JSON composition spec")
     args = parser.parse_args()
     try:
         spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
-        result = fit_image(spec) if spec.get("op") == "fit" else compose(spec)
+        if spec.get("op") == "fit":
+            result = fit_image(spec)
+        elif spec.get("op") == "decorate":
+            result = decorate(spec)
+        else:
+            result = compose(spec)
     except SystemExit:
         raise
     except Exception as error:  # noqa: BLE001 - surface one JSON error to the MCP caller

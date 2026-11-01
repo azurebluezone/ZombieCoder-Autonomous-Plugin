@@ -96,13 +96,17 @@ test("applyModeOverrides switches only valid ids and modes", () => {
   assert.equal(ROSTER.find((agent) => agent.id === "manu")?.mode, "all", "input roster must not mutate");
 });
 
-test("every persona carries the mode protocol and matches its frontmatter", () => {
+test("every persona keeps its frontmatter mode and carries no mode protocol", () => {
   for (const agent of ROSTER) {
     const prompt = agentSystemPrompt(agent);
-    assert.match(prompt, /Mode protocol \(OpenCode V2\)/);
-    assert.match(prompt, new RegExp("current mode: `" + agent.mode + "`"));
-    assert.match(prompt, /scout/);
-    assert.match(agentMarkdown(agent), new RegExp("^mode: " + agent.mode + "$", "m"));
+    // Mode is an OpenCode frontmatter field, not a speech the model performs.
+    assert.doesNotMatch(prompt, /Mode protocol \(OpenCode V2\)/);
+    assert.doesNotMatch(prompt, new RegExp("current mode: `" + agent.mode + "`"));
+    assert.doesNotMatch(prompt, /`scout`/);
+    assert.match(prompt, /there is no handoff to another agent/);
+    const markdown = agentMarkdown(agent);
+    assert.match(markdown, new RegExp("^mode: " + agent.mode + "$", "m"));
+    assert.match(markdown, /action: subagent\s+resource: "\*"\s+effect: deny/);
     assert.ok(MODE_REGISTRY[agent.mode], "agent mode must exist in the registry");
   }
   assert.match(modeProtocol("subagent"), /picker/);

@@ -20,6 +20,7 @@
     "quick-install": "node bin/quick-install.mjs",
     "e2e:install": "node scripts/e2e-install.mjs --quick",
     "e2e:install:full": "node scripts/e2e-install.mjs --full",
+    "e2e:modules": "node --experimental-strip-types scripts/e2e-modules.mjs",
     "integrity": "node scripts/integrity.mjs",
     "integrity:check": "node scripts/integrity.mjs --check",
     "identity": "node scripts/identity.mjs --write",

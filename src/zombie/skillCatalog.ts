@@ -18,7 +18,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { installSkillsDir, safe } from "./paths.ts";
+import { installSkillsDir, nativeSkillsDir, safe } from "./paths.ts";
+import { parseFrontmatter } from "./frontmatter.ts";
+import { nativeSkillFile, nativeSkillName } from "./skills.ts";
 
 export type SkillSpec = {
   id: string;
@@ -505,12 +507,69 @@ export async function ensureSkillCatalog(options: SkillCatalogOptions = {}): Pro
   };
 }
 
-export type SkillInstallResult = { id: string; file: string; copied: boolean; error?: string };
+export type SkillInstallResult = {
+  id: string;
+  /** Legacy flat store used by the plugin transform. */
+  file: string;
+  copied: boolean;
+  /** OpenCode's native global skill file. */
+  nativeFile?: string;
+  nativeCopied?: boolean;
+  error?: string;
+};
 
 /**
- * Copy one cached skill into the shared install-root store. The file is shared
- * by every working directory under this install; nothing is written into the
- * project.
+ * Write one catalog skill as `skills/<name>/SKILL.md`. The frontmatter is
+ * rebuilt from the source markdown: OpenCode requires `name` to equal the
+ * directory name and a description of 1-1024 characters, so a catalog id that
+ * differs from the source `name` cannot be copied verbatim.
+ */
+export function installNativeSkill(
+  installRoot: string,
+  id: string,
+  sourceFile: string,
+  options: { force?: boolean } = {},
+): SkillInstallResult {
+  const name = nativeSkillName(id);
+  const target = nativeSkillFile(installRoot, name);
+  if (fs.existsSync(target) && !options.force) {
+    return { id, file: target, copied: false, nativeFile: target, nativeCopied: false };
+  }
+  let raw: string;
+  try {
+    raw = fs.readFileSync(sourceFile, "utf8");
+  } catch (error: any) {
+    return { id, file: "", copied: false, error: String(error?.message ?? error) };
+  }
+  const { data, body } = parseFrontmatter(raw);
+  const description = String(data.description ?? findSkill(id)?.description ?? "").trim().slice(0, 1024);
+  if (!description) {
+    return { id, file: "", copied: false, error: "skill description is missing" };
+  }
+  const content = [
+    "---",
+    `name: ${name}`,
+    `description: ${JSON.stringify(description)}`,
+    ...(data.license ? [`license: ${JSON.stringify(String(data.license))}`] : []),
+    ...(data.compatibility ? [`compatibility: ${JSON.stringify(String(data.compatibility))}`] : []),
+    "---",
+    "",
+    body.trim(),
+    "",
+  ].join("\n");
+  try {
+    ensureDir(path.dirname(target));
+    fs.writeFileSync(target, content, "utf8");
+    return { id, file: target, copied: true, nativeFile: target, nativeCopied: true };
+  } catch (error: any) {
+    return { id, file: "", copied: false, error: String(error?.message ?? error) };
+  }
+}
+
+/**
+ * Copy one cached skill into the shared stores. The legacy flat file keeps the
+ * plugin transform working; the native `skills/<name>/SKILL.md` is what OpenCode
+ * loads by itself in every working directory.
  */
 export async function installSharedSkill(
   installRoot: string,
@@ -530,17 +589,24 @@ export async function installSharedSkill(
   }
   const source = path.join(catalogDir(installRoot), spec.file);
   const target = path.join(installSkillsDir(installRoot), safe(id) + ".md");
-  if (fs.existsSync(target) && !options.force) {
-    return { id, file: target, copied: false };
-  }
-  const copied = copySkill(source, target);
-  const result = { id, file: target, copied };
-  return copied ? result : { ...result, error: "copy failed" };
+  const native = installNativeSkill(installRoot, id, source, { force: options.force });
+  const legacyExists = fs.existsSync(target) && !options.force;
+  const copied = legacyExists ? false : copySkill(source, target);
+  const result: SkillInstallResult = {
+    id,
+    file: legacyExists ? target : copied ? target : "",
+    copied,
+    nativeFile: native.nativeFile,
+    nativeCopied: native.nativeCopied,
+  };
+  const error = native.error ?? (!copied && !legacyExists ? "copy failed" : undefined);
+  return error ? { ...result, error } : result;
 }
 
 export type SharedSkillInstallSummary = {
   installRoot: string;
   skillsDir: string;
+  nativeSkillsDir: string;
   ids: string[];
   results: SkillInstallResult[];
 };
@@ -559,6 +625,7 @@ async function installMany(
   return {
     installRoot,
     skillsDir: installSkillsDir(installRoot),
+    nativeSkillsDir: nativeSkillsDir(installRoot),
     ids: unique,
     results,
   };
@@ -589,7 +656,8 @@ export async function autoInstallSkills(
 export type CatalogListing = {
   cacheDir: string;
   skillsDir: string;
-  skills: (SkillSpec & { cached: boolean; installed: boolean; file: string })[];
+  nativeSkillsDir: string;
+  skills: (SkillSpec & { cached: boolean; installed: boolean; native: boolean; file: string })[];
 };
 
 export function listSkillCatalog(
@@ -599,14 +667,20 @@ export function listSkillCatalog(
   const root = options.installRoot ?? installRoot;
   const cache = catalogDir(root);
   const shared = installSkillsDir(root);
+  const nativeRoot = nativeSkillsDir(root);
   return {
     cacheDir: cache,
     skillsDir: shared,
-    skills: SKILL_CATALOG.map((skill) => ({
-      ...skill,
-      cached: fs.existsSync(path.join(cache, skill.file)),
-      installed: fs.existsSync(path.join(shared, skill.id + ".md")),
-      file: path.join(cache, skill.file),
-    })),
+    nativeSkillsDir: nativeRoot,
+    skills: SKILL_CATALOG.map((skill) => {
+      const native = fs.existsSync(nativeSkillFile(root, nativeSkillName(skill.id)));
+      return {
+        ...skill,
+        cached: fs.existsSync(path.join(cache, skill.file)),
+        installed: fs.existsSync(path.join(shared, skill.id + ".md")) || native,
+        native,
+        file: path.join(cache, skill.file),
+      };
+    }),
   };
 }

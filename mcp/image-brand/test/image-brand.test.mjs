@@ -62,8 +62,8 @@ test("provider normalizers keep PD/CC0 and drop the rest", () => {
   assert.equal(normalizeNasa({ data: [{ nasa_id: "PIA1", title: "Earth" }], links: [{ href: "https://images-assets.nasa.gov/x.jpg" }] }).provider, "nasa");
 });
 
-test("stdio MCP exposes five tools and brands a real fixture", async () => {
-  assert.equal(TOOLS.length, 5);
+test("stdio MCP exposes six tools and brands a real fixture", async () => {
+  assert.equal(TOOLS.length, 6);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "image-brand-test-"));
   execFileSync("python3", [path.join(HERE, "..", "fixtures.py"), "--dir", dir], { stdio: "ignore" });
   const client = await startServer();
@@ -71,7 +71,7 @@ test("stdio MCP exposes five tools and brands a real fixture", async () => {
     const init = await client.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } });
     assert.equal(init.serverInfo.name, "image-brand");
     const list = await client.request("tools/list", {});
-    assert.deepEqual(list.tools.map((tool) => tool.name).sort(), ["image_batch", "image_brand", "image_fetch", "image_fit", "image_search"]);
+    assert.deepEqual(list.tools.map((tool) => tool.name).sort(), ["image_batch", "image_brand", "image_fetch", "image_fit", "image_search", "web_decorate"]);
 
     const branded = await client.callTool("image_brand", {
       input: path.join(dir, "input.jpg"),
@@ -123,6 +123,23 @@ test("stdio MCP exposes five tools and brands a real fixture", async () => {
     assert.equal(dims(covered.output), "(640, 480)");
     assert.equal(dims(contain.output), "(500, 500)");
     assert.deepEqual(JSON.parse(fs.readFileSync(contain.sidecar, "utf8")).canvas, [500, 500]);
+
+    const site = await client.callTool("web_decorate", {
+      site: "lms",
+      brand: "Shikho Lab",
+      headline: "হাতে-কলমে শেখা, নিজের গতিতে",
+      logo: path.join(dir, "logo.png"),
+      images: [path.join(dir, "input.jpg")],
+      output_dir: path.join(dir, "site"),
+    });
+    assert.equal(site.cards, 3);
+    assert.ok(fs.existsSync(site.files.html));
+    assert.ok(fs.existsSync(path.join(dir, "site", "shikho-lab-logo.png")));
+    assert.ok(fs.readFileSync(site.files.html, "utf8").includes("Shikho Lab"));
+    const manifest = JSON.parse(fs.readFileSync(site.manifest, "utf8"));
+    assert.equal(manifest.site, "lms");
+    assert.ok(manifest.hashes.hero);
+    assert.equal(manifest.hashes.cards.length, 0);
   } finally {
     await client.close();
   }

@@ -21,7 +21,8 @@ try {
   assert.equal(init.serverInfo.name, "image-brand");
 
   const list = await client.request("tools/list", {});
-  assert.equal(list.tools.length, 5);
+  assert.equal(list.tools.length, 6);
+  assert.ok(list.tools.some((tool) => tool.name === "web_decorate"));
 
   const result = await client.callTool("image_brand", {
     input: path.join(dir, "input.jpg"),
@@ -50,9 +51,30 @@ try {
   assert.equal(fit.width, 320);
   assert.equal(fit.height, 200);
 
-  console.log(`tools=5 pipeline=ok fit=${fit.width}x${fit.height} bytes=${result.output_bytes} sha=${result.output_sha256.slice(0, 12)}`);
+  const site = await client.callTool("web_decorate", {
+    site: "hospital",
+    brand: "Shohor Clinic",
+    headline: "প্রতিদিনের যত্ন, কাছেই",
+    subheadline: "একই ছাদের নিচে বিভাগ, ল্যাব ও অ্যাপয়েন্টমেন্ট।",
+    logo: path.join(dir, "logo.png"),
+    images: [path.join(dir, "input.jpg"), path.join(dir, "input.jpg")],
+    output_dir: path.join(dir, "site"),
+  });
+  assert.ok(fs.existsSync(site.files.html));
+  assert.ok(fs.existsSync(site.files.styles ?? site.files.css));
+  assert.ok(fs.existsSync(path.join(dir, "site", "shohor-clinic-logo.png")));
+  const html = fs.readFileSync(site.files.html, "utf8");
+  assert.ok(html.includes("Shohor Clinic"));
+  assert.ok(html.includes("loading"));
+  assert.equal(site.cards, 3);
+  const manifest = JSON.parse(fs.readFileSync(site.manifest, "utf8"));
+  assert.equal(manifest.tool, "web_decorate");
+  assert.ok(manifest.hashes.html);
+
+  console.log(`tools=6 pipeline=ok fit=${fit.width}x${fit.height} decorate=${site.cards} cards bytes=${result.output_bytes}`);
   console.log(`output=${result.output}`);
   console.log(`fit=${fit.output}`);
+  console.log(`site=${site.files.html}`);
 } finally {
   await client.close();
 }

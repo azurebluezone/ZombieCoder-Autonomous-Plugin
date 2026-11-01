@@ -24,14 +24,14 @@ function fakeStorage() {
   };
 }
 
-test("keepRecent keeps the latest KEEP_RECENT in RAM and archives the rest", async () => {
+test("keepRecent keeps the latest KEEP_RECENT in RAM and archives the full dialogue", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-memory-"));
   const storage = fakeStorage();
   const messages = Array.from({ length: 14 }, (_, i) => ({ role: "user", text: `message ${i + 1}` }));
 
   const result = await keepRecent(storage, root, "ses_test", messages);
   assert.equal(result.kept, KEEP_RECENT);
-  assert.equal(result.archived, 14 - KEEP_RECENT);
+  assert.equal(result.archived, 14);
   const repeated = await keepRecent(storage, root, "ses_test", messages);
   assert.equal(repeated.archived, 0, "reprocessing messages must not duplicate archive rows");
 
@@ -42,16 +42,34 @@ test("keepRecent keeps the latest KEEP_RECENT in RAM and archives the rest", asy
 
   const archived = readArchive(root, "ses_test");
   assert.equal(archived.length, 1);
-  assert.equal(archived[0].archived.length, 14 - KEEP_RECENT);
+  assert.equal(archived[0].archived.length, 14);
 
   const index = readIndex(root);
   assert.equal(index.sessions.ses_test.kept, KEEP_RECENT);
-  assert.equal(index.sessions.ses_test.archivedTotal, 14 - KEEP_RECENT);
+  assert.equal(index.sessions.ses_test.archivedTotal, 14);
   assert.equal(index.archives.length, 1);
   assert.equal(index.archives[0].sessionID, "ses_test");
-  assert.equal(index.archives[0].archived, 14 - KEEP_RECENT);
+  assert.equal(index.archives[0].archived, 14);
   assert.ok(index.archives[0].bytes > 0);
   assert.match(index.archives[0].file, /ses_test\.jsonl$/);
+});
+
+test("the archive names the agent that produced the turn", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-agent-memory-"));
+  const storage = fakeStorage();
+  await keepRecent(
+    storage,
+    root,
+    "ses_agent",
+    [
+      { id: "m1", role: "user", text: "প্রশ্ন" },
+      { id: "m2", role: "assistant", text: "উত্তর", agent: "halim" },
+    ],
+    "halim",
+  );
+  const archived = readArchive(root, "ses_agent");
+  assert.equal(archived[0].agent, "halim");
+  assert.equal(archived[0].archived.length, 2);
 });
 
 test("completed session snapshots archive all messages once and keep recent context", async () => {
@@ -64,7 +82,7 @@ test("completed session snapshots archive all messages once and keep recent cont
   }));
 
   const first = await archiveSessionSnapshot(storage, root, "ses_complete", messages);
-  assert.equal(first.kept, KEEP_RECENT);
+  assert.equal(first.kept, Math.min(KEEP_RECENT, messages.length));
   assert.equal(first.archived, messages.length);
   const second = await archiveSessionSnapshot(storage, root, "ses_complete", messages);
   assert.equal(second.archived, 0, "idle snapshots must be idempotent");
@@ -72,7 +90,7 @@ test("completed session snapshots archive all messages once and keep recent cont
   const archive = readArchive(root, "ses_complete");
   assert.equal(archive.length, 1);
   assert.equal(archive[0].archived.length, messages.length);
-  assert.equal((await readRecent(storage, "ses_complete")).length, KEEP_RECENT);
+  assert.equal((await readRecent(storage, "ses_complete")).length, Math.min(KEEP_RECENT, messages.length));
   assert.equal(readIndex(root).sessions.ses_complete.archivedTotal, messages.length);
 });
 
@@ -118,27 +136,33 @@ test("readIndex discovers an archive file that was written before the index exis
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-archive-"));
   const dir = path.join(root, ".zombiecoder", "memory");
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, "ses_legacy.jsonl"), JSON.stringify({ archived: [{ text: "old" }] }) + "\n");
+  fs.writeFileSync(
+    path.join(dir, "ses_legacy.jsonl"),
+    JSON.stringify({ ts: "2026-10-01T00:00:00.000Z", archived: [{ role: "user", text: "old" }] }) + "\n",
+  );
 
   const index = readIndex(root);
   const found = index.archives.find((a) => a.sessionID === "ses_legacy");
   assert.ok(found, "legacy archive missing from index");
+  assert.equal(found.archived, 1, "archive count must come from the file, not the missing index");
   assert.ok(found.bytes > 0);
+  assert.equal(index.sessions.ses_legacy.archivedTotal, 1);
+  assert.equal(index.sessions.ses_legacy.archiveFile, path.join(dir, "ses_legacy.jsonl"));
 });
 
 test("touchIndex merges patches without dropping previous fields", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-index-"));
-  touchIndex(root, "ses_a", { kept: 3 });
+  touchIndex(root, "ses_a", { kept: 1 });
   const entry = touchIndex(root, "ses_a", { archivedTotal: 7 });
-  assert.equal(entry.kept, 3);
+  assert.equal(entry.kept, 1);
   assert.equal(entry.archivedTotal, 7);
   assert.match(entry.archiveFile, /ses_a\.jsonl$/);
 });
 
 test("an empty touchIndex patch refreshes the index without resetting kept", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "zombiecoder-touch-"));
-  touchIndex(root, "ses_prompt", { kept: 4, archivedTotal: 11 });
+  touchIndex(root, "ses_prompt", { kept: 2, archivedTotal: 11 });
   const entry = touchIndex(root, "ses_prompt", {});
-  assert.equal(entry.kept, 4);
+  assert.equal(entry.kept, 2);
   assert.equal(entry.archivedTotal, 11);
 });

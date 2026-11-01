@@ -71,13 +71,14 @@ import { probeMcp } from "./zombie/mcp.ts";
 import { registerSkills } from "./zombie/skills.ts";
 import { ensureSharedSkills, DEFAULT_SKILL_REPO } from "./zombie/skillCatalog.ts";
 import { buildContextPack } from "./zombie/context.ts";
+import { buildRunnerIdentity } from "./zombie/runnerIdentity.ts";
 import { openContracts } from "./zombie/goalContract.ts";
 import { applyResponseGate } from "./zombie/responseGate.ts";
 import {
   BREAKER_LIMIT,
   breakerContext,
   decideBreaker,
-  fallbackPrompt,
+  retryPrompt,
   readBreakerState,
   statusMessage,
   unresolvedMessage,
@@ -646,45 +647,6 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
     return resolved;
   };
 
-  // A write that lands before any goal contract is a process violation, not a
-  // detail: the user was promised a pre-work card. We cannot rewind the write,
-  // so we make it visible (card + audit) exactly once per session.
-  const warnMissingGoalContract = async (input: {
-    projectRoot: string;
-    sessionID: string;
-    agentID: string;
-    tool: string;
-  }): Promise<void> => {
-    const { projectRoot, sessionID, agentID } = input;
-    if (!sessionID || sessionID === "unknown") return;
-    const tool = String(input.tool ?? "").trim().toLowerCase();
-    if (!MUTATING_TOOLS.has(tool)) return;
-    const key = `goal/warned/${sessionID}`;
-    if (await ctx.storage.get(key)) return;
-    const syllabus = readSyllabus(projectRoot) ?? "";
-    if (openContracts(syllabus, sessionID).length > 0) return;
-    await ctx.storage.set(key, { at: new Date().toISOString(), tool });
-    audit(projectRoot, agentID, { kind: "goal.missing", sessionID, tool });
-    const door = (ctx as any).session?.synthetic;
-    if (typeof door !== "function") return;
-    try {
-      await door({
-        sessionID,
-        description: "goal contract missing",
-        text: [
-          "🧭 goal contract ছাড়া কাজ শুরু হয়েছে",
-          "",
-          `টুল: \`${tool}\` — এটা চালানোর আগে \`goal_contract open\` হওয়া দরকার ছিল।`,
-          "",
-          "এখনই খুলে নাও: আসল input → চোখে দেখা expected output → check command → pass criteria।",
-          "শেষে `goal_contract close` নিজেই চেক চালিয়ে PASS/FAIL দেবে; মুখের দাবি নয়।",
-        ].join("\n"),
-      });
-    } catch {
-      /* best-effort card; the audit row above is the durable record */
-    }
-  };
-
   const report: Report = {
     plugin: PLUGIN_ID,
     version: PLUGIN_VERSION,
@@ -1147,6 +1109,17 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           event?.model?.providerID && modelID
             ? `${event.model.providerID}/${modelID}`
             : undefined;
+        // The live model ref is OpenCode's; the speaking identity is ours. Only
+        // catalog-backed facts can call the runner free or local.
+        const runner = buildRunnerIdentity(
+          def ? { id: def.id, name: def.name, role: def.role } : { id: agentID },
+          model,
+          {
+            freeRefs: plan?.freeRefs,
+            localProviders: plan?.localProviders,
+            customProviderID: plan?.customProviderID,
+          },
+        );
 
         // `session.idle` is not a dependable archive trigger in this runtime: the
         // event stream is subscribed, yet no idle snapshot has ever landed in the
@@ -1154,8 +1127,13 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         // The `context` hook fires on every model request and carries the full
         // message list, so archive the overflow here. Idempotent by message id.
         const messages = Array.isArray(event?.messages) ? event.messages : [];
+        if (sessionID && sessionID !== "unknown") {
+          // The idle hook has no agent field; remember who spoke last so the
+          // snapshot written after the final answer keeps its attribution.
+          await ctx.storage.set(`memory/agent/${sessionID}`, agentID);
+        }
         if (messages.length > 0) {
-          const memory = await keepRecent(ctx.storage, projectRoot, sessionID, messages);
+          const memory = await keepRecent(ctx.storage, projectRoot, sessionID, messages, agentID);
           if (memory.archived > 0) {
             audit(projectRoot, agentID, {
               kind: "memory.keep",
@@ -1194,7 +1172,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
                 : `Decision rule: no specialist roster entry for "${agentID}"; the shared ZombieCoder contract above is authoritative.`,
               'Start every response with "ভাইয়া". Chat in Bengali; code and shortcuts in English.',
               "Read SSOT and syllabus before acting. The footprint lives inside syllabus.md — never create a separate footprint file.",
-              "All agents are main agents and may delegate to each other with only the necessary context.",
+              "Finish the work yourself in this session; never hand the task to another agent or ask for a delegation.",
               "Evidence before confidence. No evidence means no verified answer.",
               `Context ownership: SSOT=${pack.owners.ssot.agent}, Syllabus=${pack.owners.syllabus.agent}, Memory=${pack.owners.memory.agent}, Skills=${pack.owners.skills.agent}, Gate=${pack.owners.gate.agent}.`,
               `Before substantive work, call \`context_status\` and show its uiLine. Make this the first visible line after \"ভাইয়া\" so the user sees who manages SSOT, syllabus and memory: ${pack.uiLine}`,
@@ -1217,6 +1195,9 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           uiLine: pack.uiLine,
           persona: persona.kind,
           personaBytes: persona.bytes,
+          runnerKind: runner.kind,
+          runnerRef: runner.ref,
+          runnerEvidence: runner.evidence,
         });
       }),
     );
@@ -1228,7 +1209,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         const sessionID = String(event?.sessionID ?? "unknown");
         const projectRoot = await resolveSessionRoot(sessionID);
         const messages = Array.isArray(event?.messages) ? event.messages : [];
-        const result = await keepRecent(ctx.storage, projectRoot, sessionID, messages);
+        const result = await keepRecent(ctx.storage, projectRoot, sessionID, messages, agentID);
         audit(projectRoot, agentID, {
           kind: "compaction",
           sessionID,
@@ -1239,6 +1220,37 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       }),
     );
     if (compactionHook) cleanups.push(() => compactionHook.dispose());
+
+    // A turn's final answer is written after the last `context` hook, so a
+    // context-only archive would lose it until the next user turn (or forever,
+    // if the app is upgraded first). `experimental.idle` is the documented
+    // "session finished model work" hook and carries the closing state.
+    const idleHook = await stepAsync("hook-idle", () =>
+      ctx.session!.hook!("experimental.idle", async (event: any) => {
+        const sessionID = String(event?.sessionID ?? "unknown");
+        if (!sessionID || sessionID === "unknown") return;
+        if (!ctx.session?.context) return;
+        const projectRoot = await resolveSessionRoot(sessionID);
+        try {
+          const messages = await ctx.session.context({ sessionID });
+          const agentID = (await ctx.storage.get(`memory/agent/${sessionID}`)) as string | undefined;
+          const result = await archiveSessionSnapshot(ctx.storage, projectRoot, sessionID, messages, agentID);
+          audit(projectRoot, agentID ?? "plugin", {
+            kind: "session.archive",
+            sessionID,
+            kept: result.kept,
+            archived: result.archived,
+            archiveFile: result.archiveFile,
+            ok: true,
+          });
+        } catch (error: any) {
+          const message = redact(String(error?.message ?? error));
+          audit(projectRoot, "plugin", { kind: "session.archive", sessionID, ok: false, error: message });
+          console.error(`[zombiecoder] idle archive failed for ${sessionID}: ${message}`);
+        }
+      }),
+    );
+    if (idleHook) cleanups.push(() => idleHook.dispose());
 
     step("archive-session-idle", () => {
       if (!ctx.event?.subscribe || !ctx.session?.context) {
@@ -1343,7 +1355,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       if (breakerInflight.has(sessionID)) return;
       const projectRoot = await resolveSessionRoot(sessionID);
       const session = ctx.session as any;
-      const available = Boolean(session?.synthetic && session?.prompt && session?.switchAgent);
+      const available = Boolean(session?.synthetic && session?.prompt);
       const failure = {
         agent: agentID,
         kind: "response_gate" as const,
@@ -1358,7 +1370,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
       breakerInflight.add(sessionID);
       try {
         const state = readBreakerState(await ctx.storage.get(key), sessionID);
-        const { state: nextState, decision } = decideBreaker(state, ROSTER, failure, BREAKER_LIMIT);
+        const { state: nextState, decision } = decideBreaker(state, failure, BREAKER_LIMIT);
         await ctx.storage.set(key, nextState);
         audit(projectRoot, "plugin", {
           kind: "agent.failure",
@@ -1377,7 +1389,7 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
             sessionID,
             from: agentID,
             ok: false,
-            reason: "session.synthetic/prompt/switchAgent unavailable",
+            reason: "session.synthetic/prompt unavailable",
           });
           return;
         }
@@ -1396,32 +1408,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           });
           return;
         }
-        // If the switch itself fails, keep the task moving on the current agent
-        // rather than leaving the user with only the UNVERIFIED replacement.
-        let switched = true;
-        try {
-          await session.switchAgent({ sessionID, agent: decision.next });
-        } catch (switchError: any) {
-          switched = false;
-          audit(projectRoot, "plugin", {
-            kind: "agent.escalation.switch",
-            sessionID,
-            from: agentID,
-            to: decision.next,
-            ok: false,
-            error: redact(String(switchError?.message ?? switchError)),
-          });
-        }
-        // The persona changed; the model did not unless the owner pinned models.
-        const modelSwitch = switched
-          ? await switchAgentModel({
-              sessionID,
-              from: agentID,
-              to: decision.next,
-              current: model,
-              projectRoot,
-            })
-          : { switched: false, reason: "agent switch failed" };
+        // Same agent, same model, same accountability. The retry carries the
+        // failure evidence; there is no switchAgent and no delegation.
         await session.synthetic({
           sessionID,
           text: statusMessage(failure, decision),
@@ -1429,20 +1417,20 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         });
         await session.prompt({
           sessionID,
-          text: fallbackPrompt(failure, input.blockedText, decision),
+          text: retryPrompt(failure, input.blockedText, decision),
           delivery: "queue",
         });
         audit(projectRoot, "plugin", {
           kind: "agent.escalation",
           sessionID,
           from: agentID,
-          to: switched ? decision.next : agentID,
+          to: agentID,
+          action: "retry",
           attempt: decision.attempt,
           limit: decision.limit,
-          ok: switched,
+          ok: true,
           reason: failure.reason,
-          model: modelSwitch.switched ? modelSwitch.model : model,
-          modelSwitch: modelSwitch.switched ? "switched" : modelSwitch.reason,
+          model,
         });
       } catch (error: any) {
         audit(projectRoot, "plugin", {
@@ -1589,6 +1577,48 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
 
   // ---- per-agent tool footprint --------------------------------------------
   if (ctx.tool?.hook) {
+    // A write before the pre-work card is not a detail; it is the exact promise
+    // the user asked us to keep. Block the call, log the attempt, and let the
+    // agent ask for consent. The syllabus ledger itself is plugin-owned: an
+    // agent must not hand-write a goal result and call it closed.
+    const blockHook = await stepAsync("hook-tool-before", () =>
+      ctx.tool!.hook!("execute.before", async (event: any) => {
+        const tool = String(event?.tool ?? "").trim().toLowerCase();
+        if (!MUTATING_TOOLS.has(tool)) return;
+        const sessionID = String(event?.sessionID ?? "unknown");
+        if (!sessionID || sessionID === "unknown") return;
+        const agentID = String(event?.agent ?? "unknown");
+        const projectRoot = await resolveSessionRoot(sessionID);
+        const input = (event?.input ?? {}) as Record<string, unknown>;
+        const target = String(input.filePath ?? input.path ?? input.file ?? "").replace(/\\/g, "/");
+        if (/\.zombiecoder\/syllabus\.md$/i.test(target)) {
+          audit(projectRoot, agentID, {
+            kind: "goal_contract.block",
+            sessionID,
+            tool,
+            target,
+            reason: "syllabus ledger is plugin-owned",
+          });
+          throw new Error(
+            "syllabus.md is the append-only goal ledger; use append_syllabus or goal_contract, not edit/write",
+          );
+        }
+        const syllabus = readSyllabus(projectRoot) ?? "";
+        if (openContracts(syllabus, sessionID).length > 0) return;
+        audit(projectRoot, agentID, {
+          kind: "goal_contract.block",
+          sessionID,
+          tool,
+          target,
+          reason: "no open goal contract",
+        });
+        throw new Error(
+          "goal_contract open is required before this write. Ask the user, get approval on the preview card, then edit. Nothing was written.",
+        );
+      }),
+    );
+    if (blockHook) cleanups.push(() => blockHook.dispose());
+
     const toolHook = await stepAsync("hook-tool-after", () =>
       ctx.tool!.hook!("execute.after", async (event: any) => {
         const agentID = String(event?.agent ?? "unknown");
@@ -1603,6 +1633,8 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
         if (failed || previous) {
           await ctx.storage.set(failureKey, { count, escalated: previous?.escalated ?? false });
         }
+        // The write block above is the enforcement; this row keeps the
+        // successful tool call in the per-agent footprint.
         audit(projectRoot, String(event?.agent ?? "unknown"), {
           kind: "tool",
           sessionID,
@@ -1612,61 +1644,35 @@ export async function setup(rawCtx: unknown): Promise<() => Promise<void>> {
           consecutiveFailures: count,
         });
 
-        // The pre-work card is only honest if the agent actually opened a
-        // contract. Weak/free models ignore the prompt rule, so a write that
-        // lands without one gets a visible warning card and an audit row.
-        await warnMissingGoalContract({
-          projectRoot,
-          sessionID,
-          agentID,
-          tool: String(event?.tool ?? ""),
-        });
-
         if (!failed || count < 3 || previous?.escalated) return;
 
-        const index = ROSTER.findIndex((agent) => agent.id === agentID);
-        const next = index >= 0 ? ROSTER[(index + 1) % ROSTER.length] : ROSTER[0];
         await ctx.storage.set(failureKey, { count, escalated: true });
-        if (!ctx.session?.switchAgent) {
-          audit(projectRoot, "plugin", {
-            kind: "agent.escalation",
-            sessionID,
-            from: agentID,
-            to: next.id,
-            ok: false,
-            reason: "session.switchAgent unavailable",
-          });
-          console.error(`[zombiecoder] cannot switch agent after repeated tool failures: ${agentID} -> ${next.id}`);
-          return;
-        }
-        try {
-          await ctx.session.switchAgent({ sessionID, agent: next.id });
-          const modelSwitch = await switchAgentModel({
-            sessionID,
-            from: agentID,
-            to: next.id,
-            projectRoot,
-          });
-          audit(projectRoot, "plugin", {
-            kind: "agent.escalation",
-            sessionID,
-            from: agentID,
-            to: next.id,
-            ok: true,
-            reason: "three consecutive tool execution errors",
-            model: modelSwitch.switched ? modelSwitch.model : undefined,
-            modelSwitch: modelSwitch.switched ? "switched" : modelSwitch.reason,
-          });
-        } catch (error: any) {
-          audit(projectRoot, "plugin", {
-            kind: "agent.escalation",
-            sessionID,
-            from: agentID,
-            to: next.id,
-            ok: false,
-            error: redact(String(error?.message ?? error)),
-          });
-          console.error(`[zombiecoder] agent switch failed: ${redact(String(error?.message ?? error))}`);
+        audit(projectRoot, agentID, {
+          kind: "agent.tool_breaker",
+          sessionID,
+          count,
+          limit: 3,
+          action: "stop",
+        });
+        // No switchAgent, no model switch: the same agent owns the failure.
+        // Stop and leave the next decision to the user.
+        const door = (ctx as any).session?.synthetic;
+        if (typeof door === "function") {
+          try {
+            await door({
+              sessionID,
+              description: "zombiecoder tool breaker",
+              text: [
+                `**Tool breaker:** \`${agentID}\` পরপর ${count}টি tool error পেয়েছে।`,
+                "",
+                "দায়িত্ব সরানো হয়নি, মডেল বদলানো হয়নি। এখন:",
+                "1. error message/output দিন — একই এজেন্ট আবার চেষ্টা করবে।",
+                "2. কাজটা ছোট করুন বা নতুন নির্দেশ দিন।",
+              ].join("\n"),
+            });
+          } catch {
+            /* the audit row is the durable record */
+          }
         }
       }),
     );

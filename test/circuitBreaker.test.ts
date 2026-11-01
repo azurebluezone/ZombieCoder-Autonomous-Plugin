@@ -3,62 +3,58 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import {
   BREAKER_LIMIT,
   breakerContext,
   decideBreaker,
-  fallbackPrompt,
   readBreakerState,
+  retryPrompt,
   statusMessage,
   unresolvedMessage,
 } from "../src/zombie/circuitBreaker.ts";
-
-const ROSTER = [{ id: "manu" }, { id: "jarin" }, { id: "brishti" }, { id: "halim" }];
 
 function failure(agent: string, reason = "claim without evidence") {
   return { agent, kind: "response_gate" as const, reason, at: new Date().toISOString() };
 }
 
-test("circuit breaker falls back to the next untried agent and opens after three", () => {
+test("the same agent retries, then the breaker stops after three failures", () => {
   let state = readBreakerState(undefined, "ses_breaker");
 
-  const first = decideBreaker(state, ROSTER, failure("manu"), BREAKER_LIMIT);
-  assert.equal(first.decision.action, "fallback");
-  assert.equal(first.decision.action === "fallback" && first.decision.next, "jarin");
+  const first = decideBreaker(state, failure("manu"), BREAKER_LIMIT);
+  assert.equal(first.decision.action, "retry");
+  assert.equal(first.decision.action === "retry" && first.decision.attempt, 1);
   state = first.state;
 
-  const second = decideBreaker(state, ROSTER, failure("jarin"), BREAKER_LIMIT);
-  assert.equal(second.decision.action, "fallback");
-  assert.equal(second.decision.action === "fallback" && second.decision.next, "brishti");
+  const second = decideBreaker(state, failure("manu"), BREAKER_LIMIT);
+  assert.equal(second.decision.action, "retry");
+  assert.equal(second.decision.action === "retry" && second.decision.attempt, 2);
 
-  const third = decideBreaker(second.state, ROSTER, failure("brishti"), BREAKER_LIMIT);
+  const third = decideBreaker(second.state, failure("manu"), BREAKER_LIMIT);
   assert.equal(third.decision.action, "stop");
-  assert.deepEqual(third.state.failures.length, 3);
-  assert.deepEqual(third.state.agents, ["manu", "jarin", "brishti"]);
+  assert.equal(third.state.failures.length, 3);
+  assert.deepEqual(third.state.agents, ["manu"]);
 
   const final = unresolvedMessage(third.state, BREAKER_LIMIT);
   assert.match(final, /কাজটি সমাধান হয়নি/);
-  assert.match(final, /manu.*jarin.*brishti/);
+  assert.match(final, /\bmanu\b/);
+  assert.match(final, /দায়িত্ব সরানো হয়নি/);
   assert.match(final, /প্রমাণ দিন/);
   assert.match(final, /নতুন নির্দেশ/);
   assert.match(final, /responseGate/);
 });
 
-test("circuit breaker never repeats an agent already tried", () => {
+test("the breaker never hands the task to a different agent", () => {
   const state = {
     sessionID: "ses_skip",
-    agents: ["manu", "jarin"],
+    agents: ["manu"],
     failures: [failure("manu")],
   };
-  const { decision } = decideBreaker(state, ROSTER, failure("manu"), 3);
-  assert.equal(decision.action, "fallback");
-  assert.equal(decision.action === "fallback" && decision.next, "brishti");
+  const { decision } = decideBreaker(state, failure("manu"), 3);
+  assert.equal(decision.action, "retry");
+  assert.equal(decision.action === "retry" && decision.attempt, 2);
 });
 
-test("circuit breaker status and fallback prompt carry the failure reason", () => {
+test("breaker status and retry prompt carry the failure evidence", () => {
   const reason = "file path does not exist inside allowed root: src/ghost.ts";
   const ctx = breakerContext(
     { protocol: "openai-sse", violations: ["src/ghost.ts"], matched: [] },
@@ -66,29 +62,19 @@ test("circuit breaker status and fallback prompt carry the failure reason", () =
     { model: "opencode/big-pickle" },
   );
   const record = { ...failure("manu", reason), context: ctx };
-  const decision = { action: "fallback" as const, next: "jarin", attempt: 1, limit: 3 };
+  const decision = { action: "retry" as const, attempt: 1, limit: 3 };
 
   const status = statusMessage(record, decision);
   assert.match(status, /\bmanu\b/);
-  assert.match(status, /\bjarin\b/);
   assert.match(status, /1\/3/);
   assert.match(status, /does not exist/);
+  assert.match(status, /handoff হবে না/);
 
-  const prompt = fallbackPrompt(record, "I fixed it in src/ghost.ts:42", decision);
+  const prompt = retryPrompt(record, "I fixed it in src/ghost.ts:42", decision);
   assert.match(prompt, /circuit breaker/);
+  assert.match(prompt, /\bmanu\b/);
   assert.match(prompt, /src\/ghost\.ts/);
   assert.match(prompt, /path:line/);
   assert.match(prompt, /UNVERIFIED/);
-});
-
-test("an agent outside the roster starts the fallback chain at the first roster slot", () => {
-  const state = { sessionID: "ses_build", agents: [], failures: [] };
-  const { decision } = decideBreaker(
-    state,
-    ROSTER,
-    failure("build", "claim without evidence"),
-    3,
-  );
-  assert.equal(decision.action, "fallback");
-  assert.equal(decision.action === "fallback" && decision.next, "manu");
+  assert.match(prompt, /অন্য কোনো এজেন্টে সরাও না/);
 });

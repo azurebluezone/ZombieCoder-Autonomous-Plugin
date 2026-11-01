@@ -222,6 +222,39 @@ test("resolveModels falls back to free models when no custom provider is configu
   );
   assert.equal(plan.strategy, "free-fallback");
   assert.deepEqual(plan.candidates, ["opencode/big-pickle"]);
+  assert.deepEqual(plan.freeRefs, ["opencode/big-pickle"], "cost 0/0 refs are the free evidence");
+  assert.deepEqual(plan.localProviders, [], "no local baseURL in this catalog");
+});
+
+test("resolveModels records local providers as runner-identity evidence", async () => {
+  const plan = await resolveModels(
+    {
+      provider: {
+        list: async () => ({
+          data: [{ id: "ollama", settings: { baseURL: "http://127.0.0.1:11434/v1" } }],
+        }),
+      },
+      model: {
+        list: async () => ({
+          data: [
+            {
+              providerID: "ollama",
+              modelID: "llama3",
+              cost: [{ input: 0, output: 0 }],
+              status: "active",
+              enabled: true,
+            },
+          ],
+        }),
+      },
+    },
+    ROSTER,
+    { customProviderUrl: "", strategy: "free" },
+  );
+  assert.deepEqual(plan.localProviders, [
+    { providerID: "ollama", baseURL: "http://127.0.0.1:11434/v1" },
+  ]);
+  assert.deepEqual(plan.freeRefs, ["ollama/llama3"]);
 });
 
 test("a non-reference baselineModel never turns the roster baseline into a pin", async () => {

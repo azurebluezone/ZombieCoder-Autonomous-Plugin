@@ -13,6 +13,7 @@
 | `image_brand` | cover-crop (aspect+focus বা normalized rect), bottom band, বাংলা title/subtitle, PNG logo/wordmark, attribution, JSON sidecar |
 | `image_fit` | নির্দিষ্ট `width`×`height`-এ clean output (কোনো text নয়): `cover` (ধার কাটে) বা `contain` (background pad), JPEG/PNG/WebP + sidecar |
 | `image_batch` | একাধিক item-এ `image_brand`, শেষে batch manifest |
+| `web_decorate` | ecommerce / hospital / LMS / generic সাইটের জন্য ছোট কিন্তু আসল pack: site-নামের logo PNG, hero, OG, card image, `index.html`, `styles.css`, `decorate.json` (প্রতিটি ফাইলের sha256) |
 
 `image_search`-এ `provider: "auto" | "met" | "cleveland" | "nasa" | "commons"`, `limit` 1–12।
 
@@ -62,13 +63,55 @@ Output sidecar-এ `op: "fit"`, `width`, `height`, `fit`, `crop_box`, `source_sh
 `output_sha256` থাকে — কোন ছবি থেকে কীভাবে কী সাইজে এসেছে তা পরে যাচাই করা যায়।
 `fit=cover` pixel dimension guarantee করে; `contain` letterbox/pillarbox দেয়।
 
+## সাইট decoration (web_decorate)
+
+`image_search` → `image_fetch` → `web_decorate` — এই ক্রমে চালান। শেষ ধাপে আসল ফাইল
+লেখা হয়; কোনো model call নেই। `site` চারটি profile-এর একটি বেছে দেয় (card copy,
+accent, layout), `brand` থেকে slug আর `<slug>-logo.png` তৈরি হয়।
+
+```jsonc
+{
+  "site": "hospital",                       // ecommerce | hospital | lms | generic
+  "brand": "Shohor Clinic",
+  "headline": "প্রতিদিনের যত্ন, কাছেই",
+  "subheadline": "একই ছাদের নিচে বিভাগ, ল্যাব ও অ্যাপয়েন্টমেন্ট।",
+  "kicker": "ঢাকা · ২৪/৭",
+  "accent": "#0f766e",
+  "logo": "/path/logo.png",                 // ঐচ্ছিক; না দিলে wordmark PNG
+  "images": ["/path/hero.jpg", "/path/card.jpg"],  // প্রথমটি hero, বাকিগুলো card
+  "cards": [                                // ঐচ্ছিক; না দিলে site profile
+    { "title": "কার্ডিওলজি", "body": "সকাল ৯টা–রাত ৮টা", "meta": "৩য় তলা" }
+  ],
+  "data": { "wiki": "Dhaka", "country": "Bangladesh" },  // ঐচ্ছিক, live public API
+  "output_dir": "sites/shohor-clinic"
+}
+```
+
+লেখা ফাইল:
+
+| File | কী |
+|---|---|
+| `index.html` | responsive page; loading/empty/error/success state, skip link, `:focus-visible`, lazy image |
+| `styles.css` | profile + accent থেকে tokenized CSS |
+| `<slug>-logo.png` | site-নামের logo (provided PNG resize বা wordmark) |
+| `hero.jpg`, `og.jpg` | hero (1600×900) আর Open Graph (1200×630) |
+| `card-1.jpg` … | প্রথম ৩টি input image থেকে card crop |
+| `decorate.json` | `tool`, `site`, `brand`, `files`, `hashes` (sha256), input image hashes, `data`, `data_errors`, `license_note` |
+
+`data.wiki` / `data.country` দিলে Wikipedia summary আর capital/currency/flag আনা হয়;
+API fail করলে output তৈরি হয় এবং failure `data_errors`-এ সত্যি করে লেখা থাকে — fake
+fact বসানো হয় না। Wikipedia text CC BY-SA 4.0, page-এ source link থাকে; input ছবির
+licence তার নিজের sidecar-এ থাকে। Manifest-এর `hashes` দিয়ে পরে যাচাই করা যায় কোন
+ফাইল আসলে তৈরি হয়েছিল।
+
 ## চালানো
 
 ```bash
 node mcp/image-brand/server.mjs          # stdio MCP
-node mcp/image-brand/selfcheck.mjs       # offline: tools/list + fixture branding + logo
+node mcp/image-brand/selfcheck.mjs       # offline: tools/list + fixture branding + logo + hospital site
 node mcp/image-brand/e2e-live.mjs        # live: Met search → fetch → brand
 node --test mcp/image-brand/test/*.test.mjs
+npm run e2e:modules                      # installed OpenCode + both MCP servers + design + skills + LSP
 ```
 
 OpenCode-এ connect (project config, repo root):

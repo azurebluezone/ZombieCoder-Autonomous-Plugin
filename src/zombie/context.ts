@@ -18,12 +18,12 @@ import { openContracts } from "./goalContract.ts";
 export const CONTEXT_LIMITS = {
   // Only the slices an agent needs for the current task. The full SSOT and
   // syllabus stay on disk and are read on demand through tools.
-  ssot: 1200,
-  syllabus: 650,
-  focus: 700,
-  memoryPerMessage: 220,
-  memoryTotal: 700,
-  total: 3600,
+  ssot: 900,
+  syllabus: 500,
+  focus: 600,
+  memoryPerMessage: 180,
+  memoryTotal: 500,
+  total: 2400,
 } as const;
 
 // Which SSOT sections each role actually needs. A documentation agent does not
@@ -287,16 +287,7 @@ export function buildContextPack(
     : [
         "- none for this session.",
         "- Before the first write/edit/shell that changes the project, call `goal_contract` open: real input, observable expected output, check command, pass criteria.",
-      ];
-  const onboardingRecorded = /onboarding:[a-f0-9]{12}/.test(syllabusText ?? "");
-  const onboardingGate = onboardingRecorded
-    ? [
-        "- onboarding evidence: recorded. On the first input of a session, read the docs/code, compare them with the user's expectation and append the human judgement before opening a contract.",
-      ]
-    : [
-        "- ⛔ No project onboarding evidence yet: call `project_onboarding`, then record the docs-vs-reality gaps and needed skills before any goal contract.",
-      ];
-
+      ];  // Focus: turn the user's sentence into the smallest truthful file set. This is
   // Focus: turn the user's sentence into the smallest truthful file set. This is
   // what stops the "plan first, scan everything" loop the audit found.
   let focusPlan: FocusPlan | null = null;
@@ -329,7 +320,6 @@ export function buildContextPack(
     "",
     "### Pre-work gate — goal contract",
     ...gate,
-    ...onboardingGate,
     "",
     ...(focusBody ? [`### Focus files — from the user's message (${Buffer.byteLength(focusBody, "utf8")}B)`, focusBody, ""] : []),
     `### Session memory (${memory.recent} recent, ${memory.archives} archives) — owner: ${CONTEXT_OWNERS.memory.agent}`,

@@ -1,19 +1,19 @@
 // Spec §5 — persistent local memory.
 //
-// Two layers, on purpose:
-//   RAM  (ctx.storage)  — the latest KEEP_RECENT messages per session, cheap to read
-//   disk (.zombiecoder/memory/<session>.jsonl) — everything that fell out, append-only
+// Disk is the source of truth:
+//   disk (.zombiecoder/memory/<session>.jsonl) — the full user/assistant transcript,
+//        append-only, plain JSONL, portable with the project.
+//   RAM  (ctx.storage) — only the latest KEEP_RECENT messages, a fast cache.
 //
-// The index (.zombiecoder/memory/index.json) is the list of archives so an agent can
-// find older context without loading it. This lives per working directory, so two
-// projects never share a memory.
+// OpenCode's storage is never the only copy. A version change or a move to another
+// machine must not erase the conversation: the project folder carries it.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { appendJsonl, readJson, readJsonl, readText, sha256, writeJson } from "./io.ts";
 import { memoryArchiveFile, memoryDir, memoryIndexFile, safe } from "./paths.ts";
 
-export const KEEP_RECENT = 5;
+export const KEEP_RECENT = 10;
 export const INDEX_STORAGE_PREFIX = "memory/index/";
 
 export type StorageLike = {
@@ -115,14 +115,30 @@ export function toMemoryMessage(item: any, index?: number): MemoryMessage {
 
 // Memory is the conversation, not the system prompt. Archiving system/tool rows
 // filled the store with the tool catalog and made "what did we decide?" unreadable.
-const ARCHIVED_ROLES = new Set(["user", "assistant", "message", ""]);
+const ARCHIVED_ROLES = new Set(["user", "assistant", "message"]);
 
 export function isArchivableRole(role?: string): boolean {
   return ARCHIVED_ROLES.has(String(role ?? "").toLowerCase());
 }
 
 // Disk is the truth. If an archive file exists but predates the index (or was
-// copied in by hand), add it on read so the agent never has to guess.
+// copied in by hand), rebuild its counts from the file itself so a project moved
+// to another machine still knows what it has, even without index.json.
+function countArchive(file: string): { count: number; firstAt?: string; lastAt?: string } {
+  const records = readJsonl<{ ts?: string; archived?: MemoryMessage[] }>(file);
+  let count = 0;
+  let firstAt: string | undefined;
+  let lastAt: string | undefined;
+  for (const record of records) {
+    count += Array.isArray(record.archived) ? record.archived.length : 0;
+    if (typeof record.ts === "string" && record.ts) {
+      firstAt ??= record.ts;
+      lastAt = record.ts;
+    }
+  }
+  return { count, firstAt, lastAt };
+}
+
 function reconcileArchives(projectRoot: string, index: MemoryIndex): MemoryIndex {
   if (!Array.isArray(index.archives)) index.archives = [];
   let files: string[] = [];
@@ -142,15 +158,26 @@ function reconcileArchives(projectRoot: string, index: MemoryIndex): MemoryIndex
       continue;
     }
     const sessionID = name.replace(/\.jsonl$/i, "");
+    const counted = countArchive(file);
     index.archives.push({
       sessionID,
       file,
-      archived: index.sessions[sessionID]?.archivedTotal ?? 0,
+      archived: counted.count,
       bytes: stat.size,
-      firstAt: stat.birthtime.toISOString(),
-      lastAt: stat.mtime.toISOString(),
+      firstAt: counted.firstAt ?? stat.birthtime.toISOString(),
+      lastAt: counted.lastAt ?? stat.mtime.toISOString(),
       updatedAt: stat.mtime.toISOString(),
     });
+    if (!index.sessions[sessionID]) {
+      index.sessions[sessionID] = {
+        sessionID,
+        updatedAt: stat.mtime.toISOString(),
+        kept: 0,
+        archivedTotal: counted.count,
+        archiveFile: file,
+        lastMessageAt: counted.lastAt ?? stat.mtime.toISOString(),
+      };
+    }
   }
   return index;
 }
@@ -223,7 +250,8 @@ function appendUniqueArchive(
   projectRoot: string,
   sessionID: string,
   messages: MemoryMessage[],
-): { archived: number; file: string; bytes: number } {
+  agentID?: string,
+): { archived: number; total: number; file: string; bytes: number } {
   const file = memoryArchiveFile(projectRoot, sessionID);
   const existing = readJsonl<{ archived?: MemoryMessage[] }>(file);
   const seen = new Set<string>();
@@ -239,7 +267,9 @@ function appendUniqueArchive(
     return true;
   });
   if (fresh.length > 0) {
-    appendJsonl(file, { ts: new Date().toISOString(), sessionID, archived: fresh });
+    // One record per sync, with the agent that produced the assistant turn. The
+    // format stays plain JSONL so a newer OpenCode can read it without this plugin.
+    appendJsonl(file, { ts: new Date().toISOString(), sessionID, agent: agentID, archived: fresh });
   }
   let bytes = 0;
   try {
@@ -247,36 +277,38 @@ function appendUniqueArchive(
   } catch {
     /* no archive exists until the first non-empty append */
   }
-  return { archived: fresh.length, file, bytes };
+  return { archived: fresh.length, total: seen.size, file, bytes };
 }
 
 function recordArchive(
   projectRoot: string,
   sessionID: string,
   kept: number,
-  archived: number,
+  archivedTotal: number,
   archiveFile: string,
   bytes: number,
 ): void {
   const now = new Date().toISOString();
   const index = readIndex(projectRoot);
   const previous = index.sessions[sessionID];
+  // Totals come from the file that was just read, never from adding to a cached
+  // number: re-reading the index after a rebuild must not double-count.
   index.sessions[sessionID] = {
     ...(previous ?? {}),
     sessionID,
     updatedAt: now,
     kept,
-    archivedTotal: (previous?.archivedTotal ?? 0) + archived,
+    archivedTotal,
     archiveFile,
     lastMessageAt: now,
   };
-  if (archived > 0) {
+  if (archivedTotal > 0) {
     const previousArchive = index.archives.find((entry) => entry.sessionID === sessionID);
     index.archives = index.archives.filter((entry) => entry.sessionID !== sessionID);
     index.archives.push({
       sessionID,
       file: archiveFile,
-      archived: (previousArchive?.archived ?? 0) + archived,
+      archived: archivedTotal,
       bytes,
       firstAt: previousArchive?.firstAt ?? now,
       lastAt: now,
@@ -291,10 +323,10 @@ export async function keepRecent(
   projectRoot: string,
   sessionID: string,
   messages: any[],
+  agentID?: string,
 ): Promise<{ kept: number; archived: number; archiveFile: string }> {
   const all = messages.map(toMemoryMessage).filter((m) => m.text.length > 0 && isArchivableRole(m.role));
   const recent = all.slice(-KEEP_RECENT);
-  const older = all.slice(0, Math.max(0, all.length - KEEP_RECENT));
 
   await storage.set(storageKey(sessionID), {
     updatedAt: new Date().toISOString(),
@@ -302,8 +334,10 @@ export async function keepRecent(
     recent,
   });
 
-  const appended = appendUniqueArchive(projectRoot, sessionID, older);
-  recordArchive(projectRoot, sessionID, recent.length, appended.archived, appended.file, appended.bytes);
+  // Archive the whole visible dialogue, not only the overflow: the disk copy is
+  // the portable transcript, storage is a cache of the last KEEP_RECENT turns.
+  const appended = appendUniqueArchive(projectRoot, sessionID, all, agentID);
+  recordArchive(projectRoot, sessionID, recent.length, appended.total, appended.file, appended.bytes);
 
   return {
     kept: recent.length,
@@ -317,6 +351,7 @@ export async function archiveSessionSnapshot(
   projectRoot: string,
   sessionID: string,
   messages: any[],
+  agentID?: string,
 ): Promise<{ kept: number; archived: number; archiveFile: string }> {
   const all = messages.map(toMemoryMessage).filter((message) => message.text.length > 0 && isArchivableRole(message.role));
   const recent = all.slice(-KEEP_RECENT);
@@ -325,8 +360,8 @@ export async function archiveSessionSnapshot(
     sessionID,
     recent,
   });
-  const appended = appendUniqueArchive(projectRoot, sessionID, all);
-  recordArchive(projectRoot, sessionID, recent.length, appended.archived, appended.file, appended.bytes);
+  const appended = appendUniqueArchive(projectRoot, sessionID, all, agentID);
+  recordArchive(projectRoot, sessionID, recent.length, appended.total, appended.file, appended.bytes);
   return { kept: recent.length, archived: appended.archived, archiveFile: appended.file };
 }
 
@@ -342,11 +377,12 @@ export function archiveSummary(projectRoot: string, sessionID: string): string {
   const known = index.archives.find((a) => a.sessionID === sessionID);
   return [
     `Session ${sessionID}`,
-    `kept in RAM: ${entry.kept}`,
-    `archived to disk: ${entry.archivedTotal}`,
+    `kept in RAM (cache): ${entry.kept}`,
+    `full dialogue archived to disk: ${entry.archivedTotal}`,
     `archive file: ${entry.archiveFile}${exists ? "" : " (not written yet)"}`,
     `index knows ${index.archives.length} archive file(s); this session: ${known ? `${known.archived} message(s), ${known.bytes} bytes` : "not indexed yet"}`,
     `last message: ${entry.lastMessageAt}`,
     `index file: ${memoryIndexFile(projectRoot)}`,
+    "Disk is the source of truth; OpenCode storage is only the recent-message cache.",
   ].join("\n");
 }

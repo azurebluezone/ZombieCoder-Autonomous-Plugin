@@ -11,7 +11,7 @@ import {
   listSkillCatalog,
   SKILL_CATALOG,
 } from "../src/zombie/skillCatalog.ts";
-import { registerSkills } from "../src/zombie/skills.ts";
+import { discoverSkills, parseFrontmatter, registerSkills } from "../src/zombie/skills.ts";
 
 function tempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -135,7 +135,7 @@ test("registerSkills re-discovers shared skills when the skill door reloads", as
   }
 });
 
-test("runtime downloads a missing skill from a git repo and installs it once at the install root", async (t) => {
+test("runtime installs a skill once at the install root without touching the project", async (t) => {
   const git = spawnSync("git", ["--version"], { encoding: "utf8" });
   if (git.status !== 0) {
     t.skip("git is not installed");
@@ -178,6 +178,19 @@ test("runtime downloads a missing skill from a git repo and installs it once at 
     assert.equal(installed.copied, true);
     assert.equal(Object.prototype.hasOwnProperty.call(installed, "error"), false);
     assert.ok(fs.existsSync(path.join(installRoot, "zombiecoder", "skills", "node.md")));
+
+    // OpenCode's native global door: skills/<name>/SKILL.md with a rewritten
+    // name that matches the directory, not the catalog id.
+    const native = path.join(installRoot, "skills", "node", "SKILL.md");
+    assert.ok(fs.existsSync(native), "native skills/node/SKILL.md missing");
+    const parsed = parseFrontmatter(fs.readFileSync(native, "utf8"));
+    assert.equal(parsed.data.name, "node");
+    assert.match(parsed.data.description, /Build and debug Node\.js/);
+    assert.match(parsed.body, /# Node\.js/);
+
+    const nativeListing = listSkillCatalog(installRoot).skills.find((skill) => skill.id === "node");
+    assert.equal(nativeListing?.native, true);
+
     assert.ok(
       !fs.existsSync(path.join(project, ".zombiecoder", "skills")),
       "opening a project must not create a per-project skill tree",
@@ -187,6 +200,28 @@ test("runtime downloads a missing skill from a git repo and installs it once at 
     const node = listing.skills.find((skill) => skill.id === "node");
     assert.equal(node?.installed, true);
     assert.equal(node?.cached, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("discoverSkills skips a legacy flat file when its native SKILL.md exists", () => {
+  const root = tempDir("zombiecoder-skill-dupe-");
+  try {
+    write(
+      path.join(root, "zombiecoder", "skills", "dupe.md"),
+      "---\nid: dupe\nname: Legacy\n---\n\nLegacy body.\n",
+    );
+    write(
+      path.join(root, "skills", "dupe", "SKILL.md"),
+      "---\nname: dupe\ndescription: native copy\n---\n\nNative body.\n",
+    );
+    write(
+      path.join(root, "zombiecoder", "skills", "legacy-only.md"),
+      "---\nid: legacy-only\nname: Legacy only\n---\n\nOnly here.\n",
+    );
+    const ids = discoverSkills(root).map((skill) => skill.id).sort();
+    assert.deepEqual(ids, ["zombiecoder.workstation.legacy-only"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

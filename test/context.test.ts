@@ -88,7 +88,11 @@ test("context pack merges SSOT, syllabus and memory into a bounded pack", () => 
   assert.match(pack.text, /### Syllabus/);
   assert.match(pack.text, /### Session memory \(2 recent, 0 archives\)/);
   assert.match(pack.text, /Allowed root: /);
-  assert.ok(pack.bytes > 0 && pack.bytes <= CONTEXT_LIMITS.total, `pack must stay bounded, got ${pack.bytes}`);
+  assert.ok(pack.bytes > 0, "pack must not be empty");
+  assert.ok(
+    pack.text.length <= CONTEXT_LIMITS.total + 64,
+    `pack must stay bounded, got ${pack.text.length} chars (limit ${CONTEXT_LIMITS.total})`,
+  );
   assert.match(pack.uiLine, /Context: SSOT OK \(manu\) \| Syllabus OK \(halim\) \| Memory 2 recent/);
   assert.equal(pack.ssot.exists, true);
   assert.equal(pack.syllabus.exists, true);
@@ -110,6 +114,14 @@ test("context pack merges SSOT, syllabus and memory into a bounded pack", () => 
   assert.match(pack.uiLine, /SSOT OK \(manu\)/);
   assert.match(pack.uiLine, /Syllabus OK \(halim\)/);
   assert.match(pack.text, /### Context ownership/);
+});
+
+test("context pack carries persona context, not model identity", () => {
+  const root = seedProject();
+  const pack = buildContextPack(root, "jarin");
+  assert.doesNotMatch(pack.text, /### Runner identity/);
+  assert.doesNotMatch(pack.text, /big-pickle/);
+  assert.doesNotMatch(pack.text, /kind: (free|local|paid)/);
 });
 
 test("syllabus excerpt shows the newest lesson, not the seed placeholder", () => {
@@ -157,23 +169,26 @@ test("pre-work gate says none when the session has no open contract", () => {
   const pack = buildContextPack(root, "manu", [], "", "ses_none");
   assert.match(pack.text, /### Pre-work gate/);
   assert.match(pack.text, /- none for this session\./);
-  assert.match(pack.text, /No project onboarding evidence yet/);
+  assert.doesNotMatch(pack.text, /onboarding evidence|No project onboarding evidence/);
   assert.match(pack.uiLine, /\| Contract none/);
 });
 
-test("pre-work gate asks for onboarding until the syllabus records it", () => {
+test("pre-work gate never adds an onboarding status line", () => {
   const root = seedProject();
-  const syllabus = path.join(root, ".zombiecoder", "syllabus.md");
   const before = buildContextPack(root, "manu");
-  assert.match(before.text, /No project onboarding evidence yet/);
+  assert.doesNotMatch(before.text.split("### Pre-work gate — goal contract")[1].split("###")[0], /onboarding/i);
 
   fs.appendFileSync(
-    syllabus,
+    path.join(root, ".zombiecoder", "syllabus.md"),
     "\n### Project onboarding\n\n`onboarding:abcdef123456`\n\n- docs read\n",
   );
   const after = buildContextPack(root, "manu");
-  assert.match(after.text, /onboarding evidence: recorded/);
-  assert.doesNotMatch(after.text, /No project onboarding evidence yet/);
+  // The lesson itself is allowed in the syllabus excerpt. What must never appear
+  // is a synthetic onboarding status line in the gate or the UI summary.
+  const gate = after.text.split("### Pre-work gate — goal contract")[1].split("###")[0];
+  assert.doesNotMatch(gate, /onboarding/i);
+  assert.doesNotMatch(after.uiLine, /onboarding/i);
+  assert.match(after.text, /### Project onboarding/, "the recorded lesson must stay readable");
 });
 
 test("context pack marks missing SSOT instead of inventing content", () => {

@@ -16,10 +16,11 @@
 //
 // Per working directory the runtime creates only .zombiecoder (SSOT, syllabus,
 // memory, .state). Project config/models/fingerprint/footprint/mcp are not
-// created. Skills live once at <install>/zombiecoder/skills, shared by every
-// working directory; the installer seeds the offline catalog and the runtime
-// `skill_catalog` tool fetches a named skill on demand. No .opencode and no
-// skills directory is created in arbitrary working directories.
+// created. Skills live once at <install>/skills/<name>/SKILL.md, which OpenCode
+// discovers natively; a legacy flat copy stays in <install>/zombiecoder/skills
+// for the plugin transform, and the installer seeds the offline catalog.
+// `skill_catalog` fetches a named skill on demand. No .opencode and no skills
+// directory is created in arbitrary working directories.
 //
 // NO backups, NO .bak files, NO archives: the owner keeps their own. Writes are atomic
 // (temp + rename) and existing files are only replaced when the content actually differs.
@@ -112,6 +113,20 @@ const { lspPackageList, resolveLspServers, syncLspConfig } = await import(
 const { planInstallSpace, formatMb } = await import(
   pathToFileURL(path.join(PACKAGE_ROOT, "src", "install", "space.ts")).href
 );
+// OpenCode V2 runtime detection. V1 (opencode-ai) and V2 (@opencode/cli) are
+// different packages; this install writes V2 config, so it must not accept V1.
+const {
+  OPENCODE_PACKAGE,
+  findOpenCodeBinary,
+  inspectVersion,
+  npmInstallArgs,
+  parseMode: parseOpenCodeMode,
+} = await import(pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "opencodeRuntime.ts")).href);
+// V2 puts every MCP server under mcp.servers and uses `disabled`; a V1-shaped
+// entry is silently ignored, which shows up as "no tools" in the agent.
+const { migrateMcpConfig, mcpServerNames } = await import(
+  pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "mcpConfig.ts")).href
+);
 
 const argv = process.argv.slice(2);
 function flag(name) {
@@ -149,6 +164,14 @@ Options:
   --origin-url <url>     optional public origin handshake URL
   --no-install           skip npm install
   --no-lsp               skip LSP server install + lsp config generation
+  --opencode <mode>      auto | install | none (default: auto)
+                         auto    use an existing V2 binary; never downloads
+                         install download @opencode/cli when no V2 binary is found
+                         none    only write config; do not look for OpenCode
+  --no-opencode          same as --opencode none
+  --opencode-path <bin>  use this OpenCode binary instead of PATH discovery
+  --opencode-prefix <d>  npm global prefix for --opencode install
+  --no-mcp-check         skip the local stdio tools/list verification
   --no-space-check       skip the free-space preflight
   --keep-cache           never clean the npm cache automatically
   --force-low-space      proceed even when the preflight says space is short
@@ -209,6 +232,19 @@ const DO_SPACE_CHECK = !flag("--no-space-check");
 const KEEP_CACHE = flag("--keep-cache");
 const FORCE_LOW_SPACE = flag("--force-low-space");
 const FORCE_INSTALL = flag("--force-install");
+const DO_MCP_CHECK = !flag("--no-mcp-check");
+
+// --opencode is a mode, not a boolean: `auto` must never download behind the
+// owner's back. `install` is the explicit download consent.
+let OPENCODE_MODE;
+try {
+  OPENCODE_MODE = parseOpenCodeMode(value("--opencode", "auto"), flag("--no-opencode"));
+} catch (error) {
+  console.error(`[zc] FAIL ${String(error?.message ?? error)}`);
+  process.exit(2);
+}
+const OPENCODE_PATH = value("--opencode-path", null);
+const OPENCODE_PREFIX = value("--opencode-prefix", null);
 
 // ---- disk preflight -----------------------------------------------------------
 // A live USB can die halfway through npm and leave a tree that looks installed.
@@ -725,14 +761,69 @@ function linkSelfContainedGlobal() {
   return `${linked.length} linked: ${linked.sort().join(", ")}${suffix}`;
 }
 
+// OpenCode reads both ~/.config/opencode and ~/.opencode when both exist. MCP
+// servers are keyed by name there, so an old 5-tool copy in the other root can
+// win and hide a newly added tool. Update the generated copy; do not edit or
+// delete the owner's config.
+function alternateConfigRoot() {
+  const current = path.resolve(CONFIG_DIR);
+  const globalRoot = path.resolve(GLOBAL_DIR);
+  const homeRoot = path.resolve(path.join(os.homedir(), ".opencode"));
+  if (current === globalRoot && globalRoot !== homeRoot) {
+    return { root: homeRoot, label: "legacy --home install" };
+  }
+  if (current === homeRoot && globalRoot !== homeRoot) {
+    return { root: globalRoot, label: "global install" };
+  }
+  return null;
+}
+
+function syncAlternateMcpCopy() {
+  const other = alternateConfigRoot();
+  if (!other) return "skipped (not a default global/home install)";
+  const configFile = path.join(other.root, "opencode.json");
+  if (!fs.existsSync(configFile)) return `skipped (${other.label} has no opencode.json)`;
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  } catch {
+    return `skipped (${other.label} config is not strict JSON)`;
+  }
+  const names = mcpServerNames(config.mcp);
+  if (names.length === 0) return `skipped (${other.label} registers no MCP servers)`;
+  const target = path.join(other.root, "mcp");
+  const localNames = names.filter((name) => {
+    const entry = config.mcp?.servers?.[name];
+    const command = Array.isArray(entry?.command) ? entry.command : [];
+    return (
+      entry?.type === "local" &&
+      command.some(
+        (part) =>
+          typeof part === "string" &&
+          path.resolve(part).startsWith(target + path.sep),
+      )
+    );
+  });
+  if (localNames.length === 0) return `skipped (${other.label} uses no local mcp/ copy)`;
+  const source = path.join(CONFIG_DIR, "mcp");
+  fs.cpSync(source, target, {
+    recursive: true,
+    force: true,
+    filter: (entry) => !entry.split(path.sep).includes("node_modules"),
+  });
+  return `updated ${localNames.length} server copy/copies in ${path.relative(
+    os.homedir(),
+    target,
+  )} (${localNames.join(", ")})`;
+}
+
 // One plugin must load once. A global install and an old --home install both put
 // a loader on OpenCode's plugin path; the second registration fails with
 // "Duplicate plugin ID: zombiecoder". Retire only a generated entry in the other
 // root, with a backup, so a hand-written file is never touched. The rest of the
 // old root stays where it is: this removes the duplicate loader, not the user's
 // config or state.
-function retireLegacyDuplicateEntry() {
-  const installRoot = path.resolve(CONFIG_DIR);
+function retireLegacyDuplicateEntry() {  const installRoot = path.resolve(CONFIG_DIR);
   const defaultHome = path.resolve(path.join(os.homedir(), ".opencode"));
   const other = GLOBAL_MODE
     ? { root: defaultHome, label: "legacy --home install" }
@@ -1013,6 +1104,117 @@ console.log(
 );
 console.log("=".repeat(72));
 
+// ---- 0. OpenCode runtime -----------------------------------------------------
+// The config below is V2 (`mcp.servers`, V2 agent shape). Pointing it at V1
+// (package opencode-ai) produces a config the running binary silently ignores.
+// `auto` only reuses an existing V2 binary; downloading needs `install`.
+let opencodeInfo = null;
+await step("ensure OpenCode runtime", () => {
+  if (OPENCODE_MODE === "none") return "skipped (--opencode none)";
+
+  const runVersion = (binary) => {
+    const probe = spawnSync(binary, ["--version"], {
+      encoding: "utf8",
+      timeout: 20000,
+      shell: process.platform === "win32" && /\.cmd$/i.test(binary),
+    });
+    if (probe.error) return { error: String(probe.error.message ?? probe.error) };
+    const output = `${probe.stdout ?? ""}\n${probe.stderr ?? ""}`.trim();
+    if (probe.status !== 0) {
+      return { error: `exited ${probe.status}: ${output || "(no output)"}` };
+    }
+    return { output };
+  };
+
+  const accept = (binary) => {
+    const versionRun = runVersion(binary);
+    const info = inspectVersion(binary, () => versionRun.output ?? "");
+    if (!info.found) {
+      return {
+        error: `could not read a version from ${binary} --version${
+          versionRun.error ? ` (${versionRun.error})` : ""
+        }`,
+      };
+    }
+    if (info.major < 2) {
+      return {
+        error:
+          `found OpenCode ${info.version} (V1) at ${binary}. This installer writes V2 config ` +
+          `and refuses to point it at V1; install @opencode/cli (not opencode-ai) or ` +
+          `use --opencode install.`,
+      };
+    }
+    opencodeInfo = info;
+    return { info };
+  };
+
+  let binary = OPENCODE_PATH;
+  if (binary) {
+    if (!fs.existsSync(binary)) {
+      throw new Error(`--opencode-path does not exist: ${binary}`);
+    }
+    const checked = accept(binary);
+    if (checked.error) throw new Error(checked.error);
+    return `using ${checked.info.version} at ${binary} (--opencode-path)`;
+  }
+
+  binary = findOpenCodeBinary({ home: os.homedir(), env: process.env });
+  if (binary) {
+    const checked = accept(binary);
+    if (!checked.error) return `using existing ${checked.info.version} at ${binary}`;
+    // A binary on PATH that cannot report a version is broken, not absent.
+    throw new Error(checked.error);
+  }
+
+  if (OPENCODE_MODE === "auto") {
+    return (
+      "not found (V2 config written); install @opencode/cli or rerun with " +
+      "--opencode install, or --opencode none to silence this check"
+    );
+  }
+
+  // Explicit download consent. npm is the documented V2 install method that
+  // works on every platform this installer supports.
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npmPrefix = () => {
+    const result = spawnSync(npm, ["prefix", "-g"], {
+      encoding: "utf8",
+      timeout: 30000,
+      shell: process.platform === "win32",
+    });
+    return String(result.stdout ?? "").trim() || null;
+  };
+  const prefix = OPENCODE_PREFIX ?? npmPrefix();
+  const args = npmInstallArgs(prefix);
+  const install = spawnSync(npm, args, {
+    encoding: "utf8",
+    timeout: 300000,
+    shell: process.platform === "win32",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (install.error) throw new Error(`npm install failed: ${String(install.error.message ?? install.error)}`);
+  if (install.status !== 0) {
+    const tail = String(install.stderr || install.stdout || "").trim().split("\n").slice(-4).join(" ");
+    throw new Error(`npm exited ${install.status} while installing ${OPENCODE_PACKAGE}: ${tail}`);
+  }
+
+  const exe = process.platform === "win32" ? "opencode.cmd" : "opencode";
+  const candidates = [
+    prefix ? path.join(prefix, "bin", exe) : null,
+    prefix ? path.join(prefix, exe) : null,
+  ].filter(Boolean);
+  binary = candidates.find((file) => fs.existsSync(file)) ?? findOpenCodeBinary({ home: os.homedir(), env: process.env });
+  if (!binary) {
+    throw new Error(
+      `installed ${OPENCODE_PACKAGE} but no binary found under ${prefix || "npm prefix"}; ` +
+        `add it to PATH or pass --opencode-path`,
+    );
+  }
+  const checked = accept(binary);
+  if (checked.error) throw new Error(checked.error);
+  return `installed ${checked.info.version} at ${binary}`;
+});
+
 // ---- 1. scaffold ---------------------------------------------------------------
 await step("scaffold install root", () => {
   // Project skills are created by the plugin's first setup, not by the global
@@ -1102,6 +1304,42 @@ await step("copy runtime assets", () => {
   return `${assets.length + skillFiles} files -> ${path.relative(TARGET, RUNTIME_ASSETS_DIR)}/{docs,tools,tls,model.mjs,skills-catalog}`;
 });
 
+// ---- 2b-2. native skills ------------------------------------------------------
+// OpenCode V2 discovers `<config>/skills/<name>/SKILL.md` itself, in every
+// working directory. Seed the bundled catalog here so a fresh install has the
+// skills without waiting for a project's first setup; `skill_catalog`
+// action=install later writes the same folder for a named skill.
+await step("seed native skills", async () => {
+  const { SKILL_CATALOG, catalogDir, installNativeSkill } = await import(
+    pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "skillCatalog.ts")).href
+  );
+  const { nativeSkillsDir } = await import(
+    pathToFileURL(path.join(PACKAGE_ROOT, "src", "zombie", "paths.ts")).href
+  );
+  const cache = catalogDir(CONFIG_DIR);
+  const created = [];
+  const present = [];
+  const missing = [];
+  const failed = [];
+  for (const spec of SKILL_CATALOG) {
+    const source = path.join(cache, spec.file);
+    if (!fs.existsSync(source)) {
+      missing.push(spec.id);
+      continue;
+    }
+    const result = installNativeSkill(CONFIG_DIR, spec.id, source);
+    if (result.error) failed.push(`${spec.id}: ${result.error}`);
+    else if (result.nativeCopied) created.push(spec.id);
+    else present.push(spec.id);
+  }
+  if (failed.length) throw new Error(`native skill write failed: ${failed.join("; ")}`);
+  if (created.length + present.length === 0) throw new Error("no native skills seeded");
+  return `${created.length} new, ${present.length} existing, ${missing.length} missing source -> ${path.relative(
+    TARGET,
+    nativeSkillsDir(CONFIG_DIR),
+  )}/ (${SKILL_CATALOG.length} catalog)`;
+});
+
 // ---- 2c. in-repo MCP servers -------------------------------------------------
 // The package ships stdio MCP servers under mcp/. Copy them into the install
 // root so the clone can be deleted, and register each one in opencode.json in
@@ -1123,6 +1361,10 @@ await step("copy MCP servers", () => {
   if (servers.length === 0) return "0 server(s) with server.mjs";
   return `${servers.length} server(s) -> mcp/: ${servers.map((server) => server.name).join(", ")}`;
 });
+
+// The same server name in both config roots means the older copy can answer.
+// Keep the alternate root's generated copy byte-current with this install.
+await step("sync alternate MCP copies", syncAlternateMcpCopy);
 
 // ---- 3. declare the dependency ------------------------------------------------
 await step("declare @opencode/plugin dependency", () => {
@@ -1550,10 +1792,18 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
   // the install and need no network. The remote ZombieCoder MCP is registered
   // only when the probe actually reached it — a dead default URL in
   // opencode.json slows every boot and teaches the user to ignore errors.
+  //
+  // V2 shape first: direct `mcp.<name>` entries are moved under `mcp.servers`
+  // and `enabled:false` becomes `disabled:true`. A V1-shaped entry is ignored by
+  // V2, which looks exactly like "the tools disappeared".
   const localMcp = listMcpServers(path.join(CONFIG_DIR, "mcp"));
-  if (mcpProbe?.ok || localMcp.length > 0) {
-    next.mcp = { ...(existing.mcp ?? {}) };
-    next.mcp.servers = { ...(next.mcp.servers ?? {}) };
+  const migratedMcp = migrateMcpConfig(existing.mcp);
+  if (
+    mcpProbe?.ok ||
+    localMcp.length > 0 ||
+    Object.keys(migratedMcp.mcp.servers).length > 0
+  ) {
+    next.mcp = migratedMcp.mcp;
   }
   if (mcpProbe?.ok) {
     next.mcp.servers.zombiecoder = {
@@ -1588,11 +1838,63 @@ await step("sync opencode.json (providers, agents, permissions, MCP)", async () 
   const mcpSummary = [
     localMcp.length ? `local MCP: ${localMcp.map((server) => server.name).join(", ")}` : null,
     mcpProbe?.ok ? `remote MCP zombiecoder (${mcpProbe.tools.length} tools)` : null,
+    migratedMcp.moved.length ? `moved ${migratedMcp.moved.join(", ")} under mcp.servers` : null,
+    migratedMcp.enabledRemoved.length
+      ? `removed enabled from ${migratedMcp.enabledRemoved.join(", ")}`
+      : null,
+    migratedMcp.invalid.length
+      ? `invalid ${migratedMcp.invalid.map((item) => `${item.name} (${item.reason})`).join(", ")}`
+      : null,
   ]
     .filter(Boolean)
     .join("; ");
   return `${providerSummary}; ${roster.ROSTER.length} agents + ${next.permissions.length} permission rules; ${mcpSummary || "MCP not registered"}`;
 });
+
+// ---- 8a. MCP tools/list ------------------------------------------------------
+// Reading opencode.json proves the file, not the server. Speak one real
+// initialize + tools/list handshake over stdio for every bundled server.
+if (DO_PROVIDER_CONFIG && DO_MCP_CHECK) {
+  await step("verify MCP tools (stdio)", async () => {
+    const servers = listMcpServers(path.join(CONFIG_DIR, "mcp"));
+    if (servers.length === 0) return "skipped (no local MCP servers)";
+    const { startServer } = await import(
+      pathToFileURL(path.join(PACKAGE_ROOT, "mcp", "shared", "client.mjs")).href
+    );
+    const parts = [];
+    for (const server of servers) {
+      const client = await startServer(server.entry, {
+        timeoutMs: 20000,
+        cwd: path.dirname(server.entry),
+      });
+      try {
+        await client.request("initialize", {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "zombiecoder-installer", version: PKG.version },
+        });
+        const listed = await client.request("tools/list", {});
+        const names = Array.isArray(listed?.tools)
+          ? listed.tools.map((tool) => tool?.name).filter((name) => typeof name === "string")
+          : [];
+        if (names.length === 0) throw new Error(`${server.name}: tools/list returned 0 tools`);
+        if (server.name === "image-brand" && !names.includes("web_decorate")) {
+          throw new Error("image-brand: web_decorate missing from tools/list");
+        }
+        parts.push(`${server.name}=${names.length}`);
+      } finally {
+        await client.close();
+      }
+    }
+    return parts.join(", ");
+  });
+} else {
+  report.steps.push({
+    step: "verify MCP tools (stdio)",
+    ok: true,
+    detail: DO_MCP_CHECK ? "skipped (--no-provider-config)" : "skipped (--no-mcp-check)",
+  });
+}
 
 // ---- 8b. LSP config ----------------------------------------------------------
 // Generate the `lsp` section from binaries that actually resolve. Existing
@@ -1754,13 +2056,14 @@ if (!fs.existsSync(path.join(pluginFolder, "plugin.ts"))) {
 }
 console.log("-".repeat(72));
 console.log(`installed: ${report.steps.length - failed.length}/${report.steps.length} steps ok`);
+if (opencodeInfo) console.log(`opencode: ${opencodeInfo.version} at ${opencodeInfo.path}`);
 if (SELF_MODE || GLOBAL_MODE) {
   console.log(`global: ${TARGET}/{opencode.json,agents,plugins,zombiecoder}`);
   console.log("per-directory: each working directory gets only .zombiecoder");
   console.log("  (SSOT, syllabus, memory, .state); no .opencode is created there.");
   console.log("  no per-project config.json/models.json/fingerprint.json/footprint.jsonl/mcp.json.");
-  console.log("skills: shared at <install>/zombiecoder/skills (not per working directory);");
-  console.log("        `skill_catalog` action=install fetches a named skill from git on demand.");
+  console.log("skills: native at <install>/skills/<name>/SKILL.md (OpenCode discovers it globally);");
+  console.log("        legacy store <install>/zombiecoder/skills; `skill_catalog` fetches a named skill on demand.");
   console.log("lsp: opencode.json `lsp` generated from installed server binaries;");
   console.log("     verify with `npm run lsp:probe`.");
 } else {

@@ -229,7 +229,8 @@ curl -fsSL https://raw.githubusercontent.com/azurebluezone/ZombieCoder-Autonomou
    state-এর SHA-256 তুলনা করা হয় (`H1 === H2`)। Probe latency/timestamp বাদ যায়,
    কিন্তু model assignment, config ও agent graph-এর মতো decision field থাকে।
 6. **proof** — entrypoint, downloaded source-এর সাথে installed plugin graph-এর
-   hash fidelity, এক loader, ৯ agent, consent `ask`, dependencies, audit, LSP
+   hash fidelity, এক loader, ৯ agent, consent `ask`, dependencies, audit, native
+   skill `skills/<name>/SKILL.md`, local MCP `initialize` + `tools/list`, LSP
    config, real LSP initialize, live `/api/plugin` (running instance reload করে),
    live MCP connectivity (`/api/mcp`), space delta ও staging cleanup যাচাই হয়।
 
@@ -549,6 +550,36 @@ Windows PowerShell:
 Get-Content <project>\.zombiecoder\.state\setup-report.json
 Get-Content <project>\.zombiecoder\.state\audit.jsonl
 ```
+
+### ৫.৫ Session ও এজেন্ট যাচাই
+
+কোন folder-এ কোন agent চলছে এবং সে নিয়ম মানছে কিনা — Live API থেকে দেখা যায়:
+
+```bash
+# newest session: id, agent, directory
+opencode api get /api/session \
+  | jq -r '.data | sort_by(.time.created) | last | [.id, .agent, .location.directory] | @tsv'
+```
+
+```bash
+# that session's visible assistant text (first turn + tool calls)
+opencode api get /api/session/<session-id>/message \
+  | jq -r '.data[] | select(.type=="assistant") | .content[]? | select(.type=="text") | .text' \
+  | head -40
+```
+
+Checklist:
+
+- প্রথম assistant line `ভাইয়া` দিয়ে শুরু, তারপর
+  `Context: SSOT … | Syllabus … | Memory … | Contract …`।
+- নতুন project-এ প্রথম input-এ `project_onboarding` চলে; docs আর code-এর gap
+  syllabus-এ লেখা হয়।
+- কোনো write-এর আগে `goal_contract` open; close নিজে check command চালায় —
+  agent নিজে PASS বলে না।
+- evidence path/command/exit code ছাড়া "হয়ে গেছে" নেই।
+
+Folder-এর নিজের প্রমাণ: `<folder>/.zombiecoder/{SSOT.md,syllabus.md,memory/,.state/audit.jsonl}`।
+Audit-এ contract ছাড়া write চেষ্টা থাকলে `blocked` entry দেখা যাবে।
 
 ---
 
@@ -932,9 +963,20 @@ Persona inject না হলে model generic উত্তর দেবে — �
 | `zombiecoder.memory_archive` | Archive করা conversation পড়া |
 | `zombiecoder.append_syllabus` | নতুন lesson append করা |
 | `zombiecoder.syntax_check` | Syntax fallback (LSP নয়): JSON, JS, TS, Python, Bash, PHP |
-| `zombiecoder.skill_catalog` | Shared skill list/install/auto; user-requested skill gate/git থেকে নামিয়ে install root-এ রাখে |
+| `zombiecoder.skill_catalog` | Native/legacy skill list, install, auto; named skill gate/git থেকে নামিয়ে install root-এ রাখে |
+| `zombiecoder.goal_contract` | কাজের আগে observable expected + check command সহ contract খোলা/বন্ধ; close নিজেই check চালায় |
+| `zombiecoder.project_onboarding` | প্রথম input-এ docs/tests/audit/skill evidence পড়ে gap syllabus-এ লেখে |
+| `zombiecoder.verify_real` | আসল input ও artifact-এর sha256 রেকর্ড; stand-in হলে `NOT_TESTED` |
+| `zombiecoder.design_sketch` | Code-এর আগে Stitch-style `sketch.md` + `design.json` |
+| `zombiecoder.design_review` | Markup/CSS-এ `file:line` a11y ও state finding |
+| `zombiecoder.agent_modes` | Agent mode দেখা/বদলানো |
+| `zombiecoder.reload` | Skills/tools/agent door reload |
+| `zombiecoder.http_probe` | HTTP status, body hash, redacted headers |
+| `zombiecoder.patch_preview` | Dry-run patch; apply-এ backup |
+| `zombiecoder.env_get` | Env presence, value leak ছাড়া |
+| `zombiecoder.service_probe` | Port/service reachability |
 
-Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
+মোট ২১টি tool। Tool execute না হলে `৬.৪ Native tool calls` দেখুন।
 
 ### MCP — দুটি local server (installer নিজেই register করে)
 
@@ -944,7 +986,7 @@ Installer clone থেকে চালালে এগুলো install root-এ
 
 | Server | Tools | কাজ |
 |---|---|---|
-| `image-brand` | 5 | PD/CC0 ছবি search (`image_search`), provenance সহ download (`image_fetch`), বাংলা title+logo branding (`image_brand`), exact-size clean crop (`image_fit`), batch (`image_batch`) |
+| `image-brand` | 6 | PD/CC0 ছবি search (`image_search`), provenance সহ download (`image_fetch`), বাংলা title+logo branding (`image_brand`), exact-size clean crop (`image_fit`), batch (`image_batch`), site decoration (`web_decorate`: logo, hero, OG, card, HTML/CSS, sha256 manifest) |
 | `public-api` | 8 | Wikipedia search/page/onthisday/featured, weather, currency, country, QR PNG |
 
 `opencode mcp list` → `✓ image-brand connected`, `✓ public-api connected`।
@@ -959,41 +1001,43 @@ Install-এর পরে কনফিগ যাচাই: `node scripts/audit-in
 ### Skills
 
 ```text
-<install>/zombiecoder/skills/*.md        # active, shared by every working directory
+<install>/skills/<name>/SKILL.md          # native global door; OpenCode নিজেই discover করে
+<install>/zombiecoder/skills/*.md         # legacy flat copy for the plugin transform
 <install>/zombiecoder/skills-catalog/*.md # offline source cache
 ```
 
 Skill আর প্রতিটি project-এ copy হয় না। Install root-এ একবার থাকে, তাই ১০টি
-working directory খুললেও ১০টি skill tree তৈরি হয় না। Installer catalog seed করে
-এবং core skill (`first-principles`, `evidence-before-confidence`,
-`resource-optimization`, `server`) shared store-এ রাখে।
+working directory খুললেও ১০টি skill tree তৈরি হয় না। Installer catalog-এর ২০টি
+skill `<install>/skills/<name>/SKILL.md`-এ seed করে; legacy flat copy-ও থাকে,
+কিন্তু native folder থাকলে `discoverSkills` সেটি skip করে — নইলে একই skill দুবার
+register হয়।
 
 User কোনো skill/ডোমেইন বললে agent সঙ্গে সঙ্গে
 `skill_catalog` `action=install` (id সহ) call করে। Tool ক্যাটালগে থাকলে local
 copy ব্যবহার করে, না থাকলে configured repo থেকে clone/raw fetch করে
-`skills-catalog`-এ নামায়, তারপর `skills/`-এ install করে এবং OpenCode-এর skill
-registry reload করে — অর্থাৎ পরের request থেকেই সেটি পাওয়া যায়। Project-এর
-ভিতরে কোনো skill file লেখা হয় না।
+`skills-catalog`-এ নামায়, তারপর native `skills/<name>/SKILL.md` + legacy copy
+লেখে এবং OpenCode-এর skill registry reload করে — অর্থাৎ পরের request থেকেই সেটি
+পাওয়া যায়। Project-এর ভিতরে কোনো skill file লেখা হয় না।
 
-Skill একটি ছোট markdown + frontmatter; `registerSkills` install root-এর shared
-store-কে OpenCode-এর skill door-এ register করে। `action=auto` current project-এর
-marker দেখে দরকারি id বেছে নেয়, কিন্তু install target একই shared store।
+Skill একটি ছোট markdown + YAML frontmatter; `registerSkills` native
+`skills/<name>/SKILL.md` door-কে অগ্রাধিকার দেয়। `action=auto` current project-এর
+marker দেখে দরকারি id বেছে নেয়, কিন্তু install target একই shared install root।
 
 ### Memory
 
-- শেষ ৫টি message context-এ রাখা হয়।
-- `session.idle` হলে OpenCode-এর session context থেকে দৃশ্যমান message text
-  `.zombiecoder/memory/<session>.jsonl`-এ append হয়; message ID দিয়ে duplicate
-  বাদ দেওয়া হয়। Reasoning/thinking block archive করা হয় না। OpenCode-এর
-  session context API না থাকলে setup report-এ subscription skipped দেখাবে;
-  archive চলাকালীন error হলে audit/console-এ দেখা যাবে। কেবল memory index তৈরি
-  হওয়া মানেই conversation archive হওয়া নয়।
+- শেষ ১০টি message context-এ রাখা হয় (`KEEP_RECENT = 10`)।
+- `session.idle` ও প্রতি context sync-এ OpenCode-এর session context থেকে দৃশ্যমান
+  পুরো user/assistant dialogue `.zombiecoder/memory/<session>.jsonl`-এ append হয়;
+  message ID দিয়ে duplicate বাদ দেওয়া হয়। Reasoning/thinking block archive করা
+  হয় না। OpenCode-এর session context API না থাকলে setup report-এ subscription
+  skipped দেখাবে; archive চলাকালীন error হলে audit/console-এ দেখা যাবে। কেবল
+  memory index তৈরি হওয়া মানেই conversation archive হওয়া নয়।
 - Archive index: `.zombiecoder/memory/index.json`।
 - প্রতিটি model call-এ full history নয় — SSOT/syllabus/recent memory-র bounded
   context pack inject হয়; বিস্তারিত দরকার হলে `context_status` তারপর নির্দিষ্ট
   file/section পড়ুন।
-- Runtime tool-এ পরপর তিনটি execution error হলে একই session-এ পরের roster agent-এ
-  একবার handoff চেষ্টা হয়; switch ব্যর্থ হলে audit log-এ স্পষ্ট error থাকে।
+- Runtime tool-এ পরপর তিনটি execution error হলে একই agent সর্বোচ্চ তিনবার retry
+  পায়; তারপর circuit breaker থামে — অন্য agent বা model-এ handoff নেই।
   Semantic ভুল যা tool execution error হিসেবে ধরা পড়ে না, তা এই counter
   স্বয়ংক্রিয়ভাবে শনাক্ত করে না। Evidence gate-ও evidence-এর কাঠামো পরীক্ষা করে,
   দাবির সত্যতা প্রমাণ করে না।
@@ -1039,6 +1083,11 @@ Plugin-এর `ctx.rpc` door `POST /api/rpc/zombiecoder/<method>`-এ reachable�
 | `--yes` | কোনো prompt ছাড়া install |
 | `--no-install` | `npm install` skip |
 | `--no-lsp` | LSP server install ও `lsp` config generation skip |
+| `--opencode <mode>` | `auto` (default, শুধু existing V2 খোঁজে), `install` (না পেলে `@opencode/cli` নামায়), `none` (খোঁজে না) |
+| `--no-opencode` | `--opencode none`-এর সমান |
+| `--opencode-path <bin>` | PATH discovery বাদ দিয়ে নির্দিষ্ট OpenCode binary ব্যবহার |
+| `--opencode-prefix <dir>` | `--opencode install`-এ npm global prefix |
+| `--no-mcp-check` | local MCP server-এর `initialize` + `tools/list` verification skip |
 | `--no-space-check` | free-space preflight skip |
 | `--keep-cache` | npm cache স্বয়ংক্রিয়ভাবে পরিষ্কার করবে না |
 | `--force-low-space` | জায়গা কম হলেও install চালিয়ে যাবে (ঝুঁকিসহ) |
@@ -1331,8 +1380,8 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  8bcd9e703f0107f8a4e910201872ef73ae91d38d821e8aa2ad4e1dacf4262411  ║
-║  files 105 · bytes 1037542 · base 78bb4d2 · dirty                        ║
+║  root  7d03a7dd8b11f64c89ff83792ef09f64b8b8c487cc9fec59b6305a20801991ea  ║
+║  files 116 · bytes 1172098 · base no-git · dirty                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1340,7 +1389,7 @@ commercial অনুমতি বা আইনি পরামর্শের �
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T11:18:09.324Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T19:23:23.363Z
 
 </div>
 <!-- INTEGRITY:END -->

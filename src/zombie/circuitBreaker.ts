@@ -1,10 +1,9 @@
 // Circuit breaker for agent turns.
 //
-// A blocked answer is a failure, not a dead end. Each failure is recorded with
-// its reason and the context it left behind, the session is handed to the next
-// roster agent, and after three failed agents the breaker opens with a message
-// the user can act on. Nothing here invents evidence: the fallback prompt asks
-// for proof, and the final message says plainly that the task is unresolved.
+// A blocked answer is a failure, not a dead end. The same agent retries with
+// the failure evidence attached; after the limit the breaker stops and tells
+// the user what is missing. There is deliberately no cross-agent fallback:
+// handing the task to someone else is how accountability disappears.
 
 export const BREAKER_LIMIT = 3;
 
@@ -30,16 +29,14 @@ export type BreakerFailure = {
 
 export type BreakerState = {
   sessionID: string;
-  /** Agents already tried, oldest first. */
+  /** Agents that failed, oldest first. Usually one; kept for audit compatibility. */
   agents: string[];
   failures: BreakerFailure[];
 };
 
 export type BreakerDecision =
-  | { action: "fallback"; next: string; attempt: number; limit: number }
+  | { action: "retry"; attempt: number; limit: number }
   | { action: "stop"; limit: number; tried: string[] };
-
-export type RosterEntry = { id: string };
 
 const PREVIEW_LIMIT = 240;
 
@@ -59,29 +56,8 @@ export function readBreakerState(raw: unknown, sessionID: string): BreakerState 
   return { sessionID, agents, failures };
 }
 
-// Walk the roster forward from the current agent, skipping anyone already tried.
-// Wrapping keeps the chain predictable: manu -> jarin -> brishti -> ...
-export function nextUntriedAgent(
-  roster: readonly RosterEntry[],
-  current: string,
-  tried: readonly string[],
-): string | undefined {
-  if (roster.length === 0) return undefined;
-  const done = new Set(tried);
-  const start = roster.findIndex((agent) => agent.id === current);
-  // An agent outside the roster (e.g. built-in "build") starts the chain at the
-  // first roster slot instead of silently skipping it.
-  const base = start < 0 ? -1 : start;
-  for (let step = 1; step <= roster.length; step++) {
-    const candidate = roster[(base + step) % roster.length];
-    if (!done.has(candidate.id)) return candidate.id;
-  }
-  return undefined;
-}
-
 export function decideBreaker(
   state: BreakerState,
-  roster: readonly RosterEntry[],
   failure: BreakerFailure,
   limit: number = BREAKER_LIMIT,
 ): { state: BreakerState; decision: BreakerDecision } {
@@ -95,13 +71,9 @@ export function decideBreaker(
   if (failures.length >= cappedLimit) {
     return { state: next, decision: { action: "stop", limit: cappedLimit, tried: agents } };
   }
-  const candidate = nextUntriedAgent(roster, failure.agent, agents);
-  if (!candidate) {
-    return { state: next, decision: { action: "stop", limit: cappedLimit, tried: agents } };
-  }
   return {
     state: next,
-    decision: { action: "fallback", next: candidate, attempt: failures.length, limit: cappedLimit },
+    decision: { action: "retry", attempt: failures.length, limit: cappedLimit },
   };
 }
 
@@ -123,19 +95,19 @@ export function breakerContext(
 
 export function statusMessage(
   failure: BreakerFailure,
-  decision: Extract<BreakerDecision, { action: "fallback" }>,
+  decision: Extract<BreakerDecision, { action: "retry" }>,
 ): string {
   return [
     `**Circuit breaker:** \`${failure.agent}\` এই turn-এ আটকে গেছে — ${failure.reason}`,
     "",
-    `ফলব্যাক: \`${decision.next}\` (প্রয়াস ${decision.attempt}/${decision.limit})। কাজ থেমে যায়নি, পরের এজেন্ট একই কাজ প্রমাণসহ শেষ করবে।`,
+    `একই এজেন্ট আবার চেষ্টা করবে (প্রয়াস ${decision.attempt}/${decision.limit})। অন্য এজেন্টে handoff হবে না; কাজ ও দায়িত্ব একই এজেন্টের।`,
   ].join("\n");
 }
 
-export function fallbackPrompt(
+export function retryPrompt(
   failure: BreakerFailure,
   blockedText: string,
-  decision: Extract<BreakerDecision, { action: "fallback" }>,
+  decision: Extract<BreakerDecision, { action: "retry" }>,
 ): string {
   return [
     "[zombiecoder circuit breaker]",
@@ -147,8 +119,8 @@ export function fallbackPrompt(
     "আগের উত্তরটি (কাটা):",
     preview(blockedText) || "(খালি)",
     "",
-    `তুমি এখন \`${decision.next}\`, প্রয়াস ${decision.attempt}/${decision.limit}।`,
-    "একই কাজটি শেষ করো, কিন্তু প্রতিটি দাবির সাথে যাচাইযোগ্য প্রমাণ দাও: `path:line` (ফাইল ও লাইন সত্যিই আছে), test output-এর count, অথবা exit code।",
+    `তুমি এখনো \`${failure.agent}\`, প্রয়াস ${decision.attempt}/${decision.limit}।`,
+    "একই কাজটি নিজে শেষ করো, অন্য কোনো এজেন্টে সরাও না। প্রতিটি দাবির সাথে যাচাইযোগ্য প্রমাণ দাও: `path:line` (ফাইল ও লাইন সত্যিই আছে), test output-এর count, অথবা exit code।",
     "প্রমাণ না থাকলে স্পষ্ট লিখো UNVERIFIED — ভুয়া success দাবি কোরো না।",
   ]
     .filter((line) => line !== "")
@@ -156,13 +128,14 @@ export function fallbackPrompt(
 }
 
 export function unresolvedMessage(state: BreakerState, limit: number = BREAKER_LIMIT): string {
-  const tried = state.agents.length > 0 ? state.agents.map((agent) => `\`${agent}\``).join(" → ") : "(কেউ না)";
   const last = state.failures[state.failures.length - 1];
+  const agent = last?.agent ? `\`${last.agent}\`` : "(অজানা এজেন্ট)";
+  const attempts = Math.max(limit, state.failures.length);
   return [
     "**কাজটি সমাধান হয়নি — circuit breaker খুলে গেছে।**",
     "",
-    `${Math.max(limit, state.failures.length)}টি এজেন্ট চেষ্টা করেছে: ${tried}।`,
-    last ? `শেষ failure: \`${last.agent}\` — ${last.reason}` : "",
+    `${agent} ${attempts} বার চেষ্টা করেছে। কোনো অন্য এজেন্টে দায়িত্ব সরানো হয়নি।`,
+    last ? `শেষ failure: ${last.reason}` : "",
     "",
     "**ভাইয়া, এখন কী করবেন:**",
     "1. **প্রমাণ দিন** — `path:line`, test output বা exit code; আমি সেটা দিয়ে আবার চালাব।",

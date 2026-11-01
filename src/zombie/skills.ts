@@ -1,19 +1,18 @@
 // Spec §6 — shared skills.
 //
-//   shared tier : <install>/zombiecoder/skills/*.md   (one copy for every project)
+//   native tier : <install>/skills/<name>/SKILL.md   (OpenCode discovers this globally)
+//   legacy tier : <install>/zombiecoder/skills/*.md  (plugin transform, older installs)
 //
-// Skills are owned by the install root, so opening a working directory never
-// creates a second skill tree. OpenCode still discovers its own
-// <project>/.opencode/skills natively; we do not register those again.
-//
-// Plain markdown with a tiny frontmatter block. We do not invent a new skill
-// format — OpenCode's Skill.Info has {id, name, description, path, content} and
-// we fill exactly those fields through its own ctx.skill door.
+// OpenCode V2 loads `skills/*/SKILL.md` from its config directory by itself.
+// The plugin still registers legacy flat files through ctx.skill, but a legacy
+// file whose native folder exists is skipped: the same skill must not appear
+// twice with two ids.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readText } from "./io.ts";
-import { installSkillsDir, safe } from "./paths.ts";
+import { installSkillsDir, nativeSkillsDir, safe } from "./paths.ts";
+import { parseFrontmatter } from "./frontmatter.ts";
 import { keepTransform, type TransformDoor } from "./transform.ts";
 
 export type SkillTier = "workstation";
@@ -29,24 +28,41 @@ export type DiscoveredSkill = {
 
 export type SkillLike = TransformDoor<any> & { reload?: () => Promise<void> };
 
-export function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
-  if (!match) return { data: {}, body: raw };
-  const data: Record<string, string> = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    const sep = line.indexOf(":");
-    if (sep < 0) continue;
-    const key = line.slice(0, sep).trim();
-    const value = line
-      .slice(sep + 1)
-      .trim()
-      .replace(/^["']|["']$/g, "");
-    if (key) data[key] = value;
-  }
-  return { data, body: raw.slice(match[0].length) };
+const SKILL_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/** Directory/frontmatter name OpenCode accepts. */
+export function nativeSkillName(id: string): string {
+  const cleaned = String(id ?? "")
+    .toLowerCase()
+    .replace(/^zombiecoder[._-][a-z-]+[._-]/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  if (SKILL_NAME.test(cleaned)) return cleaned;
+  return "skill";
 }
 
-function discoverTier(dir: string, tier: SkillTier): DiscoveredSkill[] {
+export function nativeSkillFile(installRoot: string, name: string): string {
+  return path.join(nativeSkillsDir(installRoot), name, "SKILL.md");
+}
+
+function nativeNames(installRoot: string): Set<string> {
+  const names = new Set<string>();
+  try {
+    for (const entry of fs.readdirSync(nativeSkillsDir(installRoot), { withFileTypes: true })) {
+      if (entry.isDirectory() && fs.existsSync(path.join(nativeSkillsDir(installRoot), entry.name, "SKILL.md"))) {
+        names.add(entry.name);
+      }
+    }
+  } catch {
+    /* no native skills yet */
+  }
+  return names;
+}
+
+export { parseFrontmatter } from "./frontmatter.ts";
+
+function discoverTier(dir: string, tier: SkillTier, native: Set<string>): DiscoveredSkill[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -56,11 +72,12 @@ function discoverTier(dir: string, tier: SkillTier): DiscoveredSkill[] {
   const out: DiscoveredSkill[] = [];
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) continue;
+    const fallbackId = entry.name.replace(/\.md$/i, "");
+    if (native.has(nativeSkillName(fallbackId))) continue;
     const file = path.join(dir, entry.name);
     const raw = readText(file);
     if (!raw) continue;
     const { data, body } = parseFrontmatter(raw);
-    const fallbackId = entry.name.replace(/\.md$/i, "");
     const id = `zombiecoder.${tier}.${safe(data.id ?? fallbackId)}`;
     out.push({
       id,
@@ -75,7 +92,7 @@ function discoverTier(dir: string, tier: SkillTier): DiscoveredSkill[] {
 }
 
 export function discoverSkills(installRoot: string): DiscoveredSkill[] {
-  return discoverTier(installSkillsDir(installRoot), "workstation");
+  return discoverTier(installSkillsDir(installRoot), "workstation", nativeNames(installRoot));
 }
 
 export type SkillRegistration = {

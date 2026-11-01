@@ -1,6 +1,6 @@
 {
   "schema": "zombiecoder-integrity/v1",
-  "generated_at": "2026-11-01T09:30:28.558Z",
+  "generated_at": "2026-11-01T09:55:14.500Z",
   "scope": [
     "src",
     "bin",
@@ -12,11 +12,11 @@
     "package.json",
     "LICENSE"
   ],
-  "root_sha256": "083d0b49457369ca18b2cb490f4fb0db52062fcf8934a1f1367e7140c82b9d17",
-  "file_count": 103,
-  "total_bytes": 976585,
+  "root_sha256": "98204656dfbdacb87afb97174887cf4254c184159093c40c18dd9fe3df6dd692",
+  "file_count": 105,
+  "total_bytes": 988702,
   "git": {
-    "commit": "9d8234c",
+    "commit": "ae09518",
     "branch": "murubbi",
     "dirty": true
   },
@@ -213,8 +213,13 @@
     },
     {
       "path": "package.json",
-      "bytes": 2188,
-      "sha256": "b6a3a40667ef276f00938565689f46d7e139995a724f88d6980cca60ca1a4cdd"
+      "bytes": 2247,
+      "sha256": "9d4e4041a2de2caeeeef6b8e6240c4ccdb229dd8fc5f322aad736089823793a2"
+    },
+    {
+      "path": "scripts/allow-always-check.mjs",
+      "bytes": 3138,
+      "sha256": "514642a97a4f3a3a3f67b68789d8b2e1665680d2623e79d14ba640c6d395c257"
     },
     {
       "path": "scripts/audit-install.mjs",
@@ -240,6 +245,11 @@
       "path": "scripts/integrity.mjs",
       "bytes": 10209,
       "sha256": "becd315c0a79043b6b372837fc89174db99393fa4da2561ba9743918e87143df"
+    },
+    {
+      "path": "scripts/lsp-diagnostics.mjs",
+      "bytes": 8920,
+      "sha256": "9ee3431929bf4fec4e39d822e0a1876380229fda3408b7fa8c2f326a51ab4121"
     },
     {
       "path": "scripts/lsp-probe.mjs",

@@ -25,6 +25,7 @@
     "identity": "node scripts/identity.mjs --write",
     "identity:check": "node scripts/identity.mjs",
     "lsp:probe": "node scripts/lsp-probe.mjs",
+    "lsp:diagnostics": "node scripts/lsp-diagnostics.mjs",
     "install:audit": "node scripts/audit-install.mjs",
     "mcp:image-brand": "node mcp/image-brand/server.mjs",
     "mcp:image-brand:check": "node mcp/image-brand/selfcheck.mjs",

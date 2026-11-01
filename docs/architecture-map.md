@@ -82,6 +82,7 @@ flowchart TD
 | Project configure | `scripts/configure.mjs` | direct build `:196-206` | OpenCode বন্ধ থাকলেও SSOT+syllabus |
 | LSP config | `src/zombie/lspConfig.ts` | `LSP_SERVERS:52`, `syncLspConfig:168` | server list + `opencode.json` merge |
 | LSP probe | `scripts/lsp-probe.mjs` | `probe:74`, config read `:176` | real JSON-RPC initialize |
+| LSP diagnostics | `scripts/lsp-diagnostics.mjs` | `textDocument/didOpen` + `publishDiagnostics` | real server diagnostic; file on disk untouched |
 | Tests | `test/*.test.ts` | — | `npm test` (`package.json:19`) |
 | Docs | `docs/*.md` | — | LSP: `docs/LSP.md:176`; handoff: `docs/AGENT-HANDOFF.md:23` |
 

@@ -415,7 +415,7 @@ that trade-off; the default is a working free baseline.
 `NOT_TESTED`: the new `syntax_check` code path through the already-running
 OpenCode process; a restart is required to load the updated plugin module.
 
-### ৯.২ LSP, token ও Cloudflare probe (2026-10-21)
+### ৯.২ LSP, token ও Cloudflare probe (2026-10-21; historical 2.1.1 values)
 
 | Check | Observed | Label |
 |---|---|---|
@@ -430,10 +430,24 @@ OpenCode process; a restart is required to load the updated plugin module.
 | Request mixing | 4 concurrent non-stream + 2 concurrent SSE, all markers matched their own response | `LIVE_PROBE_PASSED` (limited) |
 
 The earlier "V2 has no LSP runtime" claim was wrong. V2.1.1 supports LSP through
-the `lsp` config; the missing pieces were the config and the server binaries. The
-direct probe passes 4/4, but the desktop editor still needs a restart and a file
-open, so editor diagnostics remain `NOT_TESTED`. `syntax_check` is a fallback,
-not LSP. Use `npm run lsp:probe` and `docs/LSP.md` for evidence.
+the `lsp` config; the missing pieces were the config and the server binaries.
+
+**2026-11-01 update (live V2.2.3):**
+
+| Check | Observed | Label |
+|---|---|---|
+| OpenCode version | `opencode v2.2.3` | `LIVE_PROBE_PASSED` |
+| LSP config | ৭টি server (`typescript`, `python`, `bash`, `json`, `css`, `html`, `markdown`) | `CONFIG_VALIDATED` |
+| Initialize probe | 7/7 ok, exit `0` | `LIVE_PROBE_PASSED` |
+| Direct diagnostics probe | `typescript-language-server` child PID `74818`, real `TS2322` | `LIVE_PROBE_PASSED` (probe-spawned) |
+| Managed edit | real `.ts` edit + 4s watch: no child, no `lsp.updated`/`publishDiagnostics` | `NOT_TESTED` |
+| Desktop editor | renderer has LSP settings only; no editor surface | `NOT_APPLICABLE` |
+
+So editor diagnostics are **not** "restart and open a file" — the desktop build
+has no editor to open. `npm run lsp:probe` and `npm run lsp:diagnostics` prove the
+server side; a future editor or an `lsp` tool in the session is still required
+for `END_TO_END_TESTED`. `syntax_check` is a fallback, not LSP. `docs/LSP.md` is
+the source of truth.
 
 Token note: the bearer token in the attached probe file is valid, but it was
 shared in chat; rotate it. It is not used by LSP, and it must never be committed
@@ -477,8 +491,8 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  083d0b49457369ca18b2cb490f4fb0db52062fcf8934a1f1367e7140c82b9d17  ║
-║  files 103 · bytes 976585 · base 9d8234c · dirty                         ║
+║  root  98204656dfbdacb87afb97174887cf4254c184159093c40c18dd9fe3df6dd692  ║
+║  files 105 · bytes 988702 · base ae09518 · dirty                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -486,7 +500,7 @@ resource optimization, first-principles, evidence-before-confidence)। ছো�
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T09:30:28.558Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T09:55:14.500Z
 
 </div>
 <!-- INTEGRITY:END -->

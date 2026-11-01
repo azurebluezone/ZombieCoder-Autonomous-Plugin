@@ -1,15 +1,22 @@
-# LSP — OpenCode V2.1.1
+# LSP — OpenCode V2.2.3 (live runtime)
 
-> **সংক্ষেপে:** OpenCode **V2.1.1-এ LSP runtime আছে**। `No LSP servers configured`
+> **সংক্ষেপে:** OpenCode **V2.2.3-এ LSP runtime আছে**। `No LSP servers configured`
 > মানে upstream-এ LSP নেই — তা নয়; এর মানে `lsp` config বা language-server
-> binary নেই। এখন **installer নিজেই** `<install>/lsp`-এ server toolchain নামায়
+> binary নেই। **installer নিজেই** `<install>/lsp`-এ server toolchain নামায়
 > এবং resolve হওয়া absolute path দিয়ে `opencode.json`-এর `lsp` block লেখে
 > (`src/zombie/lspConfig.ts` → `syncLspConfig`); `--no-lsp` দিলে দুটোই skip হয়।
 > এই setup-এ `typescript`, `python`, `bash`, `json`, `css`, `html`, `markdown` — ৭টি
-> server configured, আর direct `initialize` probe **7/7 pass**
-> (`npm run lsp:probe -- --compact`, exit `0`)।
-> Editor UI-তে diagnostics এখনো `NOT_TESTED`; desktop app restart করে একটা
-> source file খুললে সেটা যাচাই করতে হবে।
+> server configured; direct `initialize` probe **7/7 pass**
+> (`npm run lsp:probe -- --compact`, exit `0`); direct diagnostics probe
+> **real `TS2322`** দেয় (`npm run lsp:diagnostics`, exit `0`)।
+>
+> তবে **desktop editor UI নেই** — renderer source map-এ শুধু LSP settings
+> (`settings/workspaces/project-lsp.ts`) পাওয়া যায়, কোনো code editor surface নয়।
+> Session catalog-এ `lsp` tool-ও নেই (85 tools, zero `lsp`)। তাই "editor
+> diagnostics" দাবি করা যাবে না। একটি real edit-এর পর ৪ সেকেন্ড watched run-এ
+> কোনো language-server child বা `lsp.updated`/`publishDiagnostics` event আসেনি;
+> OpenCode-managed edit diagnostics **`NOT_TESTED`/`UNVERIFIED`**। বিস্তারিত
+> §৫.২–§৫.৪।
 
 ---
 
@@ -17,27 +24,34 @@
 
 | চেক | ফল | লেবেল |
 |---|---|---|
-| OpenCode version | `2.1.1` (`~/.config/ai.opencode.desktop/cli/2.1.1-x64/opencode-cli --version`) | `LIVE_PROBE_PASSED` |
-| Runtime schema | `/opt/OpenCode/resources/app.asar`-এ `Config.LSP.Server` আছে | `SOURCE_VERIFIED` |
-| LSP protocol | app bundle-এ `initialize`, `textDocument/publishDiagnostics`, `textDocument/hover`, `textDocument/definition`, `workspaceFolders` আছে | `SOURCE_VERIFIED` |
-| Config | `~/.config/opencode/opencode.json`-এ `lsp` key; ৭টি server; mode `600` | `CONFIG_VALIDATED` |
-| Config reload | log-এ `config.updated` at `2026-10-21T02:43:31Z` | `LIVE_PROBE_PASSED` |
+| OpenCode version | `2.2.3` (`~/.config/ai.opencode.desktop/cli/2.2.3-x64/opencode-cli --version`) | `LIVE_PROBE_PASSED` |
+| Runtime schema | CLI binary-তে `Config.LSP.Server` (offset `122891880`/`170407040`), `publishDiagnostics` (`124119588`), `goToDefinition` (`124119680`), `typescript-language-server` (`124118650`) strings আছে | `SOURCE_VERIFIED` |
+| Desktop renderer | `app.asar`-এ `project-lsp` source map (`211685514`); renderer asset-এ `publishDiagnostics` নেই | `SOURCE_VERIFIED` |
+| Config | `~/.config/opencode/opencode.json`-এ `lsp` key; ৭টি server; effective config API-তেও ৭টি | `CONFIG_VALIDATED` |
 | Binaries | `typescript-language-server 6.0.2`, `typescript 5.9.3`, `pyright 1.1.414`, `bash-language-server 5.8.1`, `vscode-langservers-extracted 4.10.0` | `SOURCE_VERIFIED` |
-| Initialize probe | ৭টি server; `typescript` 23 capabilities, `python` 16, `bash` 11, `json` 11, `css`/`html`/`markdown` ok; **7/7 ok** | `LIVE_PROBE_PASSED` |
-| Editor UI | log-এ এখনো LSP child process নেই; restart/open file বাকি | `NOT_TESTED` |
+| Initialize probe | ৭টি server; `typescript` 172ms, `python` 246ms, `bash` 392ms, `json` 236ms, `css` 301ms, `html` 607ms, `markdown` 365ms; **7/7 ok, exit `0`** | `LIVE_PROBE_PASSED` |
+| Direct diagnostics probe | `typescript-language-server` child PID `74818`, `TS2322` at line 432 (`__lsp_probe__`), `matched:true`, exit `0` | `LIVE_PROBE_PASSED` (probe-spawned) |
+| OpenCode-managed edit | real edit + 4s watch: no language-server child, no `lsp.updated`/`publishDiagnostics` event | `NOT_TESTED` |
+| Editor UI | desktop renderer-এ editor surface নেই; শুধু LSP settings | `NOT_APPLICABLE` |
+| `lsp` tool | TUI tool-view map-এ `lsp` entry আছে, কিন্তু session catalog-এ নেই (85 tools, zero match) | `SOURCE_VERIFIED` mapping / `UNVERIFIED` availability |
 
 Runtime প্রমাণের reproducible command:
 
 ```bash
-ASAR=/opt/OpenCode/resources/app.asar
-grep -aob 'Config.LSP.Server' "$ASAR"
-grep -aob 'publishDiagnostics' "$ASAR"
-grep -aob 'textDocument/hover' "$ASAR"
+CLI="$HOME/.config/ai.opencode.desktop/cli/2.2.3-x64/opencode-cli"
+APP=/opt/OpenCode/resources/app.asar
+grep -aob 'Config.LSP.Server' "$CLI"
+grep -aob 'publishDiagnostics' "$CLI"
+grep -aob 'goToDefinition' "$CLI"
+grep -aob 'typescript-language-server' "$CLI"
+grep -aob 'project-lsp' "$APP"
 ```
 
-`grep` offset পাওয়া মানে bundle-এ string আছে; সাথে `Config.LSP.Server` schema-তে
-`command`, `extensions`, `disabled`, `env`, `initialization` field আছে। এটাই
-দেখায় V2.1.1-এ LSP client/runtime বর্তমান।
+`grep` offset পাওয়া মানে binary/bundle-এ string আছে। `Config.LSP.Server` schema-তে
+`command`, `extensions`, `disabled`, `env`, `initialization`, `diagnostics` field
+আছে। এটাই দেখায় V2.2.3-এ LSP client/runtime বর্তমান। Renderer-এ শুধু
+`settings/workspaces/project-lsp.ts` source map পাওয়া যায়; `app.asar`-এ
+`publishDiagnostics` নেই — অর্থাৎ LSP runtime server-side, renderer editor নয়।
 
 > **সতর্কতা:** `https://opencode.ai/v2/docs/lsp` probe-এর সময় `404` ছিল। ৪০৪
 > URL-কে প্রমাণ হিসেবে ব্যবহার করা যাবে না। এখানে প্রমাণ হলো installed app
@@ -180,8 +194,8 @@ print করবেন না।
 Repo-তে probe script আছে:
 
 ```bash
-cd ZombieCoder-Autonomous-Plugin
-npm run lsp:probe -- --root "/home/xubuntu/Documents/Default Project"
+cd ZombieCoder-Plugin
+npm run lsp:probe -- --root "$PWD"
 ```
 
 Expected: exit `0`, `ok: true`, ৭টি server। Agent-দের জন্য কম্প্যাক্ট output:
@@ -190,24 +204,59 @@ Expected: exit `0`, `ok: true`, ৭টি server। Agent-দের জন্য
 npm run lsp:probe -- --compact --root "$PWD"
 ```
 
-এই run-এ observed (compact mode):
+এই run-এ observed (compact mode, `2026-11-01T09:51Z`):
 
 | Server | Initialize | Time |
 |---|---:|---:|
-| `typescript` | ok | 167 ms |
-| `python` | ok | 261 ms |
-| `bash` | ok | 398 ms |
+| `typescript` | ok | 172 ms |
+| `python` | ok | 246 ms |
+| `bash` | ok | 392 ms |
 | `json` | ok | 236 ms |
-| `css` | ok | 316 ms |
-| `html` | ok | 620 ms |
-| `markdown` | ok | 377 ms |
+| `css` | ok | 301 ms |
+| `html` | ok | 607 ms |
+| `markdown` | ok | 365 ms |
 
 Full mode capability list দেখায়; `--compact` শুধু ok/time/serverInfo দেয়। Script শুধু
 `lsp` section পড়ে; provider key/config বাকি অংশ print করে না।
 
-### ৫.৩ Agent playbook — কোন ফাইলে কোন server
+### ৫.২ Direct diagnostics probe
 
-| File | Server | Agent-এর কাজ |
+`npm run lsp:diagnostics -- --file <path>` configured server-কে সত্যিকারের
+`textDocument/didOpen` পাঠায় এবং `textDocument/publishDiagnostics`-এর জন্য
+অপেক্ষা করে। File on disk বদলায় না; শুধু in-memory text-এ `--inject` line
+যোগ করতে পারে।
+
+আজকের run:
+
+```bash
+npm run lsp:diagnostics -- --file src/zombie/lsp.ts \
+  --inject 'const __lsp_probe__: number = "x";' \
+  --expect "not assignable" --compact
+```
+
+Observed: `ok:true`, PID `74818`, `TS2322` at line 432, `matched:true`, exit `0`।
+এটা `typescript-language-server 6.0.2` + TS 5.9.3 + configured path-এর real run;
+কিন্তু server-টা probe নিজে spawn করেছে — OpenCode-এর managed client নয়।
+
+### ৫.৩ OpenCode-managed edit — যা এখনো প্রমাণ হয়নি
+
+Desktop renderer-এ code editor নেই (শুধু Settings → LSP), আর session catalog-এ
+`lsp` tool নেই (85 tools, zero match)। তবু একটি real edit test চালানো হয়েছে:
+
+1. `src/zombie/lsp.ts`-এ সাময়িক type error (`const __lsp_live_probe: number = "not-a-number";`) edit।
+2. ৪ সেকেন্ড `ps` + SSE watch।
+3. ফল: কোনো `typescript-language-server` child নেই, `lsp.updated` নেই,
+   `publishDiagnostics` event নেই। Edit result-এও diagnostic আসেনি।
+4. ফাইল সাথে সাথে revert; hash আগের `4ad4e476...`-এ ফিরেছে।
+
+Label: `NOT_TESTED` (managed path), `NOT_APPLICABLE` (desktop editor UI)।
+ভবিষ্যতে যদি desktop-এ editor আসে বা `lsp` tool session-এ register হয়, তখন
+`npm run lsp:diagnostics` + real edit + child PID — তিনটে মিলিয়ে
+`END_TO_END_TESTED` দেওয়া যাবে। তার আগে নয়।
+
+### ৫.৪ Agent playbook — capability vs availability
+
+| File | Configured server | Server-side capability (initialize) |
 |---|---|---|
 | `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts` | `typescript` | hover, definition, references, rename, diagnostics |
 | `.py`, `.pyi` | `python` | hover, definition, references, diagnostics |
@@ -217,30 +266,11 @@ Full mode capability list দেখায়; `--compact` শুধু ok/time/s
 | `.html`, `.htm` | `html` | completion, hover, linked editing |
 | `.md`, `.mdx` | `markdown` | document symbol, links, rename |
 
-নিয়ম: LSP claim করার আগে `npm run lsp:probe -- --compact` চালাও; editor diagnostics
-দাবি করতে হলে app restart + আসল ফাইল খুলে `ps`-এ child process দেখতে হবে। তার আগে
-`NOT_TESTED`।
-
-### ৫.২ Editor UI
-
-Direct probe মানে server + command ঠিক। OpenCode-এর নিজের editor client যে
-diagnostics দিচ্ছে, সেটা এর চেয়ে আলাদা স্তর। এই log-এ config reload হয়েছে, কিন্তু
-LSP child process এখনো দেখা যায়নি:
-
-```bash
-grep -E 'config.updated|lsp.updated' \
-  "$HOME/.local/share/opencode/log/opencode.log" | tail -20
-ps -eo pid,args | grep -E \
-  '[t]ypescript-language-server|[p]yright-langserver|[b]ash-language-server|[v]scode-json-language-server|[v]scode-css-language-server|[v]scode-html-language-server|[v]scode-markdown-language-server'
-```
-
-Editor UI যাচাইয়ের ধাপ:
-
-1. OpenCode desktop পুরো বন্ধ করুন।
-2. আবার খুলুন, `Default Project` workspace খুলুন।
-3. একটি `.ts` file খুলুন, hover/definition/diagnostics দেখুন।
-4. উপরের `ps` command-এ LSP process দেখা উচিত।
-5. তারপর `END_TO_END_TESTED` label দিন। তার আগে `NOT_TESTED`।
+এই table server capability, agent tool availability নয়। Session-এ `lsp` tool না
+থাকলে agent hover/definition/diagnostics সরাসরি call করতে পারবে না;
+`npm run lsp:diagnostics` শুধু manual evidence। Code claim-এর আগে
+`npm run typecheck`, `npm test`, `node --check` ইত্যাদি চালাও; `syntax_check`
+fallback, LSP client নয়।
 
 ---
 
@@ -273,7 +303,7 @@ php -l file.php
 | `GET /v1/models` (token সহ) | `200` | model list |
 | `POST /v1/chat/completions` | `200` | content `TOKEN_OK` |
 
-Token **কাজ করছে**। কিন্তু LSP model token ব্যবহার করে না — LSP editor feature।
+Token **কাজ করছে**। কিন্তু LSP model token ব্যবহার করে না — LSP server feature।
 Token chat-এ শেয়ার হয়েছে; rotate করুন। কোথাও print/commit/screenshot করবেন না।
 এই doc-এ token নেই।
 
@@ -303,15 +333,18 @@ Endpoint Cloudflare-এর পিছনে:
 
 ## ৯. সিদ্ধান্ত
 
-1. OpenCode V2.1.1-এ LSP runtime **আছে**; “V2-তে LSP নেই” দাবি ভুল ছিল।
+1. OpenCode V2.2.3-এ LSP runtime **আছে**; “V2-তে LSP নেই” দাবি ভুল ছিল।
 2. আগের সমস্যা: `lsp` config নেই + binary নেই + TS 7.0.2-এ `tsserver.js` নেই।
 3. এখন ৭টি server configured (`typescript`, `python`, `bash`, `json`, `css`,
    `html`, `markdown`); direct initialize probe **7/7 pass** (`--compact`, exit `0`)।
-4. Managed entry-র binary path হারিয়ে গেলে `syncLspConfig` সেটা re-resolve করে;
+4. Direct diagnostics probe real `TS2322` দেয় (`npm run lsp:diagnostics`, exit `0`)।
+5. Managed entry-র binary path হারিয়ে গেলে `syncLspConfig` সেটা re-resolve করে;
    owner-এর নিজের (non-managed) entry ছোঁয় না।
-5. Desktop editor UI `NOT_TESTED` — restart + file open করে যাচাই করতে হবে।
-6. `syntax_check` fallback; LSP-এর বিকল্প নয়, supplement।
-7. Token valid, কিন্তু exposed — rotate। Cloudflare probe limited, no mixing seen.
+6. Desktop editor UI **নেই** (`NOT_APPLICABLE`); OpenCode-managed edit test-এ
+   কোনো child/event আসেনি (`NOT_TESTED`)। `lsp` tool session catalog-এ নেই।
+   Editor diagnostics-এর দাবি করার আগে নতুন evidence লাগবে।
+7. `syntax_check` fallback; LSP-এর বিকল্প নয়, supplement।
+8. Token valid, কিন্তু exposed — rotate। Cloudflare probe limited, no mixing seen.
 
 <!-- INTEGRITY:START -->
 <div align="center">
@@ -320,8 +353,8 @@ Endpoint Cloudflare-এর পিছনে:
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  root  083d0b49457369ca18b2cb490f4fb0db52062fcf8934a1f1367e7140c82b9d17  ║
-║  files 103 · bytes 976585 · base 9d8234c · dirty                         ║
+║  root  98204656dfbdacb87afb97174887cf4254c184159093c40c18dd9fe3df6dd692  ║
+║  files 105 · bytes 988702 · base ae09518 · dirty                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -329,7 +362,7 @@ Endpoint Cloudflare-এর পিছনে:
 
 > SHA-256 over source, scripts, tests, skills, package metadata and license.
 > Detects accidental or unauthorized changes. Not a legal identity signature.
-> Base commit is the code tree before this seal commit. Generated: 2026-11-01T09:30:28.558Z
+> Base commit is the code tree before this seal commit. Generated: 2026-11-01T09:55:14.500Z
 
 </div>
 <!-- INTEGRITY:END -->
